@@ -1,0 +1,3396 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="color-scheme" content="dark light">
+<meta name="theme-color" content="#080b11">
+<title>Академический Помощник</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+/* =========================================================
+   1. DESIGN TOKENS, THEMES, FONTS & ADAPTIVE SCALING
+   ========================================================= */
+:root{
+  --ui-scale:1;
+  --font-main:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,sans-serif;
+  --bg:var(--tg-theme-bg-color,#080b11);
+  --surface:var(--tg-theme-secondary-bg-color,#111622);
+  --surface-2:#171e2e;
+  --surface-3:#1e273b;
+  --glass:rgba(17,22,34,0.88);
+  --text:var(--tg-theme-text-color,#f1f5f9);
+  --text-2:var(--tg-theme-hint-color,#94a3b8);
+  --text-3:#64748b;
+  --accent:#3b82f6;
+  --accent-2:#6366f1;
+  --accent-text:#ffffff;
+  --accent-soft:rgba(59,130,246,0.16);
+  --accent-soft-2:rgba(59,130,246,0.08);
+  --ok:#10b981;
+  --ok-soft:rgba(16,185,129,0.16);
+  --warn:#f59e0b;
+  --warn-soft:rgba(245,158,11,0.16);
+  --danger:#ef4444;
+  --danger-soft:rgba(239,68,68,0.18);
+  --purple:#a855f7;
+  --purple-soft:rgba(168,85,247,0.16);
+  --cyan:#06b6d4;
+  --cyan-soft:rgba(6,182,212,0.16);
+  --line:rgba(255,255,255,0.07);
+  --line-2:rgba(255,255,255,0.13);
+  --line-3:rgba(255,255,255,0.22);
+  --shadow-sm:0 4px 12px rgba(0,0,0,0.22);
+  --shadow:0 10px 28px rgba(0,0,0,0.34);
+  --shadow-lg:0 20px 48px rgba(0,0,0,0.55);
+  --radius-xs:8px;
+  --radius-sm:12px;
+  --radius:16px;
+  --radius-lg:20px;
+  --radius-xl:26px;
+  --radius-full:999px;
+  --ease:cubic-bezier(.2,.8,.2,1);
+}
+
+[data-theme="violet"]{
+  --accent:#8b5cf6;--accent-2:#ec4899;
+  --accent-soft:rgba(139,92,246,0.18);--accent-soft-2:rgba(139,92,246,0.09);
+}
+[data-theme="emerald"]{
+  --accent:#10b981;--accent-2:#059669;
+  --accent-soft:rgba(16,185,129,0.18);--accent-soft-2:rgba(16,185,129,0.09);
+}
+[data-theme="amber"]{
+  --accent:#f59e0b;--accent-2:#ea580c;
+  --accent-soft:rgba(245,158,11,0.18);--accent-soft-2:rgba(245,158,11,0.09);
+}
+[data-theme="rose"]{
+  --accent:#f43f5e;--accent-2:#db2777;
+  --accent-soft:rgba(244,63,94,0.18);--accent-soft-2:rgba(244,63,94,0.09);
+}
+[data-theme="amoled"]{
+  --bg:#000000;--surface:#0a0a0c;--surface-2:#121216;--surface-3:#1a1a20;
+  --glass:rgba(10,10,12,0.92);--accent:#3b82f6;--accent-2:#2563eb;
+  --line:rgba(255,255,255,0.09);--line-2:rgba(255,255,255,0.16);
+}
+[data-theme="light"]{
+  --bg:#f1f5f9;--surface:#ffffff;--surface-2:#f8fafc;--surface-3:#e2e8f0;
+  --glass:rgba(255,255,255,0.90);--text:#0f172a;--text-2:#475569;--text-3:#94a3b8;
+  --line:rgba(15,23,42,0.08);--line-2:rgba(15,23,42,0.14);--line-3:rgba(15,23,42,0.22);
+  --shadow-sm:0 2px 8px rgba(15,23,42,0.05);--shadow:0 8px 24px rgba(15,23,42,0.08);--shadow-lg:0 18px 42px rgba(15,23,42,0.14);
+}
+
+/* =========================================================
+   BASE & FLUID SCREEN ADAPTATION
+   ========================================================= */
+*,*::before,*::after{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html{
+  font-size:calc(15px * var(--ui-scale));
+  -webkit-text-size-adjust:100%;
+}
+body{
+  margin:0;background:var(--bg);color:var(--text);
+  font-family:var(--font-main);
+  font-size:1rem;line-height:1.5;
+  -webkit-font-smoothing:antialiased;
+  overflow-x:hidden;
+  width:100%;max-width:100vw;
+  background-image:
+    radial-gradient(circle at 12% 0%, var(--accent-soft), transparent 42%),
+    radial-gradient(circle at 88% 8%, rgba(168,85,247,0.08), transparent 38%);
+  background-attachment:fixed;
+}
+#app{
+  min-height:100vh;
+  padding:clamp(12px,3.6vw,20px) clamp(10px,3.4vw,18px) calc(114px + env(safe-area-inset-bottom));
+  max-width:760px;margin:0 auto;width:100%;
+}
+h1,h2,h3,h4{margin:0;letter-spacing:-.025em;font-weight:800;word-break:break-word}
+h1{font-size:clamp(1.3rem,5vw,1.68rem);line-height:1.2}
+h2{font-size:clamp(1.02rem,3.8vw,1.15rem);line-height:1.3;margin:18px 2px 10px;color:var(--text)}
+h3{font-size:1rem}
+h4{font-size:0.95rem;margin:10px 0 4px}
+a{color:var(--accent);text-decoration:none}
+button{font:inherit;color:inherit;border:0;background:none;cursor:pointer;padding:0}
+.sub{color:var(--text-2);font-size:0.86rem;line-height:1.4;word-break:break-word}
+.mute{color:var(--text-3);font-size:0.82rem}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.9em}
+.center{text-align:center}
+.hidden{display:none!important}
+
+/* =========================================================
+   AVATARS (PHOTO OR EMOJI)
+   ========================================================= */
+.avatar{
+  width:46px;height:46px;border-radius:50%;
+  background:linear-gradient(135deg,var(--accent),var(--accent-2));
+  color:#fff;display:inline-flex;align-items:center;justify-content:center;
+  font-size:1.4rem;font-weight:800;flex:none;overflow:hidden;
+  border:2px solid var(--line-2);box-shadow:var(--shadow-sm);
+  cursor:pointer;position:relative;user-select:none;
+}
+.avatar img{width:100%;height:100%;object-fit:cover;display:block}
+.avatar.sm{width:24px;height:24px;font-size:0.85rem;border-width:1px}
+.avatar.lg{width:72px;height:72px;font-size:2.1rem;border-width:2.5px}
+
+.emoji-grid{display:grid;grid-template-columns:repeat(6,1fr);gap:6px;margin-top:8px}
+.emoji-pick{
+  height:40px;border-radius:var(--radius-sm);background:var(--surface-2);
+  border:1.5px solid var(--line);display:grid;place-items:center;
+  font-size:1.25rem;cursor:pointer;transition:.15s var(--ease);
+}
+.emoji-pick.active{border-color:var(--accent);background:var(--accent-soft);transform:scale(1.06)}
+
+/* =========================================================
+   BUTTONS
+   ========================================================= */
+.btn{
+  display:inline-flex;align-items:center;justify-content:center;gap:6px;
+  padding:10px 13px;border-radius:var(--radius);font-weight:700;font-size:0.93rem;
+  line-height:1.25;text-align:center;
+  background:linear-gradient(135deg,var(--accent),var(--accent-2));color:var(--accent-text);
+  transition:transform .12s var(--ease),opacity .2s var(--ease),box-shadow .2s var(--ease);
+  box-shadow:0 4px 14px var(--accent-soft);
+  white-space:normal;word-break:break-word;min-height:42px;max-width:100%;
+}
+.btn:hover{opacity:.95}
+.btn:active{transform:scale(.97)}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.btn.ghost{background:var(--surface-2);color:var(--text);box-shadow:none;border:1px solid var(--line)}
+.btn.ghost:hover{background:var(--surface-3)}
+.btn.danger{background:var(--danger-soft);color:var(--danger);box-shadow:none}
+.btn.subtle{background:var(--accent-soft);color:var(--accent);box-shadow:none}
+.btn.small{padding:7px 11px;font-size:0.84rem;min-height:34px;border-radius:var(--radius-sm)}
+.btn.icon{padding:0;width:38px;height:38px;min-height:38px;border-radius:var(--radius-full);flex:none}
+.btn.icon.small{width:32px;height:32px;min-height:32px}
+.btn.block{width:100%}
+.btn-row{display:flex;gap:8px;flex-wrap:wrap;width:100%}
+.btn-row>.btn{flex:1 1 135px;min-width:0}
+
+/* =========================================================
+   CARDS & LAYOUT
+   ========================================================= */
+.card{
+  background:var(--surface);border-radius:var(--radius-lg);
+  padding:clamp(12px,3.6vw,16px);margin-bottom:12px;border:1px solid var(--line);
+  box-shadow:var(--shadow-sm);max-width:100%;overflow:hidden;
+  transition:border-color .2s var(--ease),transform .12s var(--ease),box-shadow .2s var(--ease);
+}
+.card.tappable{cursor:pointer}
+.card.tappable:hover{border-color:var(--line-2);box-shadow:var(--shadow)}
+.card.tappable:active{transform:scale(.995)}
+.card.tight{padding:clamp(10px,3vw,14px)}
+
+.row{display:flex;align-items:center;gap:8px;min-width:0}
+.row.between{justify-content:space-between}
+.row.wrap{flex-wrap:wrap}
+.stack{display:flex;flex-direction:column;gap:10px}
+.grow{flex:1;min-width:0}
+.truncate{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
+.line-clamp-2{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;word-break:break-word}
+
+/* =========================================================
+   CHIPS, ACCOUNT & MODEL BADGES
+   ========================================================= */
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;min-width:0;max-width:100%}
+.chip{
+  display:inline-flex;align-items:center;gap:5px;
+  font-size:0.78rem;font-weight:600;padding:4px 9px;border-radius:var(--radius-full);
+  background:var(--accent-soft);color:var(--accent);line-height:1.3;
+  max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.chip.gray{background:var(--surface-2);color:var(--text-2);border:1px solid var(--line)}
+.chip.green{background:var(--ok-soft);color:var(--ok)}
+.chip.warn{background:var(--warn-soft);color:var(--warn)}
+.chip.red{background:var(--danger-soft);color:var(--danger)}
+.chip.purple{background:var(--purple-soft);color:var(--purple)}
+.chip.cyan{background:var(--cyan-soft);color:var(--cyan)}
+
+.model-pill{
+  display:inline-flex;align-items:center;gap:5px;
+  padding:5px 10px;border-radius:var(--radius-full);
+  background:linear-gradient(135deg,var(--accent-soft),rgba(168,85,247,0.16));
+  border:1px solid var(--line-2);
+  color:var(--text);font-size:0.8rem;font-weight:700;cursor:pointer;
+  max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.model-pill .dot{width:7px;height:7px;border-radius:50%;background:var(--ok);box-shadow:0 0 8px var(--ok);flex:none}
+
+.acc-pill{
+  display:inline-flex;align-items:center;gap:6px;
+  padding:3px 10px 3px 4px;border-radius:var(--radius-full);
+  background:var(--surface-2);border:1px solid var(--line-2);
+  color:var(--text);font-size:0.8rem;font-weight:700;cursor:pointer;
+  max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+
+.model-option{
+  display:flex;align-items:center;justify-content:space-between;gap:10px;
+  padding:12px 14px;border-radius:var(--radius);margin-bottom:8px;
+  background:var(--surface-2);border:1.5px solid var(--line);cursor:pointer;
+}
+.model-option.active{
+  border-color:var(--accent);
+  background:linear-gradient(135deg,var(--accent-soft),var(--surface-2));
+}
+.model-option .m-name{font-weight:700;font-size:0.95rem}
+.model-option .m-desc{font-size:0.78rem;color:var(--text-2);margin-top:2px}
+
+/* =========================================================
+   INPUTS & SEGMENTED CONTROL
+   ========================================================= */
+.field{display:flex;flex-direction:column;gap:5px;min-width:0}
+.field label{font-size:0.82rem;color:var(--text-2);font-weight:600;padding-left:2px}
+.input,input[type=text],input[type=password],input[type=time],input[type=number],input[type=date],input[type=search],
+select,textarea{
+  width:100%;max-width:100%;font:inherit;color:var(--text);background:var(--surface-2);
+  border:1px solid var(--line);border-radius:var(--radius);padding:10px 12px;
+  outline:none;transition:border-color .2s var(--ease),background .2s var(--ease);
+  min-height:42px;
+}
+.input:focus,input:focus,select:focus,textarea:focus{
+  border-color:var(--accent);background:var(--surface-3);
+  box-shadow:0 0 0 3px var(--accent-soft-2);
+}
+textarea{resize:vertical;min-height:80px;line-height:1.45}
+textarea.readme-box{
+  min-height:190px;
+  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  font-size:0.85rem;line-height:1.45;
+}
+
+.seg{
+  display:flex;background:var(--surface-2);border-radius:var(--radius);
+  padding:3px;margin-bottom:14px;border:1px solid var(--line);width:100%;
+}
+.seg button{
+  flex:1;min-width:0;padding:8px 6px;border-radius:var(--radius-sm);
+  font-size:0.86rem;font-weight:700;color:var(--text-2);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  transition:background .2s var(--ease),color .2s var(--ease);
+}
+.seg button.on{background:var(--surface);color:var(--text);box-shadow:var(--shadow-sm)}
+
+/* =========================================================
+   FLOATING GLASS NAV
+   ========================================================= */
+nav{
+  position:fixed;left:8px;right:8px;bottom:calc(6px + env(safe-area-inset-bottom));z-index:30;
+  max-width:740px;margin:0 auto;
+  display:flex;gap:2px;
+  padding:5px 6px;
+  background:var(--glass);
+  backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);
+  border:1px solid var(--line-2);
+  border-radius:var(--radius-xl);
+  box-shadow:var(--shadow-lg);
+}
+nav button{
+  flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;
+  padding:6px 2px;border-radius:var(--radius);
+  font-size:0.68rem;font-weight:700;color:var(--text-3);
+  transition:color .2s var(--ease),background .2s var(--ease);
+}
+nav button .ic{font-size:1.3rem;line-height:1;filter:grayscale(.6) opacity(.75);transition:.2s var(--ease)}
+nav button.on{color:var(--accent);background:var(--accent-soft-2)}
+nav button.on .ic{filter:none;transform:translateY(-1px) scale(1.05)}
+
+/* =========================================================
+   HEADER & HERO
+   ========================================================= */
+.page-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:14px;flex-wrap:wrap}
+.page-head h1{margin:0}
+.page-head .sub{margin-top:2px}
+
+.hero{
+  background:linear-gradient(135deg,var(--accent-soft) 0%,rgba(168,85,247,0.10) 55%,var(--surface) 100%);
+  border:1px solid var(--line-2);
+  border-radius:var(--radius-xl);padding:clamp(14px,4vw,20px);margin-bottom:16px;
+  position:relative;overflow:hidden;box-shadow:var(--shadow);
+}
+
+/* =========================================================
+   LESSON CARD & MATERIALS
+   ========================================================= */
+.lesson{
+  display:flex;gap:12px;align-items:flex-start;
+  padding:13px 14px;border-radius:var(--radius-lg);margin-bottom:10px;
+  background:var(--surface);border:1px solid var(--line);
+  cursor:pointer;position:relative;overflow:hidden;
+}
+.lesson::before{
+  content:"";position:absolute;left:0;top:0;bottom:0;width:4px;
+  background:var(--accent);opacity:.45;border-radius:0 3px 3px 0;
+}
+.lesson.now::before{background:var(--ok);opacity:1}
+.lesson.past{opacity:.58}
+.lesson.extra::before{background:var(--warn);opacity:1}
+.lesson .time{
+  min-width:54px;text-align:center;padding:5px 6px;border-radius:var(--radius-sm);
+  background:var(--surface-2);font-weight:800;font-size:0.92rem;line-height:1.2;
+  border:1px solid var(--line);flex:none;
+}
+.lesson .time small{display:block;font-weight:500;color:var(--text-3);font-size:0.74rem;margin-top:2px}
+.lesson.now .time{background:var(--ok-soft);color:var(--ok)}
+.lesson .meta{flex:1;min-width:0}
+.lesson .subject{font-weight:700;font-size:1rem;line-height:1.32;word-break:break-word}
+.lesson .desc-preview{
+  margin-top:4px;font-size:0.84rem;color:var(--text-2);
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
+}
+.lesson .hw-preview{
+  margin-top:6px;padding:5px 9px;border-radius:var(--radius-xs);
+  background:var(--warn-soft);border-left:3px solid var(--warn);
+  font-size:0.82rem;color:var(--text);
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
+}
+
+.info-box{
+  background:var(--surface-2);border:1px solid var(--line);
+  border-radius:var(--radius);padding:11px 13px;margin-bottom:10px;
+}
+.info-box .info-title{
+  font-size:0.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;
+  color:var(--text-2);margin-bottom:5px;
+}
+.info-box .info-body{font-size:0.92rem;line-height:1.45;white-space:pre-wrap;word-break:break-word}
+.file-list{display:flex;flex-direction:column;gap:8px;margin-top:8px}
+.file-item{
+  display:flex;align-items:center;gap:10px;padding:8px 11px;
+  border-radius:var(--radius-sm);background:var(--surface);border:1px solid var(--line);
+  font-size:0.88rem;min-width:0;cursor:pointer;
+}
+.file-item .file-thumb{
+  width:36px;height:36px;border-radius:8px;object-fit:cover;
+  background:var(--surface-3);display:grid;place-items:center;font-size:17px;flex:none;
+}
+.file-item .file-info{flex:1;min-width:0}
+.file-item .file-name{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.file-item .file-size{font-size:0.75rem;color:var(--text-3)}
+.file-upload-zone{
+  display:flex;align-items:center;justify-content:center;gap:8px;
+  padding:11px;border-radius:var(--radius);
+  border:1.5px dashed var(--line-3);background:var(--surface-2);
+  color:var(--accent);font-weight:600;font-size:0.88rem;cursor:pointer;text-align:center;
+}
+
+/* Панель прикреплённых файлов сверху каждой записи в Истории (Пункт 3) */
+.hist-files-box{
+  background:var(--surface-2);border:1px solid var(--line-2);
+  border-radius:var(--radius);padding:9px 11px;margin:4px 0 10px;
+}
+.hist-files-box .hf-title{
+  font-size:0.72rem;font-weight:800;text-transform:uppercase;letter-spacing:.04em;
+  color:var(--text-2);margin-bottom:6px;display:flex;align-items:center;gap:5px;
+}
+
+.pulse{position:relative;display:inline-flex;width:8px;height:8px;margin-right:5px;flex:none}
+.pulse::before,.pulse::after{content:"";position:absolute;inset:0;border-radius:50%;background:var(--ok)}
+.pulse::after{animation:pulse 1.6s ease-out infinite}
+@keyframes pulse{0%{transform:scale(1);opacity:.7}80%,100%{transform:scale(2.2);opacity:0}}
+
+/* =========================================================
+   DAY PICKER
+   ========================================================= */
+.days{display:flex;gap:5px;margin:12px 0 14px;width:100%}
+.day{
+  flex:1;min-width:0;text-align:center;padding:8px 0;border-radius:var(--radius);
+  background:var(--surface);border:1px solid var(--line);cursor:pointer;
+  position:relative;transition:.2s var(--ease);
+}
+.day b{display:block;font-size:1rem;font-weight:800;line-height:1.1;margin-top:2px}
+.day span{font-size:0.68rem;color:var(--text-3);font-weight:700;text-transform:uppercase}
+.day.today:not(.on) b{color:var(--accent)}
+.day.on{background:linear-gradient(135deg,var(--accent),var(--accent-2));color:var(--accent-text);border-color:transparent;box-shadow:0 6px 16px var(--accent-soft)}
+.day.on span{color:rgba(255,255,255,.85)}
+.day i{
+  position:absolute;bottom:4px;left:50%;width:4px;height:4px;margin-left:-2px;
+  border-radius:50%;background:var(--accent);
+}
+.day.on i{background:var(--accent-text)}
+
+/* =========================================================
+   TASKS & ACCORDIONS
+   ========================================================= */
+.top-plank{
+  display:flex;align-items:center;justify-content:space-between;gap:8px;
+  padding:11px 13px;border-radius:var(--radius);margin-bottom:12px;
+  background:linear-gradient(135deg,var(--accent-soft),var(--surface-2));
+  border:1px solid var(--line-2);
+}
+.top-plank .plank-left{display:flex;align-items:center;gap:10px;min-width:0;flex:1}
+.top-plank .plank-ic{
+  width:36px;height:36px;border-radius:10px;
+  background:var(--accent-soft);color:var(--accent);
+  display:grid;place-items:center;font-size:17px;flex:none;
+}
+.top-plank .plank-title{font-weight:700;font-size:0.9rem;line-height:1.25}
+.top-plank .plank-sub{font-size:0.76rem;color:var(--text-2);margin-top:2px}
+
+.burning-banner{
+  display:flex;align-items:center;justify-content:space-between;gap:8px;
+  padding:10px 12px;border-radius:var(--radius);margin-bottom:12px;
+  background:linear-gradient(135deg,rgba(239,68,68,0.22),rgba(245,158,11,0.14));
+  border:1px solid rgba(239,68,68,0.50);
+  animation:burnPulse 2s ease-in-out infinite;
+}
+@keyframes burnPulse{
+  0%,100%{border-color:rgba(239,68,68,0.40)}
+  50%{border-color:rgba(239,68,68,0.85)}
+}
+.burning-banner .burn-title{
+  display:flex;align-items:center;gap:6px;font-weight:800;font-size:0.86rem;color:var(--danger);
+}
+.burning-banner .burn-time{
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+  font-size:0.78rem;font-weight:700;padding:3px 8px;
+  border-radius:var(--radius-full);background:rgba(239,68,68,0.22);color:var(--danger);white-space:nowrap;flex:none;
+}
+
+details.group-acc{
+  background:var(--surface);border-radius:var(--radius-lg);
+  margin-bottom:12px;overflow:hidden;border:1px solid var(--line);
+  box-shadow:var(--shadow-sm);
+}
+details.group-acc[open]{border-color:var(--line-2);box-shadow:var(--shadow)}
+details.group-acc>summary{
+  padding:13px 14px;font-weight:700;font-size:0.96rem;cursor:pointer;list-style:none;
+  display:flex;align-items:center;gap:10px;min-width:0;
+}
+details.group-acc>summary::-webkit-details-marker{display:none}
+.group-icon{
+  width:36px;height:36px;border-radius:10px;
+  background:var(--accent-soft);color:var(--accent);
+  display:grid;place-items:center;font-size:17px;flex:none;
+}
+.group-meta{flex:1;min-width:0}
+.group-meta .g-title{font-weight:700;font-size:0.95rem;line-height:1.25}
+.group-meta .g-sub{font-size:0.78rem;color:var(--text-2);font-weight:500;margin-top:2px}
+.chev,details.acc>summary::after{
+  content:"";width:8px;height:8px;flex:none;
+  border-right:2px solid var(--text-3);border-bottom:2px solid var(--text-3);
+  transform:rotate(-45deg);transition:transform .22s var(--ease);
+}
+details.group-acc[open]>summary .chev,
+details.topic-acc[open]>summary .chev,
+details.acc[open]>summary::after{transform:rotate(45deg)}
+.group-body{padding:4px 10px 12px;display:flex;flex-direction:column;gap:8px}
+
+details.topic-acc{
+  background:var(--surface-2);border-radius:var(--radius);
+  border:1px solid var(--line);overflow:hidden;
+}
+details.topic-acc>summary{
+  padding:11px 12px;font-weight:600;font-size:0.92rem;cursor:pointer;list-style:none;
+  display:flex;align-items:center;gap:8px;min-width:0;
+}
+details.topic-acc>summary::-webkit-details-marker{display:none}
+.topic-dot{
+  width:26px;height:26px;border-radius:7px;
+  background:var(--surface-3);display:grid;place-items:center;font-size:13px;flex:none;
+}
+.topic-body{padding:6px 10px 10px}
+
+.date-divider{display:flex;align-items:center;gap:8px;margin:8px 0 6px}
+.date-divider .date-pill{
+  display:inline-flex;align-items:center;gap:5px;
+  padding:3px 10px;border-radius:var(--radius-full);
+  background:var(--accent-soft);color:var(--accent);
+  font-size:0.76rem;font-weight:700;
+}
+.date-divider .date-line{flex:1;height:1px;background:var(--line)}
+
+.task-card{
+  background:var(--surface);border-radius:var(--radius);border:1px solid var(--line);
+  padding:0;margin-bottom:8px;overflow:hidden;
+}
+.task-card.burning{border-color:rgba(239,68,68,0.55)}
+.task-plank{
+  display:flex;align-items:center;justify-content:space-between;gap:6px;
+  padding:7px 11px;font-size:0.76rem;font-weight:700;
+  border-bottom:1px solid var(--line);background:var(--surface-2);flex-wrap:wrap;
+}
+.task-plank.kind-timer{background:linear-gradient(90deg,var(--purple-soft),transparent);color:var(--purple)}
+.task-plank.kind-reminder{background:linear-gradient(90deg,var(--cyan-soft),transparent);color:var(--cyan)}
+.task-plank.kind-regular{background:linear-gradient(90deg,var(--accent-soft-2),transparent);color:var(--accent)}
+.task-plank.kind-burning{background:linear-gradient(90deg,rgba(239,68,68,0.25),rgba(245,158,11,0.15));color:var(--danger)}
+.task-body{padding:10px 12px 12px}
+.task-card .text{
+  white-space:pre-wrap;line-height:1.45;word-break:break-word;
+  display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden;
+  font-size:0.93rem;cursor:pointer;
+}
+.task-card .text.open{-webkit-line-clamp:unset}
+.task-card .footer{display:flex;align-items:center;gap:8px;justify-content:space-between;margin-top:10px}
+
+details.acc{
+  background:var(--surface);border-radius:var(--radius-lg);
+  margin-bottom:10px;overflow:hidden;border:1px solid var(--line);
+}
+details.acc>summary{
+  padding:12px 14px;font-weight:600;cursor:pointer;list-style:none;
+  display:flex;align-items:center;gap:8px;min-width:0;
+}
+details.acc>summary::-webkit-details-marker{display:none}
+details.acc>summary::after{margin-left:auto}
+details.acc .content{padding:0 14px 12px}
+
+/* =========================================================
+   EMPTY, SKELETON, FAB, SHEET, TOAST
+   ========================================================= */
+.empty{
+  text-align:center;color:var(--text-2);padding:36px 16px;
+  display:flex;flex-direction:column;align-items:center;gap:12px;
+}
+.empty .big{font-size:48px;line-height:1;animation:float 3s ease-in-out infinite}
+@keyframes float{50%{transform:translateY(-4px)}}
+.empty h3{color:var(--text);font-size:1.02rem;margin:0}
+.empty p{margin:0;font-size:0.88rem;max-width:320px;line-height:1.45}
+
+.skeleton{
+  background:linear-gradient(90deg,var(--surface),var(--surface-3),var(--surface));
+  background-size:200% 100%;animation:shimmer 1.3s infinite;
+  border-radius:var(--radius);height:72px;margin-bottom:10px;
+}
+@keyframes shimmer{to{background-position:-200% 0}}
+
+.fab{
+  position:fixed;right:16px;bottom:calc(92px + env(safe-area-inset-bottom));
+  width:52px;height:52px;border-radius:var(--radius-full);
+  display:inline-flex;align-items:center;justify-content:center;
+  font-size:24px;line-height:1;
+  background:linear-gradient(135deg,var(--accent),var(--accent-2));color:var(--accent-text);
+  box-shadow:var(--shadow-lg);z-index:20;
+}
+
+.overlay{
+  position:fixed;inset:0;z-index:50;background:rgba(0,0,0,0.64);
+  backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);
+  display:flex;align-items:flex-end;animation:fadeIn .2s var(--ease);
+}
+@keyframes fadeIn{from{opacity:0}}
+.sheet{
+  width:100%;max-width:760px;margin:0 auto;
+  background:var(--bg);border-radius:var(--radius-xl) var(--radius-xl) 0 0;
+  padding:8px 14px calc(22px + env(safe-area-inset-bottom));
+  max-height:90vh;overflow-y:auto;overflow-x:hidden;animation:slideUp .25s var(--ease);
+  border-top:1px solid var(--line-2);
+}
+@keyframes slideUp{from{transform:translateY(40px);opacity:.6}}
+.sheet::before{
+  content:"";display:block;width:36px;height:4px;border-radius:2px;
+  background:var(--line-3);margin:4px auto 12px;
+}
+.sheet h1{font-size:1.25rem;margin-bottom:12px}
+
+#toasts{
+  position:fixed;top:12px;left:50%;transform:translateX(-50%);
+  z-index:100;display:flex;flex-direction:column;gap:8px;
+  pointer-events:none;width:max-content;max-width:calc(100vw - 24px);
+}
+.toast{
+  background:var(--text);color:var(--bg);
+  padding:10px 16px;border-radius:var(--radius-full);
+  font-size:0.88rem;font-weight:700;box-shadow:var(--shadow-lg);
+  text-align:center;word-break:break-word;
+}
+.toast.err{background:var(--danger);color:#fff}
+.toast.ok{background:var(--ok);color:#042f1e}
+
+/* =========================================================
+   STUDY, CHAT, ATTACHMENT PREVIEW & FILE CARDS
+   ========================================================= */
+.ring{
+  width:78px;height:78px;border-radius:50%;display:grid;place-items:center;
+  background:conic-gradient(var(--accent) calc(var(--p)*1%),var(--surface-3) 0);
+  position:relative;flex:none;
+}
+.ring::after{content:"";position:absolute;inset:6px;border-radius:50%;background:var(--surface)}
+.ring>div{position:relative;z-index:1;font-weight:800;font-size:1.05rem;color:var(--text)}
+.ring.ok{background:conic-gradient(var(--ok) calc(var(--p)*1%),var(--surface-3) 0)}
+
+.flip{perspective:1200px;height:240px;margin:12px 0 16px;cursor:pointer}
+.flip .in{
+  position:relative;width:100%;height:100%;
+  transition:transform .55s cubic-bezier(.4,0,.2,1);transform-style:preserve-3d;
+}
+.flip.on .in{transform:rotateY(180deg)}
+.face{
+  position:absolute;inset:0;border-radius:var(--radius-lg);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  padding:20px;text-align:center;
+  backface-visibility:hidden;-webkit-backface-visibility:hidden;
+  background:var(--surface);border:1px solid var(--line);box-shadow:var(--shadow);
+}
+.face.back{transform:rotateY(180deg);background:var(--surface-2);border-color:var(--accent-soft)}
+.face .w{font-size:1.65rem;font-weight:800;line-height:1.2;word-break:break-word}
+.face .ph{color:var(--text-2);margin-top:6px;font-size:0.92rem}
+.face .ex{margin-top:12px;color:var(--text-2);font-style:italic;font-size:0.88rem}
+
+.bar{height:8px;border-radius:var(--radius-full);background:var(--surface-3);overflow:hidden;margin-top:8px}
+.bar i{display:block;height:100%;border-radius:inherit;background:var(--accent);transition:width .5s var(--ease)}
+.bar.ok i{background:var(--ok)}.bar.warn i{background:var(--warn)}.bar.danger i{background:var(--danger)}
+
+.chat-wrap{padding-bottom:135px;width:100%}
+.bubble{
+  max-width:90%;padding:11px 13px;border-radius:18px;margin-bottom:10px;
+  line-height:1.48;font-size:0.95rem;word-wrap:break-word;overflow-wrap:anywhere;
+  position:relative;
+}
+.bubble.me{margin-left:auto;background:linear-gradient(135deg,var(--accent),var(--accent-2));color:var(--accent-text);border-bottom-right-radius:6px}
+.bubble.bot{background:var(--surface);border:1px solid var(--line);border-bottom-left-radius:6px}
+.bubble .meta-row{
+  display:flex;align-items:center;gap:6px;margin-top:7px;opacity:.85;font-size:0.74rem;
+  flex-wrap:wrap;
+}
+.bubble.me .meta-row{justify-content:flex-end}
+.bubble .act-btn{
+  display:inline-flex;align-items:center;gap:3px;padding:3px 7px;
+  border-radius:6px;background:rgba(255,255,255,0.14);font-size:0.72rem;font-weight:600;
+}
+.bubble.bot .act-btn{background:var(--surface-2);border:1px solid var(--line)}
+
+.msg-att-list{display:flex;flex-direction:column;gap:6px;margin-bottom:8px;max-width:100%}
+.msg-att-item{
+  display:flex;align-items:center;gap:8px;
+  padding:6px 10px;border-radius:12px;
+  background:rgba(255,255,255,0.16);border:1px solid rgba(255,255,255,0.22);
+  color:#fff;cursor:pointer;max-width:100%;overflow:hidden;
+}
+.msg-att-item .att-thumb{
+  width:32px;height:32px;border-radius:7px;object-fit:cover;
+  background:rgba(0,0,0,0.22);display:grid;place-items:center;font-size:15px;flex:none;
+}
+.msg-att-item .att-meta{flex:1;min-width:0}
+.msg-att-item .att-name{
+  font-weight:700;font-size:0.82rem;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;
+}
+.msg-att-item .att-sub{font-size:0.7rem;opacity:.85;display:block}
+
+.bot-file-card{
+  display:flex;flex-direction:column;gap:8px;
+  margin-top:10px;padding:10px 12px;border-radius:var(--radius);
+  background:var(--surface-2);border:1px solid var(--line-2);max-width:100%;
+}
+.bot-file-card .bf-head{display:flex;align-items:center;gap:10px;min-width:0}
+.bot-file-card .bf-ic{
+  width:36px;height:36px;border-radius:10px;background:var(--accent-soft);color:var(--accent);
+  display:grid;place-items:center;font-size:18px;flex:none;
+}
+.bot-file-card .bf-name{font-weight:700;font-size:0.88rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bot-file-card .bf-sub{font-size:0.75rem;color:var(--text-2)}
+
+.chat-dock{
+  position:fixed;left:8px;right:8px;bottom:calc(72px + env(safe-area-inset-bottom));
+  z-index:18;max-width:740px;margin:0 auto;
+  display:flex;flex-direction:column;gap:6px;
+}
+.chat-files-bar{
+  display:flex;gap:6px;overflow-x:auto;padding:6px 8px;
+  background:var(--glass);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);
+  border:1px solid var(--line-2);border-radius:var(--radius);
+  box-shadow:var(--shadow-sm);
+}
+.chat-file-chip{
+  display:inline-flex;align-items:center;gap:6px;
+  padding:5px 9px;border-radius:var(--radius-full);
+  background:var(--surface-2);border:1px solid var(--line-2);
+  font-size:0.78rem;font-weight:600;white-space:nowrap;cursor:pointer;max-width:220px;
+}
+.chat-file-chip .cf-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:130px}
+.chatbar{
+  padding:5px 7px;background:var(--glass);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);
+  border:1px solid var(--line-2);border-radius:var(--radius-full);
+  display:flex;align-items:center;gap:6px;box-shadow:var(--shadow);
+}
+.chatbar .attach-btn{
+  width:36px;height:36px;border-radius:50%;background:var(--surface-2);
+  border:1px solid var(--line);display:grid;place-items:center;
+  font-size:17px;cursor:pointer;flex:none;color:var(--text-2);
+}
+.chatbar input[type=text]{border-radius:var(--radius-full);padding:7px 8px;flex:1;min-width:0;background:transparent;border:0;min-height:36px}
+.chatbar input[type=text]:focus{box-shadow:none;background:transparent}
+.chatbar .send-btn{
+  width:38px;height:38px;border-radius:50%;
+  background:linear-gradient(135deg,var(--accent),var(--accent-2));
+  color:var(--accent-text);display:grid;place-items:center;font-size:17px;flex:none;
+}
+.chatbar .send-btn.stop{background:var(--danger);color:#fff}
+
+.dots span{display:inline-block;width:7px;height:7px;margin:0 2px;border-radius:50%;background:var(--text-3);animation:blink 1s infinite}
+.dots span:nth-child(2){animation-delay:.15s}.dots span:nth-child(3){animation-delay:.3s}
+@keyframes blink{50%{opacity:.25;transform:translateY(-2px)}}
+
+.md p{margin:5px 0;line-height:1.5;word-break:break-word}
+.md pre{background:var(--bg);border:1px solid var(--line);border-radius:var(--radius-sm);padding:10px;overflow-x:auto;font-size:0.84rem;margin:8px 0;max-width:100%}
+.md code{font-family:ui-monospace,Menlo,monospace;font-size:.9em;background:var(--surface-2);padding:2px 5px;border-radius:6px;color:var(--accent);word-break:break-word}
+.bubble.me .md code{background:rgba(255,255,255,0.18);color:#fff}
+.md pre code{background:none;padding:0;color:inherit;word-break:normal}
+.md ul,.md ol{margin:6px 0;padding-left:18px}
+
+.sw{position:relative;width:44px;height:26px;border-radius:var(--radius-full);background:var(--line-2);transition:background .2s var(--ease);flex:none}
+.sw::after{content:"";position:absolute;top:2px;left:2px;width:22px;height:22px;border-radius:50%;background:#fff;transition:left .25s var(--ease)}
+.sw.on{background:var(--ok)}.sw.on::after{left:20px}
+
+.key-card{
+  display:flex;align-items:center;justify-content:space-between;gap:8px;
+  padding:10px 12px;border-radius:var(--radius);margin-bottom:8px;
+  background:var(--surface-2);border:1px solid var(--line);font-size:0.82rem;flex-wrap:wrap;
+}
+.search-wrap{position:relative;margin-bottom:10px}
+.search-wrap .icon{position:absolute;left:13px;top:50%;transform:translateY(-50%);color:var(--text-3);font-size:15px;pointer-events:none}
+.search-wrap input{padding-left:38px;border-radius:var(--radius-full)}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px}
+.stat{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:10px 6px;text-align:center;min-width:0}
+.stat b{display:block;font-size:1.2rem;font-weight:800;line-height:1.1}
+.stat span{font-size:0.7rem;color:var(--text-2);font-weight:600;text-transform:uppercase;display:block;margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.stat.warn b{color:var(--warn)}.stat.danger b{color:var(--danger)}.stat.ok b{color:var(--ok)}
+.week-nav{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:8px 0 4px}
+.week-nav .label{font-size:0.88rem;color:var(--text-2);font-weight:700;text-align:center;flex:1}
+.week-nav button{width:34px;height:34px;border-radius:var(--radius-full);background:var(--surface-2);border:1px solid var(--line);display:grid;place-items:center;color:var(--text);font-size:16px}
+.session-progress{display:flex;align-items:center;gap:10px;margin-bottom:10px;font-size:0.82rem;color:var(--text-2)}
+.session-progress .bar{flex:1;margin:0}
+
+.theme-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:12px}
+.theme-tile{
+  display:flex;align-items:center;gap:8px;padding:10px 11px;
+  border-radius:var(--radius-sm);background:var(--surface-2);border:1.5px solid var(--line);
+  font-size:0.84rem;font-weight:700;cursor:pointer;min-width:0;
+}
+.theme-tile.active{border-color:var(--accent);background:var(--accent-soft)}
+.theme-swatch{width:18px;height:18px;border-radius:50%;flex:none}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="view">
+    <div class="skeleton"></div>
+    <div class="skeleton"></div>
+    <div class="skeleton"></div>
+  </div>
+</div>
+<nav id="nav">
+  <button class="on"><span class="ic">🏠</span>Главная</button>
+  <button><span class="ic">📅</span>Пары</button>
+  <button><span class="ic">📋</span>Задачи</button>
+  <button><span class="ic">🧠</span>Учёба</button>
+  <button><span class="ic">💬</span>Чат</button>
+</nav>
+<div id="toasts"></div>
+<script>
+window.onerror = function(msg, src, line) {
+  console.warn("WebApp warning:", msg, src, line);
+  return true;
+};
+</script>
+<script>
+"use strict";
+
+const NL = String.fromCharCode(10);
+const tg = window.Telegram && window.Telegram.WebApp;
+if (tg) {
+  tg.ready(); tg.expand();
+  try { tg.setHeaderColor("secondary_bg_color"); } catch (e) {}
+  try { tg.setBackgroundColor("secondary_bg_color"); } catch (e) {}
+  if (tg.initData) {
+    try {
+      sessionStorage.setItem("tg_init_data", tg.initData);
+      localStorage.setItem("tg_init_data_backup", tg.initData);
+    } catch (e) {}
+  }
+}
+const hap = (t) => { try { tg && tg.HapticFeedback && tg.HapticFeedback.impactOccurred(t || "light"); } catch (e) {} };
+const pick = (t) => { try { tg && tg.HapticFeedback && tg.HapticFeedback.notificationOccurred(t); } catch (e) {} };
+
+/* =========================================================
+   APPEARANCE ENGINE (ТЕМА, ШРИФТ, МАСШТАБ ЭКРАНА)
+   ========================================================= */
+const UI_PREFS_KEY = "webapp_ui_prefs_v1";
+const FONTS_MAP = {
+  system: '-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,sans-serif',
+  rounded: '"Inter","Manrope","Segoe UI",Roboto,sans-serif',
+  mono: 'ui-monospace,SFMono-Regular,Menlo,Consolas,monospace',
+  serif: 'Georgia,"Times New Roman",serif'
+};
+const THEMES_LIST = [
+  { id: "sapphire", name: "Сапфир", color: "#3b82f6" },
+  { id: "violet", name: "Аметист", color: "#8b5cf6" },
+  { id: "emerald", name: "Изумруд", color: "#10b981" },
+  { id: "amber", name: "Янтарь", color: "#f59e0b" },
+  { id: "rose", name: "Кварц", color: "#f43f5e" },
+  { id: "amoled", name: "AMOLED Black", color: "#111111" },
+  { id: "light", name: "Светлая", color: "#e2e8f0" }
+];
+const AVATAR_EMOJIS = ["🧑‍💻","🎓","🦊","⚡","🚀","🐱","🔥","💎","🦉","🌟","🎯","🤖"];
+
+function loadUiPrefs() {
+  try {
+    return Object.assign({ theme: "sapphire", font: "system", scale: 1.0 }, JSON.parse(localStorage.getItem(UI_PREFS_KEY) || "{}"));
+  } catch (e) {
+    return { theme: "sapphire", font: "system", scale: 1.0 };
+  }
+}
+function applyUiPrefs(prefs) {
+  prefs = prefs || loadUiPrefs();
+  document.documentElement.setAttribute("data-theme", prefs.theme || "sapphire");
+  document.documentElement.style.setProperty("--font-main", FONTS_MAP[prefs.font] || FONTS_MAP.system);
+  document.documentElement.style.setProperty("--ui-scale", String(prefs.scale || 1.0));
+  try { localStorage.setItem(UI_PREFS_KEY, JSON.stringify(prefs)); } catch (e) {}
+}
+applyUiPrefs();
+
+/* =========================================================
+   HELPERS, AVATAR RENDERER & API
+   ========================================================= */
+function h(tag, props, ...kids) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(props || {})) {
+    if (v === false || v == null) continue;
+    if (k === "class") el.className = v;
+    else if (k === "style" && typeof v === "object") Object.assign(el.style, v);
+    else if (k.startsWith("on") && typeof v === "function") el.addEventListener(k.slice(2), v);
+    else el.setAttribute(k, v === true ? "" : v);
+  }
+  for (const kid of kids.flat(Infinity)) {
+    if (kid == null || kid === false) continue;
+    el.append(kid.nodeType ? kid : document.createTextNode(String(kid)));
+  }
+  return el;
+}
+
+function renderAvatar(av, sizeCls, onClick) {
+  const val = String(av || "🧑‍💻").trim();
+  const isImg = val.startsWith("data:image/") || val.startsWith("http");
+  return h("div", {
+    class: "avatar" + (sizeCls ? " " + sizeCls : ""),
+    onclick: onClick
+  }, isImg ? h("img", { src: val, alt: "avatar" }) : val.slice(0, 2));
+}
+
+function resizeAvatarImage(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        const size = 160;
+        canvas.width = size;
+        canvas.height = size;
+        const ctx = canvas.getContext("2d");
+        const minSide = Math.min(img.width, img.height);
+        const sx = (img.width - minSide) / 2;
+        const sy = (img.height - minSide) / 2;
+        ctx.drawImage(img, sx, sy, minSide, minSide, 0, 0, size, size);
+        resolve(canvas.toDataURL("image/jpeg", 0.85));
+      };
+      img.onerror = () => reject(new Error("Не удалось прочитать изображение"));
+      img.src = reader.result;
+    };
+    reader.onerror = () => reject(new Error("Ошибка чтения файла"));
+    reader.readAsDataURL(file);
+  });
+}
+
+function getInitData() {
+  if (tg && tg.initData) return tg.initData;
+  try {
+    const hashParams = new URLSearchParams(location.hash.slice(1));
+    const fromHash = hashParams.get("tgWebAppData");
+    if (fromHash) return fromHash;
+  } catch (e) {}
+  return sessionStorage.getItem("tg_init_data") || localStorage.getItem("tg_init_data_backup") || "";
+}
+
+function getActiveAccountId() {
+  return localStorage.getItem("active_account_id") || "";
+}
+function setActiveAccountId(id) {
+  if (id) localStorage.setItem("active_account_id", id);
+  else localStorage.removeItem("active_account_id");
+}
+
+async function api(path, opt) {
+  opt = opt || {};
+  const r = await fetch(path, {
+    method: opt.method || "GET",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Init-Data": getInitData(),
+      "X-Account-Id": getActiveAccountId(),
+      "X-WebApp-Client": "tg"
+    },
+    body: opt.body ? JSON.stringify(opt.body) : undefined,
+    signal: opt.signal,
+  });
+  let d;
+  try { d = await r.json(); } catch (e) { d = { error: "Ошибка ответа сервера" }; }
+  if (!r.ok || d.error) throw new Error(d.error || "HTTP " + r.status);
+  return d;
+}
+
+function toast(msg, kind) {
+  const t = h("div", { class: "toast" + (kind ? " " + kind : "") }, msg);
+  document.getElementById("toasts").append(t);
+  setTimeout(() => {
+    t.style.transition = "opacity .25s,transform .25s";
+    t.style.opacity = "0"; t.style.transform = "translateY(-8px)";
+    setTimeout(() => t.remove(), 260);
+  }, 2500);
+}
+
+const DAYS = ["Пн","Вт","Ср","Чт","Пт","Сб","Вс"];
+const iso = d => d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0");
+const parse = s => new Date(s + "T12:00:00");
+const addDays = (s, n) => { const d = parse(s); d.setDate(d.getDate() + n); return iso(d); };
+const fmtShort = s => parse(s).toLocaleDateString("ru-RU", { day:"numeric", month:"short" });
+const PARITY = { odd:"нечётная неделя", even:"чётная неделя" };
+
+const DEFAULT_MODELS = [
+  { id: "gemini-3.8-flash", name: "Gemini 3.8 Flash", desc: "Флагман · 5 RPM / 20 RPD" },
+  { id: "gemini-3.6-flash", name: "Gemini 3.6 Flash", desc: "Быстрая и точная · 5 RPM / 20 RPD" },
+  { id: "gemini-3.5-flash-lite", name: "Gemini 3.5 Flash Lite", desc: "Высокий лимит · 15 RPM / 500 RPD" },
+  { id: "gemini-3.1-flash-lite", name: "Gemini 3.1 Flash Lite", desc: "Высокий лимит · 15 RPM / 500 RPD" },
+  { id: "gemini-3-flash", name: "Gemini 3 Flash", desc: "Базовая 3.0 · 5 RPM / 20 RPD" },
+  { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash", desc: "Стабильная 2.5 · 5 RPM / 20 RPD" },
+  { id: "gemini-2.5-flash-lite", name: "Gemini 2.5 Flash Lite", desc: "Лёгкая 2.5 · 10 RPM / 20 RPD" },
+];
+
+function shortModelName(id) {
+  const found = DEFAULT_MODELS.find(m => m.id === id);
+  return found ? found.name.replace("Gemini ", "") : (id || "3.8 Flash");
+}
+
+function parseTaskDateObj(t) {
+  if (t.deadline_iso) {
+    const d = new Date(t.deadline_iso);
+    if (!isNaN(d.getTime())) return d;
+  }
+  const raw = String(t.deadline || "").trim();
+  if (!raw) return null;
+  const parts = raw.split(" ");
+  const dParts = parts[0].split(".");
+  if (dParts.length >= 2) {
+    const day = parseInt(dParts[0], 10);
+    const mon = parseInt(dParts[1], 10) - 1;
+    let yr = dParts[2] ? parseInt(dParts[2], 10) : new Date().getFullYear();
+    if (yr < 100) yr += 2000;
+    let hr = 23, mn = 59;
+    if (parts[1] && parts[1].includes(":")) {
+      const tParts = parts[1].split(":");
+      hr = parseInt(tParts[0], 10) || 0;
+      mn = parseInt(tParts[1], 10) || 0;
+    }
+    const dt = new Date(yr, mon, day, hr, mn);
+    if (!isNaN(dt.getTime())) return dt;
+  }
+  const fallback = new Date(raw);
+  return isNaN(fallback.getTime()) ? null : fallback;
+}
+
+function getTaskTimestamp(t) {
+  const d = parseTaskDateObj(t);
+  return d ? d.getTime() : Number.MAX_SAFE_INTEGER;
+}
+
+function fmtDayDDMM(t) {
+  const d = parseTaskDateObj(t);
+  if (!d) return t.deadline || "";
+  return String(d.getDate()).padStart(2, "0") + "." + String(d.getMonth() + 1).padStart(2, "0");
+}
+
+function fmtDeadline(t) {
+  const d = parseTaskDateObj(t);
+  if (!d) return t.deadline || "";
+  const ddmm = fmtDayDDMM(t);
+  const hasTime = (t.deadline && t.deadline.length > 10) || (t.deadline_iso && t.deadline_iso.includes("T"));
+  if (hasTime) {
+    return ddmm + " в " + d.toLocaleTimeString("ru-RU", { hour:"2-digit", minute:"2-digit" });
+  }
+  return ddmm;
+}
+
+function getTaskKindInfo(t) {
+  if (t.kind === "timer") {
+    return { id: "timer", icon: "⏲", label: "Таймер", cls: "kind-timer", chipCls: "purple" };
+  }
+  if (t.notif || t.kind === "reminder" || t.kind === "notif") {
+    return { id: "reminder", icon: "🔔", label: "Напоминание", cls: "kind-reminder", chipCls: "cyan" };
+  }
+  return { id: "regular", icon: "📝", label: "Обычная задача", cls: "kind-regular", chipCls: "" };
+}
+
+function isBurning30Min(t) {
+  const d = parseTaskDateObj(t);
+  if (!d) return false;
+  const diffMs = d.getTime() - Date.now();
+  return diffMs <= 30 * 60 * 1000 && diffMs > -24 * 3600 * 1000;
+}
+
+function fmtRemainingTime(t) {
+  const d = parseTaskDateObj(t);
+  if (!d) return "";
+  const diffMs = d.getTime() - Date.now();
+  if (diffMs <= 0) return "просрочено!";
+  const totalSec = Math.floor(diffMs / 1000);
+  const mins = Math.floor(totalSec / 60);
+  const secs = totalSec % 60;
+  if (mins < 60) return mins + " мин " + String(secs).padStart(2, "0") + " сек";
+  const hrs = Math.floor(mins / 60);
+  return hrs + " ч " + (mins % 60) + " мин";
+}
+
+const TT_META_KEY = "tt_lesson_meta_v2";
+function loadAllLessonMeta() {
+  try { return JSON.parse(localStorage.getItem(TT_META_KEY) || "{}"); }
+  catch (e) { return {}; }
+}
+function lessonMetaKey(l) {
+  if (l.id) return "id_" + l.id;
+  if (l.exc_id) return "exc_" + l.exc_id;
+  return "sub_" + (l.weekday || 0) + "_" + l.start + "_" + l.subject;
+}
+function getLessonMeta(l) {
+  const store = loadAllLessonMeta();
+  const saved = store[lessonMetaKey(l)] || {};
+  return {
+    description: l.description || saved.description || "",
+    homework: l.homework || saved.homework || "",
+    notes: l.notes || saved.notes || "",
+    files: Array.isArray(l.files) ? l.files : (Array.isArray(saved.files) ? saved.files : [])
+  };
+}
+function saveLessonMeta(l, meta) {
+  const store = loadAllLessonMeta();
+  store[lessonMetaKey(l)] = {
+    description: meta.description || "",
+    homework: meta.homework || "",
+    notes: meta.notes || "",
+    files: Array.isArray(meta.files) ? meta.files : []
+  };
+  try {
+    localStorage.setItem(TT_META_KEY, JSON.stringify(store));
+  } catch (e) {
+    toast("Файл слишком большой для локальной памяти", "err");
+  }
+}
+function fmtBytes(bytes) {
+  if (!bytes) return "";
+  if (bytes < 1024) return bytes + " Б";
+  if (bytes < 1048576) return (bytes / 1024).toFixed(1) + " КБ";
+  return (bytes / 1048576).toFixed(1) + " МБ";
+}
+
+function empty(icon, title, text, action) {
+  return h("div", { class: "empty" },
+    h("div", { class: "big" }, icon),
+    title ? h("h3", {}, title) : null,
+    text ? h("p", {}, text) : null,
+    action || null);
+}
+function skeleton(n = 3) { return Array.from({ length: n }, () => h("div", { class: "skeleton" })); }
+
+function sheet(title, content) {
+  const close = () => {
+    document.body.style.overflow = "";
+    ov.style.animation = "fadeIn .15s reverse";
+    setTimeout(() => ov.remove(), 150);
+  };
+  const ov = h("div", { class:"overlay", onclick: (e) => { if (e.target === ov) close(); } },
+    h("div", { class:"sheet" }, h("h1", {}, title), content(close)));
+  document.body.append(ov);
+  document.body.style.overflow = "hidden";
+  return close;
+}
+function field(label, input) {
+  return h("div", { class:"field" }, h("label", {}, label), input);
+}
+
+/* =========================================================
+   FILE PREVIEW MODAL (ДЛЯ ЧАТА И ИСТОРИИ)
+   ========================================================= */
+function previewFileModal(fileObj, onRemove) {
+  sheet("👁 Просмотр файла", (close) => {
+    const isImg = (fileObj.type || fileObj.mime || "").startsWith("image/") || /\.(png|jpe?g|webp|gif)$/i.test(fileObj.name || "");
+    const isText = /\.(txt|md|py|js|html|css|json|csv|c|cpp|h|java|xml|log|tex)$/i.test(fileObj.name || "");
+    const serverUrl = fileObj.id
+      ? ("/api/files/" + fileObj.id + "?initData=" + encodeURIComponent(getInitData()) + "&acc=" + encodeURIComponent(getActiveAccountId()) + "&client=tg")
+      : "";
+    const dlUrl = fileObj.data || serverUrl;
+
+    let previewNode = h("div", { class:"info-box center", style:{padding:"22px 14px"} },
+      h("div", { style:{fontSize:"42px", marginBottom:"8px"} }, "📄"),
+      h("div", { style:{fontWeight:700} }, fileObj.name || "Документ"),
+      h("div", { class:"sub", style:{marginTop:"4px"} }, fmtBytes(fileObj.size) || "Прикреплённый файл")
+    );
+
+    if (isImg && (fileObj.data || serverUrl)) {
+      previewNode = h("div", { style:{textAlign:"center", marginBottom:"14px"} },
+        h("img", {
+          src: fileObj.data || (serverUrl + "&inline=1"),
+          alt: fileObj.name,
+          style:{maxWidth:"100%", maxHeight:"55vh", borderRadius:"14px", border:"1px solid var(--line-2)", objectFit:"contain"}
+        })
+      );
+    } else if (isText && fileObj.data && fileObj.data.includes(",")) {
+      try {
+        const b64 = fileObj.data.split(",")[1];
+        const decoded = new TextDecoder("utf-8").decode(Uint8Array.from(atob(b64), c => c.charCodeAt(0)));
+        previewNode = h("pre", {
+          style:{
+            background:"var(--surface-2)", border:"1px solid var(--line)", borderRadius:"12px",
+            padding:"12px", maxHeight:"48vh", overflow:"auto", fontSize:"0.8rem", whiteSpace:"pre-wrap", wordBreak:"break-word"
+          }
+        }, decoded.slice(0, 8000) + (decoded.length > 8000 ? "\n\n… (файл обрезан для предпросмотра)" : ""));
+      } catch (e) {}
+    } else if (isText && serverUrl) {
+      const codeBox = h("pre", {
+        style:{
+          background:"var(--surface-2)", border:"1px solid var(--line)", borderRadius:"12px",
+          padding:"12px", maxHeight:"48vh", overflow:"auto", fontSize:"0.8rem", whiteSpace:"pre-wrap", wordBreak:"break-word"
+        }
+      }, "Загрузка содержимого файла…");
+      fetch(serverUrl + "&inline=1").then(r => r.text()).then(txt => {
+        codeBox.textContent = txt.slice(0, 10000);
+      }).catch(() => {
+        codeBox.textContent = "Файл готов к скачиванию ниже.";
+      });
+      previewNode = codeBox;
+    }
+
+    return h("div", {},
+      h("div", { class:"chips", style:{marginTop:0, marginBottom:"12px"} },
+        h("span", { class:"chip" }, "📎 " + (fileObj.name || "файл")),
+        fileObj.size ? h("span", { class:"chip gray" }, fmtBytes(fileObj.size)) : null
+      ),
+      previewNode,
+      h("div", { class:"btn-row", style:{marginTop:"14px"} },
+        dlUrl ? h("a", {
+          class:"btn ghost",
+          href: dlUrl,
+          download: fileObj.name || "file",
+          target: "_blank"
+        }, "⬇️ Скачать") : null,
+        fileObj.id ? h("button", {
+          class:"btn subtle",
+          onclick: async (ev) => {
+            ev.target.disabled = true;
+            try {
+              await api("/api/files/" + fileObj.id + "/send", { method:"POST" });
+              pick("success"); toast("Отправлено в Telegram 📨", "ok");
+            } catch (e) { toast(e.message, "err"); }
+            ev.target.disabled = false;
+          }
+        }, "📨 В Telegram") : null,
+        onRemove ? h("button", {
+          class:"btn danger",
+          onclick: () => { onRemove(); close(); }
+        }, "🗑 Убрать") : null,
+        h("button", { class:"btn", onclick: close }, "Закрыть")
+      )
+    );
+  });
+}
+
+/* =========================================================
+   MARKDOWN RENDERER
+   ========================================================= */
+const INLINE_MD_RE = /(`[^`\n]+`|\*\*[^*\n]+\*\*|__[^_\n]+__|\[[^\]\n]+\]\(https?:\/\/[^\s)]+\)|(?<![\w*])\*[^*\n]+\*(?![\w*]))/g;
+
+function renderInlineMd(text) {
+  const parts = String(text || "").split(INLINE_MD_RE);
+  const nodes = [];
+  for (const part of parts) {
+    if (!part) continue;
+    if (part.startsWith("`") && part.endsWith("`") && part.length > 2) {
+      nodes.push(h("code", {}, part.slice(1, -1)));
+    } else if ((part.startsWith("**") && part.endsWith("**")) || (part.startsWith("__") && part.endsWith("__"))) {
+      nodes.push(h("b", {}, ...renderInlineMd(part.slice(2, -2))));
+    } else if (part.startsWith("*") && part.endsWith("*") && part.length > 2) {
+      nodes.push(h("i", {}, ...renderInlineMd(part.slice(1, -1))));
+    } else if (part.startsWith("[")) {
+      const m = part.match(/^\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)$/);
+      if (m) nodes.push(h("a", { href: m[2], target: "_blank", rel: "noopener" }, m[1]));
+      else nodes.push(part);
+    } else {
+      nodes.push(part);
+    }
+  }
+  return nodes;
+}
+
+function renderMd(src) {
+  const root = h("div", { class:"md" });
+  String(src || "").split("```").forEach((part, i) => {
+    if (i % 2) {
+      const nlPos = part.indexOf(NL);
+      const codeBody = nlPos !== -1 ? part.slice(nlPos + 1) : part;
+      root.append(h("pre", {}, h("code", {}, codeBody)));
+      return;
+    }
+    let list = null;
+    const lines = part.split(NL);
+    for (let li = 0; li < lines.length; li++) {
+      const line = lines[li];
+      const trimmed = line.trim();
+      if (!trimmed) { list = null; continue; }
+      if (/^(?:-{3,}|\*{3,}|_{3,})$/.test(trimmed)) {
+        list = null;
+        root.append(h("hr"));
+        continue;
+      }
+      if (trimmed.startsWith("- ") || trimmed.startsWith("* ") || trimmed.startsWith("• ")) {
+        if (!list) { list = h("ul"); root.append(list); }
+        list.append(h("li", {}, ...renderInlineMd(trimmed.slice(2))));
+      } else if (/^\d+[.)]\s+/.test(trimmed)) {
+        if (!list || list.tagName !== "OL") { list = h("ol"); root.append(list); }
+        list.append(h("li", {}, ...renderInlineMd(trimmed.replace(/^\d+[.)]\s+/, ""))));
+      } else if (trimmed.startsWith("#")) {
+        list = null;
+        root.append(h("h4", {}, ...renderInlineMd(trimmed.replace(/^#+\s*/, ""))));
+      } else {
+        list = null;
+        root.append(h("p", {}, ...renderInlineMd(line)));
+      }
+    }
+  });
+  return root;
+}
+
+/* =========================================================
+   STATE + NAV
+   ========================================================= */
+const S = {
+  tab:"home", ttDate:null, studySub:"cards", chatSub:"chat", me:null, today:null,
+  chatsByAcc: {}, chatFiles: [], sending: false, abortCtrl: null,
+  homeDeadlinesOpen: false,
+  tasksQuery:"", tasksFilter:"all", tasksKindFilter:"all",
+  timerInterval: null
+};
+
+function currentChatList() {
+  const aid = (S.me && S.me.account && S.me.account.id) || getActiveAccountId() || "default";
+  if (!S.chatsByAcc[aid]) S.chatsByAcc[aid] = [];
+  return S.chatsByAcc[aid];
+}
+
+const TABS = [
+  ["home","🏠","Главная"],
+  ["tt","📅","Пары"],
+  ["tasks","📋","Задачи"],
+  ["study","🧠","Учёба"],
+  ["chat","💬","Чат"],
+];
+function drawNav() {
+  const nav = document.getElementById("nav");
+  nav.replaceChildren(...TABS.map(([id, ic, label]) =>
+    h("button", { class: S.tab === id ? "on" : "", onclick: () => {
+      if (S.tab === id) { window.scrollTo({top:0,behavior:"smooth"}); return; }
+      hap(); S.tab = id; drawNav(); render();
+      window.scrollTo({top:0});
+    }},
+      h("span", { class:"ic" }, ic), label)));
+}
+   
+async function render() {
+  if (S.timerInterval) { clearInterval(S.timerInterval); S.timerInterval = null; }
+  const view = document.getElementById("view");
+  const nav = document.getElementById("nav");
+  view.replaceChildren(...skeleton(3));
+  const tab = S.tab;
+  try {
+    if (S.me && S.me.needs_onboarding) {
+      if (nav) nav.style.display = "none";
+      view.replaceChildren(renderOnboardingView());
+      return;
+    }
+    if (nav) nav.style.display = "flex";
+    const node = await VIEWS[tab]();
+    if (tab === S.tab) view.replaceChildren(node);
+  } catch (e) {
+    if (nav) nav.style.display = "flex";
+    view.replaceChildren(h("div", { class:"card" },
+      h("h3", {}, "Не получилось загрузить"),
+      h("p", { class:"sub", style:{marginTop:"6px"} }, e.message),
+      h("button", { class:"btn ghost block", style:{marginTop:"12px"}, onclick: render }, "Повторить")));
+  }
+}
+
+function seg(items, cur, onPick) {
+  return h("div", { class:"seg" }, items.map(([id, label]) =>
+    h("button", { class: cur === id ? "on" : "", onclick: () => onPick(id) }, label)));
+}
+
+/* =========================================================
+   ONBOARDING / REGISTRATION VIEW (ПУНКТ 1: BYOK БЕЗ КОСТЫЛЕЙ)
+   ========================================================= */
+function renderOnboardingView() {
+  const acc = (S.me && S.me.account) || { name: "", avatar: "🧑‍💻" };
+  let curAvatar = acc.avatar || "🧑‍💻";
+  const avatarPreviewWrap = h("div", { class:"center", style:{marginBottom:"10px"} });
+  const nameInp = h("input", { type:"text", value: acc.name || "", placeholder:"Как к вам обращаться (напр., Артём)" });
+  const keyInp = h("input", { type:"text", placeholder:"Вставьте ваш ключ из Google AI Studio (AQ... или AIzaSy...)" });
+  const emojiGrid = h("div", { class:"emoji-grid" });
+
+  const drawAvatarState = () => {
+    avatarPreviewWrap.replaceChildren(renderAvatar(curAvatar, "lg"));
+    emojiGrid.replaceChildren(...AVATAR_EMOJIS.map(em =>
+      h("button", {
+        type:"button",
+        class: "emoji-pick" + (curAvatar === em ? " active" : ""),
+        onclick: () => { hap(); curAvatar = em; drawAvatarState(); }
+      }, em)
+    ));
+  };
+  drawAvatarState();
+
+  const photoInput = h("input", {
+    type:"file", accept:"image/*", class:"hidden",
+    onchange: async (e) => {
+      const f = e.target.files && e.target.files[0];
+      if (!f) return;
+      try {
+        curAvatar = await resizeAvatarImage(f);
+        drawAvatarState();
+        toast("Фото выбрано ✅", "ok");
+      } catch (err) { toast(err.message, "err"); }
+    }
+  });
+
+  return h("div", {},
+    h("div", { class:"hero center" },
+      avatarPreviewWrap,
+      h("h1", {}, "Добро пожаловать! 👋"),
+      h("div", { class:"sub", style:{marginTop:"6px"} },
+        "Настройте свой профиль и подключите личный ключ Google AI Studio для безлимитной работы.")
+    ),
+    h("div", { class:"card" },
+      h("div", { class:"row between", style:{marginBottom:"6px"} },
+        h("label", { style:{fontSize:"0.82rem", fontWeight:600, color:"var(--text-2)"} }, "Выберите аватарку"),
+        h("label", { class:"chip", style:{cursor:"pointer"} }, "📷 Загрузить фото", photoInput)
+      ),
+      emojiGrid,
+      h("div", { style:{marginTop:"14px"} }, field("👤 Ваше имя", nameInp)),
+      h("div", { style:{marginTop:"12px"} },
+        field("🔑 Ваш API-ключ Gemini (Bring Your Own Key)", keyInp),
+        h("div", { class:"sub", style:{marginTop:"6px"} },
+          "Получите бесплатно за 10 секунд на ",
+          h("a", { href:"https://aistudio.google.com/apikey", target:"_blank" }, "aistudio.google.com/apikey"),
+          ". Ваш ключ используется только для вашего профиля.")
+      ),
+      h("div", { class:"btn-row", style:{marginTop:"16px"} },
+        h("button", {
+          class:"btn ghost",
+          onclick: async (ev) => {
+            const k = keyInp.value.trim();
+            if (!k) return toast("Сначала вставьте ключ", "err");
+            ev.target.disabled = true;
+            try {
+              const res = await api("/api/keys/verify", { method:"POST", body: { api_key: k } });
+              pick("success"); toast("Ключ работает! (" + res.masked + ") ✅", "ok");
+            } catch (err) { toast(err.message, "err"); }
+            ev.target.disabled = false;
+          }
+        }, "🔍 Проверить ключ"),
+        h("button", {
+          class:"btn",
+          onclick: async (ev) => {
+            const name = nameInp.value.trim();
+            const k = keyInp.value.trim();
+            if (!name) return toast("Введите ваше имя", "err");
+            if (!k) return toast("Укажите ваш API-ключ Gemini", "err");
+            ev.target.disabled = true;
+            try {
+              await api("/api/keys/verify", { method:"POST", body: { api_key: k } });
+              await api("/api/settings", {
+                method:"POST",
+                body: { account_name: name, avatar: curAvatar, custom_api_key: k }
+              });
+              S.me = await api("/api/me");
+              pick("success"); toast("Профиль готов к работе! 🚀", "ok");
+              render();
+            } catch (err) {
+              toast(err.message, "err");
+              ev.target.disabled = false;
+            }
+          }
+        }, "🚀 Войти в приложение")
+      )
+    )
+  );
+}
+
+/* =========================================================
+   PROFILE EDITOR (ПУНКТ 4 + BYOK: СМЕНА ИМЕНИ, АВАТАРКИ И КЛЮЧА)
+   ========================================================= */
+async function openProfileEditor() {
+  let s;
+  try { s = await api("/api/settings"); }
+  catch (e) { toast(e.message, "err"); return; }
+
+  const curAcc = s.account || { id: "default", name: "Артём", avatar: "🧑‍💻", custom_api_key: "" };
+  let curAvatar = curAcc.avatar || "🧑‍💻";
+
+  sheet("👤 Редактировать профиль", (close) => {
+    const avatarWrap = h("div", { class:"row", style:{gap:"14px", marginBottom:"12px"} });
+    const emojiGrid = h("div", { class:"emoji-grid" });
+    const nameInp = h("input", { type:"text", value: curAcc.name || "", placeholder:"Ваше имя" });
+    const keyInp = h("input", {
+       type:"text",
+       value: curAcc.custom_api_key || "",
+       placeholder: s.is_admin ? "Оставьте пустым для использования общих ключей бота…" : "Вставьте ваш ключ из Google AI Studio"
+    });
+
+    const photoInput = h("input", {
+      type:"file", accept:"image/*", class:"hidden",
+      onchange: async (e) => {
+        const f = e.target.files && e.target.files[0];
+        if (!f) return;
+        try {
+          curAvatar = await resizeAvatarImage(f);
+          drawAvatar();
+          toast("Фото обновлено ✅", "ok");
+        } catch (err) { toast(err.message, "err"); }
+      }
+    });
+
+    const drawAvatar = () => {
+      avatarWrap.replaceChildren(
+        renderAvatar(curAvatar, "lg"),
+        h("div", { class:"grow" },
+          h("div", { style:{fontWeight:700, fontSize:"0.95rem"} }, "Аватар профиля"),
+          h("div", { class:"sub" }, "Выберите эмодзи ниже или загрузите свою картинку"),
+          h("label", { class:"btn ghost small", style:{marginTop:"8px", cursor:"pointer"} },
+            "📷 Загрузить фото с устройства", photoInput)
+        )
+      );
+      emojiGrid.replaceChildren(...AVATAR_EMOJIS.map(em =>
+        h("button", {
+          type:"button",
+          class: "emoji-pick" + (curAvatar === em ? " active" : ""),
+          onclick: () => { hap(); curAvatar = em; drawAvatar(); }
+        }, em)
+      ));
+    };
+    drawAvatar();
+
+    return h("div", {},
+      avatarWrap,
+      emojiGrid,
+      h("div", { style:{marginTop:"14px"} }, field("✏️ Имя аккаунта", nameInp)),
+      h("div", { style:{marginTop:"12px"} },
+        field("🔑 Личный API-ключ Gemini (Bring Your Own Key)", keyInp),
+        h("div", { class:"sub", style:{marginTop:"4px"} },
+          curAcc.has_custom_key
+            ? "✅ Сейчас подключён личный ключ (" + curAcc.masked_key + ")"
+            : (s.is_admin ? "☁️ Сейчас используется общий пул ключей администратора" : "⚠️ Ключ не задан"),
+          " · ",
+          h("a", { href:"https://aistudio.google.com/apikey", target:"_blank" }, "Получить ключ"))
+      ),
+      h("div", { class:"btn-row", style:{marginTop:"16px"} },
+        h("button", {
+          type:"button",
+          class:"btn ghost",
+          onclick: async (ev) => {
+            const k = keyInp.value.trim();
+            if (!k) return toast("Поле ключа пустое", "err");
+            ev.target.disabled = true;
+            try {
+              const res = await api("/api/keys/verify", { method:"POST", body: { api_key: k } });
+              pick("success"); toast("Ключ валиден! (" + res.masked + ") ✅", "ok");
+            } catch (err) { toast(err.message, "err"); }
+            ev.target.disabled = false;
+          }
+        }, "🔍 Проверить ключ"),
+        h("button", {
+          type:"button",
+          class:"btn",
+          onclick: async (ev) => {
+            const newName = nameInp.value.trim();
+            if (!newName) return toast("Введите имя", "err");
+            ev.target.disabled = true;
+            try {
+              await api("/api/settings", {
+                method:"POST",
+                body: {
+                  account_name: newName,
+                  avatar: curAvatar,
+                  custom_api_key: keyInp.value.trim()
+                }
+              });
+              S.me = await api("/api/me");
+              pick("success"); toast("Профиль «" + newName + "» сохранён ✅", "ok");
+              close();
+              render();
+            } catch (err) {
+              toast(err.message, "err");
+              ev.target.disabled = false;
+            }
+          }
+        }, "💾 Сохранить профиль")
+      ),
+      h("button", {
+        type:"button",
+        class:"btn subtle block",
+        style:{marginTop:"10px"},
+        onclick: () => { close(); openAccountSwitcher(); }
+      }, "🔄 Переключить на другой аккаунт / Создать новый")
+    );
+  });
+}
+
+/* =========================================================
+   APPEARANCE CUSTOMIZER MODAL
+   ========================================================= */
+function openAppearanceSheet() {
+  const prefs = loadUiPrefs();
+  sheet("🎨 Оформление и экран", (close) => {
+    const themeWrap = h("div", { class:"theme-grid" });
+    const fontSel = h("select", {}, [
+      ["system", "Системный (SF Pro / Roboto)"],
+      ["rounded", "Современный (Inter / Manrope)"],
+      ["mono", "Моноширинный (Код / JetBrains)"],
+      ["serif", "Книжный (Georgia / с засечками)"]
+    ].map(([id, label]) => h("option", { value: id, selected: prefs.font === id }, label)));
+
+    const scaleLabel = h("span", { class:"chip" }, Math.round((prefs.scale || 1) * 100) + "%");
+    const scaleInput = h("input", {
+      type:"range", min:"0.84", max:"1.18", step:"0.02", value: String(prefs.scale || 1.0),
+      style:{width:"100%", accentColor:"var(--accent)"},
+      oninput: (e) => {
+        prefs.scale = parseFloat(e.target.value) || 1.0;
+        scaleLabel.textContent = Math.round(prefs.scale * 100) + "%";
+        applyUiPrefs(prefs);
+      }
+    });
+
+    const drawThemes = () => {
+      themeWrap.replaceChildren(...THEMES_LIST.map(t =>
+        h("div", {
+          class: "theme-tile" + (prefs.theme === t.id ? " active" : ""),
+          onclick: () => { hap(); prefs.theme = t.id; applyUiPrefs(prefs); drawThemes(); }
+        },
+          h("span", { class:"theme-swatch", style:{background: t.color, border:"1px solid rgba(255,255,255,0.3)"} }),
+          h("span", { class:"truncate" }, t.name)
+        )
+      ));
+    };
+    drawThemes();
+
+    fontSel.addEventListener("change", () => {
+      prefs.font = fontSel.value;
+      applyUiPrefs(prefs);
+    });
+
+    const presets = [
+      [0.88, "88% (Mini)"],
+      [0.94, "94%"],
+      [1.0, "100%"],
+      [1.08, "108% (Крупный)"]
+    ];
+
+    return h("div", {},
+      h("div", { class:"field", style:{marginBottom:"12px"} },
+        h("label", {}, "Цветовая тема"),
+        themeWrap
+      ),
+      field("Шрифт приложения", fontSel),
+      h("div", { class:"field", style:{marginTop:"14px"} },
+        h("div", { class:"row between" },
+          h("label", {}, "Масштаб под экран смартфона"),
+          scaleLabel
+        ),
+        scaleInput,
+        h("div", { class:"chips" },
+          presets.map(([val, text]) => h("button", {
+            class:"chip gray",
+            onclick: () => {
+              prefs.scale = val;
+              scaleInput.value = String(val);
+              scaleLabel.textContent = Math.round(val * 100) + "%";
+              applyUiPrefs(prefs);
+            }
+          }, text))
+        )
+      ),
+      h("button", { class:"btn block", style:{marginTop:"18px"}, onclick: () => {
+        applyUiPrefs(prefs);
+        toast("Оформление сохранено 🎨", "ok");
+        close();
+      }}, "Готово")
+    );
+  });
+}
+
+/* =========================================================
+   MULTI-ACCOUNT SWITCHER MODAL
+   ========================================================= */
+async function openAccountSwitcher() {
+  let s;
+  try { s = await api("/api/settings"); }
+  catch (e) { toast(e.message, "err"); return; }
+
+  const accounts = s.accounts || [];
+  let activeId = (s.account && s.account.id) || getActiveAccountId();
+  let newAvatar = "🦊";
+
+  sheet("🔄 Переключение аккаунтов", (close) => {
+    const listWrap = h("div", {});
+    const newNameInp = h("input", { type:"text", placeholder:"Имя нового профиля (напр., Машенька)" });
+    const newKeyInp = h("input", { type:"text", placeholder:"Личный API-ключ Gemini (необязательно для админа)" });
+    const emojiRow = h("div", { class:"emoji-grid" });
+
+    const drawEmojiRow = () => {
+      emojiRow.replaceChildren(...AVATAR_EMOJIS.slice(0, 6).map(em =>
+        h("button", {
+          type:"button",
+          class:"emoji-pick" + (newAvatar === em ? " active" : ""),
+          onclick: () => { newAvatar = em; drawEmojiRow(); }
+        }, em)
+      ));
+    };
+    drawEmojiRow();
+
+    const drawAccounts = () => {
+      listWrap.replaceChildren(...accounts.map(a =>
+        h("div", {
+          class: "model-option" + (a.id === activeId ? " active" : ""),
+          onclick: async () => {
+            hap();
+            setActiveAccountId(a.id);
+            S.me = await api("/api/me");
+            toast("Аккаунт: " + a.name, "ok");
+            close();
+            render();
+          }
+        },
+          renderAvatar(a.avatar || "🧑‍💻", ""),
+          h("div", { class:"grow" },
+            h("div", { class:"m-name" }, a.name),
+            h("div", { class:"m-desc" },
+              (a.has_custom_key ? "🔑 Личный ключ · " : "☁️ Общий пул · ") +
+              (a.has_readme ? "📄 README · " : "") +
+              shortModelName(a.model))
+          ),
+          a.id === activeId
+            ? h("span", { class:"chip green" }, "Активен")
+            : (accounts.length > 1 ? h("button", {
+                class:"btn danger small icon",
+                title:"Удалить профиль",
+                onclick: async (ev) => {
+                  ev.stopPropagation();
+                  if (!confirm("Удалить профиль «" + a.name + "»?")) return;
+                  const res = await api("/api/accounts", { method:"POST", body: { action:"delete", id: a.id } });
+                  setActiveAccountId(res.active_id);
+                  S.me = await api("/api/me");
+                  close();
+                  render();
+                }
+              }, "🗑") : null)
+        )
+      ));
+    };
+    drawAccounts();
+
+    return h("div", {},
+      listWrap,
+      h("button", {
+        type:"button",
+        class:"btn ghost small block",
+        style:{marginTop:"4px"},
+        onclick: () => { close(); openProfileEditor(); }
+      }, "✏️ Изменить имя, аватарку или ключ текущего профиля"),
+      h("h2", { style:{marginTop:"16px", marginBottom:"8px"} }, "➕ Создать новый аккаунт"),
+      emojiRow,
+      h("div", { style:{marginTop:"8px"} }, field("Имя пользователя", newNameInp)),
+      h("div", { style:{marginTop:"8px"} }, field("🔑 Личный API-ключ Gemini", newKeyInp)),
+      h("button", { class:"btn block", style:{marginTop:"12px"}, onclick: async (e) => {
+        const name = newNameInp.value.trim();
+        if (!name) return toast("Введите имя аккаунта", "err");
+        e.target.disabled = true;
+        try {
+          const res = await api("/api/accounts", {
+            method:"POST",
+            body: {
+              action:"create",
+              name,
+              avatar: newAvatar,
+              custom_api_key: newKeyInp.value.trim()
+            }
+          });
+          setActiveAccountId(res.active_id);
+          S.me = await api("/api/me");
+          pick("success"); toast("Создан профиль: " + name, "ok");
+          close();
+          render();
+        } catch (err) {
+          toast(err.message, "err");
+          e.target.disabled = false;
+        }
+      }}, "Создать и войти")
+    );
+  });
+}
+
+/* =========================================================
+   QUICK MODEL SWITCHER SHEET
+   ========================================================= */
+async function openModelPicker() {
+  let s;
+  try { s = await api("/api/settings"); }
+  catch (e) { toast(e.message, "err"); return; }
+
+  const models = s.available_models || DEFAULT_MODELS;
+  let currentModel = s.model || (S.me && S.me.model) || "gemini-3.8-flash";
+  let autoFallback = s.model_fallback !== false;
+
+  sheet("🤖 Выбор модели Gemini", (close) => {
+    const listWrap = h("div", {});
+    const fbSwitch = h("button", {
+      class: "sw" + (autoFallback ? " on" : ""),
+      onclick: (e) => {
+        e.target.classList.toggle("on");
+        autoFallback = e.target.classList.contains("on");
+      }
+    });
+
+    const drawOptions = () => {
+      listWrap.replaceChildren(...models.map(m =>
+        h("div", {
+          class: "model-option" + (currentModel === m.id ? " active" : ""),
+          onclick: () => { hap(); currentModel = m.id; drawOptions(); }
+        },
+          h("div", { class:"grow" },
+            h("div", { class:"m-name" }, m.name),
+            h("div", { class:"m-desc" }, m.desc)
+          ),
+          currentModel === m.id ? h("span", { class:"chip green" }, "Выбрана") : null
+        )
+      ));
+    };
+    drawOptions();
+
+    return h("div", {},
+      h("div", { class:"card tight row between", style:{marginBottom:"14px"} },
+        h("div", { class:"grow" },
+          h("div", { style:{fontWeight:700, fontSize:"0.92rem"} }, "⚡ Авто-каскад при лимитах"),
+          h("div", { class:"sub" }, "Если токены кончились: 3.8 → 3.6 → 3.5 Lite и ниже")
+        ),
+        fbSwitch
+      ),
+      listWrap,
+      h("button", { class:"btn block", style:{marginTop:"14px"}, onclick: async (e) => {
+        e.target.disabled = true;
+        try {
+          await api("/api/settings", { method:"POST", body: {
+            model: currentModel,
+            model_fallback: autoFallback
+          }});
+          if (S.me) {
+            S.me.model = currentModel;
+            S.me.model_fallback = autoFallback;
+          }
+          pick("success"); toast("Модель: " + shortModelName(currentModel), "ok");
+          close(); render();
+        } catch (err) { toast(err.message, "err"); e.target.disabled = false; }
+      }}, "Применить")
+    );
+  });
+}
+
+/* =========================================================
+   HOME (АВАТАР + ИМЯ + СВОРАЧИВАЕМЫЕ ДЕДЛАЙНЫ)
+   ========================================================= */
+function lessonRow(l, now) {
+  const cls = ["lesson"];
+  let nowTag = null;
+  if (now) {
+    if (l.end < now) cls.push("past");
+    else if (l.start <= now) {
+      cls.push("now");
+      nowTag = h("span", { class:"chip green" }, h("span", { class:"pulse" }), "идёт сейчас");
+    }
+  }
+  if (l.extra) cls.push("extra");
+
+  const meta = getLessonMeta(l);
+  const filesCount = meta.files ? meta.files.length : 0;
+
+  return h("div", { class: cls.join(" ") },
+    h("div", { class:"time" }, l.start, h("small", {}, l.end)),
+    h("div", { class:"meta" },
+      h("div", { class:"subject" }, l.subject),
+      meta.description ? h("div", { class:"desc-preview" }, meta.description) : null,
+      meta.homework ? h("div", { class:"hw-preview" }, "📚 ДЗ: " + meta.homework) : null,
+      h("div", { class:"chips" },
+        nowTag,
+        l.room && h("span", { class:"chip" }, "ауд. " + l.room),
+        l.teacher && h("span", { class:"chip gray" }, l.teacher),
+        l.kind && h("span", { class:"chip gray" }, l.kind),
+        meta.notes ? h("span", { class:"chip cyan" }, "📝 конспект") : null,
+        filesCount ? h("span", { class:"chip purple" }, "📎 " + filesCount) : null,
+        l.extra && h("span", { class:"chip warn" }, "разово"),
+        l.parity !== "all" && !l.extra && h("span", { class:"chip gray" }, l.parity === "odd" ? "нечёт." : "чёт.")
+      )));
+}
+
+async function viewHome() {
+  const d = await api("/api/home");
+  const me = S.me;
+  const now = new Date().toTimeString().slice(0, 5);
+  const dateStr = new Date().toLocaleDateString("ru-RU", { weekday:"long", day:"numeric", month:"long" });
+  const acc = (me && me.account) || { name: "Артём", avatar: "🧑‍💻" };
+  const accName = acc.name || "Артём";
+
+  const root = h("div", {});
+  root.append(h("div", { class:"hero" },
+    h("div", { class:"row", style:{gap:"12px", marginBottom:"10px"} },
+      renderAvatar(acc.avatar, "", openProfileEditor),
+      h("div", { class:"grow" },
+        h("h1", { style:{cursor:"pointer"}, onclick: openProfileEditor }, "Привет, " + accName + " 👋"),
+        h("div", { class:"sub", style:{marginTop:"2px"} },
+          dateStr.charAt(0).toUpperCase() + dateStr.slice(1) + (d.parity ? " · " + PARITY[d.parity] : ""))
+      )
+    ),
+    h("div", { class:"row wrap", style:{gap:"6px"} },
+      h("button", { class:"acc-pill", onclick: openProfileEditor, title:"Изменить имя, аватарку или API-ключ" },
+        renderAvatar(acc.avatar, "sm"),
+        h("span", { class:"truncate" }, accName),
+        h("span", { style:{opacity:.6, fontSize:"0.7rem"} }, "✏️")),
+      h("button", { class:"model-pill", onclick: openModelPicker, title:"Сменить модель" },
+        h("span", { class:"dot" }),
+        shortModelName(me && me.model),
+        acc.has_custom_key ? " 🔑" : ""),
+      h("button", { class:"btn ghost small icon", onclick: openAppearanceSheet, title:"Оформление и масштаб" }, "🎨")
+    )
+  ));
+
+  const t = d.today;
+  root.append(h("h2", {}, "Сегодня"));
+  if (!t) {
+    root.append(empty("📅", "Модуль расписания не подключён", null));
+  } else if (!t.lessons.length) {
+    root.append(h("div", { class:"card", style:{ textAlign:"center", padding:"18px 14px" } },
+      h("div", { style:{fontSize:"32px", marginBottom:"4px"} }, "🎉"),
+      h("div", { style:{fontWeight:700} }, "Пар нет"),
+      h("div", { class:"sub", style:{marginTop:"2px"} }, "Свободный день")));
+  } else {
+    t.lessons.forEach(l => {
+      const el = lessonRow(l, now);
+      el.addEventListener("click", () => lessonActions(l, { date: S.today }));
+      root.append(el);
+    });
+  }
+
+  if (d.tasks.length) {
+    const sortedHomeTasks = [...d.tasks].sort((a, b) => getTaskTimestamp(a) - getTaskTimestamp(b));
+    const urgentCount = sortedHomeTasks.filter(k => k.overdue || k.soon || isBurning30Min(k)).length;
+    const nearest = sortedHomeTasks[0];
+
+    const dlDetails = h("details", {
+      class:"group-acc",
+      style:{marginTop:"14px"},
+      open: S.homeDeadlinesOpen,
+      ontoggle: (e) => { S.homeDeadlinesOpen = e.target.open; }
+    },
+      h("summary", {},
+        h("div", { class:"group-icon" }, "⏳"),
+        h("div", { class:"group-meta" },
+          h("div", { class:"g-title" }, "Ближайшие дедлайны"),
+          h("div", { class:"g-sub truncate" },
+            nearest ? "Ближайший: " + fmtDeadline(nearest) + " — " + nearest.text : "Нажмите, чтобы развернуть")
+        ),
+        urgentCount ? h("span", { class:"chip red" }, "🔥 " + urgentCount) : null,
+        h("span", { class:"chip" }, sortedHomeTasks.length),
+        h("span", { class:"chev" })
+      ),
+      h("div", { class:"group-body" },
+        ...sortedHomeTasks.map(k => {
+          const burning = isBurning30Min(k);
+          const urgent = burning || k.overdue ? "red" : k.soon ? "warn" : "gray";
+          const kindInfo = getTaskKindInfo(k);
+          return h("div", { class:"card tight", style:{marginBottom:0} },
+            burning ? h("div", { class:"burning-banner", style:{marginBottom:"8px"} },
+              h("span", { class:"burn-title" }, "🔥 Горит дедлайн"),
+              h("span", { class:"burn-time" }, fmtRemainingTime(k))) : null,
+            h("div", { class:"row" },
+              h("div", { class:"grow" },
+                h("div", { class:"line-clamp-2", style:{fontWeight:600, fontSize:"0.92rem"} }, k.text),
+                h("div", { class:"chips" },
+                  h("span", { class:"chip " + (kindInfo.chipCls || "gray") }, kindInfo.icon + " " + kindInfo.label),
+                  h("span", { class:"chip " + urgent },
+                    (k.overdue ? "⏰ просрочено · " : "📅 ") + fmtDeadline(k)),
+                  h("span", { class:"chip gray" }, k.topic)
+                )),
+              h("button", { class:"btn small", title:"Отметить выполненным", onclick: async () => {
+                await api("/api/tasks/" + k.id + "/done", { method:"POST" });
+                hap("medium"); pick("success"); toast("Готово ✅", "ok"); render();
+              }}, "✅"))
+          );
+        })
+      )
+    );
+    root.append(dlDetails);
+  }
+
+  if (S.me && S.me.features.study) {
+    root.append(h("h2", {}, "Карточки"));
+    const pct = d.cards_total ? Math.round(100 * (d.cards_total - d.cards_due) / d.cards_total) : 0;
+    root.append(h("div", { class:"card row", style:{gap:"14px"} },
+      h("div", { class:"ring" + (pct >= 100 ? " ok" : ""), style:{ "--p": pct } }, h("div", {}, pct + "%")),
+      h("div", { class:"grow" },
+        h("b", {}, d.cards_due ? d.cards_due + " к повторению" : "На сегодня всё 🎉"),
+        h("div", { class:"sub" }, "Всего карточек: " + d.cards_total),
+        d.cards_due ? h("button", { class:"btn subtle small", style:{marginTop:"8px"}, onclick: () => {
+          S.tab = "study"; S.studySub = "cards"; drawNav(); render();
+        }}, "Учить") : null)));
+  }
+
+  root.append(h("h2", {}, "Быстрые действия"));
+  root.append(h("div", { class:"stack" },
+    h("button", { class:"btn ghost", style:{justifyContent:"flex-start", padding:"12px 14px"},
+      onclick: () => { S.tab = "chat"; S.chatSub = "chat"; drawNav(); render(); } },
+      h("span", { style:{fontSize:"19px"} }, "💬"), h("span", {}, "Задать вопрос ИИ")),
+    h("button", { class:"btn ghost", style:{justifyContent:"flex-start", padding:"12px 14px"},
+      onclick: () => taskCreateForm() },
+      h("span", { style:{fontSize:"19px"} }, "📋"), h("span", {}, "Добавить задачу или таймер")),
+    h("button", { class:"btn ghost", style:{justifyContent:"flex-start", padding:"12px 14px"},
+      onclick: () => lessonForm(null, S.today) },
+      h("span", { style:{fontSize:"19px"} }, "➕"), h("span", {}, "Добавить пару")),
+    h("button", { class:"btn ghost", style:{justifyContent:"flex-start", padding:"12px 14px"},
+      onclick: openProfileEditor },
+      h("span", { style:{fontSize:"19px"} }, "🔑"), h("span", {}, "Профиль, аватарка и свой API-ключ"))
+  ));
+
+  return root;
+}
+
+/* =========================================================
+   TIMETABLE
+   ========================================================= */
+async function viewTT() {
+  if (!S.ttDate) S.ttDate = S.today;
+  const w = await api("/api/timetable/week?date=" + S.ttDate);
+  const day = w.days.find(x => x.date === S.ttDate) || w.days[0];
+  const root = h("div", {});
+
+  root.append(h("div", { class:"page-head" },
+    h("div", {},
+      h("h1", {}, "Пары"),
+      h("div", { class:"sub" }, w.parity ? PARITY[w.parity] : "Расписание и материалы")),
+    h("button", { class:"btn ghost small icon", title:"Настройки", onclick: ttSettings }, "⚙️")
+  ));
+
+  root.append(h("div", { class:"week-nav" },
+    h("button", { onclick: () => { S.ttDate = addDays(w.monday, -7); render(); }, "aria-label":"Назад" }, "‹"),
+    h("div", { class:"label" }, fmtShort(w.monday) + " – " + fmtShort(addDays(w.monday, 6))),
+    h("button", { onclick: () => { S.ttDate = addDays(w.monday, 7); render(); }, "aria-label":"Вперёд" }, "›")
+  ));
+
+  root.append(h("div", { class:"days" }, w.days.map((d, i) =>
+    h("div", {
+      class: "day" + (d.date === S.ttDate ? " on" : "") + (d.date === S.today ? " today" : ""),
+      onclick: () => { hap(); S.ttDate = d.date; render(); }
+    },
+      h("span", {}, DAYS[i]),
+      h("b", {}, parse(d.date).getDate()),
+      d.lessons.length ? h("i") : null))));
+
+  const now = day.date === S.today ? new Date().toTimeString().slice(0, 5) : null;
+
+  if (!day.lessons.length) {
+    root.append(empty("🎉", "Пар нет", "Свободный день — отличный повод отдохнуть",
+      h("button", { class:"btn", onclick: () => lessonForm(null, day.date) }, "➕ Добавить пару")));
+  } else {
+    day.lessons.forEach(l => {
+      const el = lessonRow(l, now);
+      el.addEventListener("click", () => lessonActions(l, day));
+      root.append(el);
+    });
+  }
+
+  if (day.cancelled && day.cancelled.length) {
+    root.append(h("div", { class:"card sub" },
+      "❌ Отменено: " + day.cancelled.map(l => l.subject + " (" + l.start + ")").join(", ")));
+  }
+
+  root.append(h("button", { class:"fab", onclick: () => lessonForm(null, day.date), title:"Добавить пару" }, "+"));
+  return root;
+}
+
+function readFilesAsDataURL(fileList) {
+  return Promise.all(Array.from(fileList).map(file => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve({
+      name: file.name,
+      size: file.size,
+      type: file.type || "application/octet-stream",
+      data: reader.result,
+      ts: Date.now()
+    });
+    reader.onerror = () => reject(new Error("Ошибка чтения файла " + file.name));
+    reader.readAsDataURL(file);
+  })));
+}
+
+function lessonActions(l, day) {
+  const meta = getLessonMeta(l);
+
+  sheet(l.subject, (close) => {
+    const wrap = h("div", {});
+
+    const drawContent = () => {
+      wrap.replaceChildren(
+        h("div", { class:"chips", style:{marginTop:0, marginBottom:"14px"} },
+          h("span", { class:"chip" }, "🕒 " + l.start + "–" + l.end),
+          l.room ? h("span", { class:"chip" }, "ауд. " + l.room) : null,
+          l.teacher ? h("span", { class:"chip gray" }, l.teacher) : null,
+          l.kind ? h("span", { class:"chip gray" }, l.kind) : null
+        ),
+
+        h("div", { class:"info-box" },
+          h("div", { class:"info-title" }, "📌 Краткое описание"),
+          h("div", { class:"info-body", style:{color: meta.description ? "var(--text)" : "var(--text-3)"} },
+            meta.description || "Нет краткого описания. Нажмите «Изменить», чтобы добавить.")
+        ),
+
+        h("div", { class:"info-box" },
+          h("div", { class:"info-title" }, "📚 Домашнее задание (ДЗ)"),
+          h("div", { class:"info-body", style:{color: meta.homework ? "var(--text)" : "var(--text-3)"} },
+            meta.homework || "ДЗ пока не записано.")
+        ),
+
+        h("div", { class:"info-box" },
+          h("div", { class:"info-title" }, "📝 Информация с пары / Конспект"),
+          h("div", { class:"info-body", style:{color: meta.notes ? "var(--text)" : "var(--text-3)"} },
+            meta.notes || "Заметок с пары пока нет.")
+        ),
+
+        h("div", { class:"info-box" },
+          h("div", { class:"row between wrap" },
+            h("div", { class:"info-title", style:{marginBottom:0} }, "📎 Файлы (" + meta.files.length + ")"),
+            h("label", { class:"chip", style:{cursor:"pointer"} },
+              "➕ Добавить файл",
+              h("input", {
+                type:"file", multiple:true, class:"hidden",
+                onchange: async (e) => {
+                  if (!e.target.files || !e.target.files.length) return;
+                  try {
+                    const added = await readFilesAsDataURL(e.target.files);
+                    meta.files.push(...added);
+                    saveLessonMeta(l, meta);
+                    toast("Файл(ы) прикреплены 📎", "ok");
+                    drawContent();
+                    render();
+                  } catch (err) { toast(err.message, "err"); }
+                }
+              })
+            )
+          ),
+          meta.files.length ? h("div", { class:"file-list" },
+            meta.files.map((f, idx) => {
+              const isImg = (f.type || "").startsWith("image/");
+              return h("div", { class:"file-item", onclick: () => previewFileModal(f) },
+                isImg && f.data
+                  ? h("img", { class:"file-thumb", src: f.data, alt: f.name })
+                  : h("div", { class:"file-thumb" }, "📄"),
+                h("div", { class:"file-info" },
+                  h("div", { class:"file-name" }, f.name),
+                  h("div", { class:"file-size" }, fmtBytes(f.size) + " · нажми для просмотра")
+                ),
+                h("button", {
+                  class:"btn danger small icon",
+                  title:"Удалить файл",
+                  onclick: (ev) => {
+                    ev.stopPropagation();
+                    meta.files.splice(idx, 1);
+                    saveLessonMeta(l, meta);
+                    drawContent();
+                    render();
+                  }
+                }, "✕")
+              );
+            })
+          ) : h("div", { class:"sub", style:{marginTop:"6px"} }, "Прикрепите фото доски, методичку или PDF к паре.")
+        ),
+
+        h("div", { class:"stack", style:{marginTop:"14px"} },
+          h("button", { class:"btn block", onclick: () => { close(); lessonForm(l, day.date); } },
+            "✏️ Изменить пару, ДЗ и материалы"),
+          l.id ? h("button", { class:"btn ghost block", onclick: async () => {
+            await api("/api/timetable/exception", { method:"POST", body: { date: day.date, kind: "cancel", lesson_id: l.id } });
+            close(); toast("Отменено на этот день", "ok"); render();
+          }}, "🚫 Отменить на " + fmtShort(day.date)) : null,
+          h("button", { class:"btn danger block", onclick: async () => {
+            if (!confirm("Удалить пару из расписания совсем?")) return;
+            if (l.id) {
+              await api("/api/timetable/lesson/" + l.id, { method:"DELETE" });
+            } else if (l.exc_id) {
+              await api("/api/timetable/exception/" + l.exc_id, { method:"DELETE" });
+            }
+            close(); toast("Удалено"); render();
+          }}, "🗑 Удалить")
+        )
+      );
+    };
+
+    drawContent();
+    return wrap;
+  });
+}
+
+function lessonForm(l, date) {
+  const wd = l ? l.weekday : (parse(date || S.today).getDay() + 6) % 7;
+  const existingMeta = l ? getLessonMeta(l) : { description:"", homework:"", notes:"", files:[] };
+  let attachedFiles = [...existingMeta.files];
+
+  sheet(l ? "Изменить пару" : "Новая пара", (close) => {
+    const f = {
+      weekday: h("select", {}, DAYS.map((d, i) => h("option", { value: i, selected: i === wd }, d))),
+      start: h("input", { type:"time", value: l ? l.start : "09:00" }),
+      end: h("input", { type:"time", value: l ? l.end : "10:30" }),
+      subject: h("input", { type:"text", value: l ? l.subject : "", placeholder:"Например, Математический анализ" }),
+      room: h("input", { type:"text", value: l ? l.room : "", placeholder:"Аудитория" }),
+      teacher: h("input", { type:"text", value: l ? l.teacher : "", placeholder:"Преподаватель" }),
+      kind: h("input", { type:"text", value: l ? l.kind : "", placeholder:"Лекция, семинар…" }),
+      parity: h("select", {}, [["all","Каждую неделю"],["odd","Нечётные недели"],["even","Чётные недели"]]
+        .map(([v, t]) => h("option", { value: v, selected: l && l.parity === v }, t))),
+      description: h("input", { type:"text", value: existingMeta.description, placeholder:"Краткое описание занятия…" }),
+      homework: h("textarea", { placeholder:"Что задали на дом, номера задач…" }, existingMeta.homework),
+      notes: h("textarea", { placeholder:"Информация с пары, важные тезисы…" }, existingMeta.notes)
+    };
+
+    const filesContainer = h("div", { class:"file-list" });
+    const renderAttachedFiles = () => {
+      filesContainer.replaceChildren(...attachedFiles.map((file, idx) => {
+        const isImg = (file.type || "").startsWith("image/");
+        return h("div", { class:"file-item", onclick: () => previewFileModal(file) },
+          isImg && file.data
+            ? h("img", { class:"file-thumb", src: file.data, alt: file.name })
+            : h("div", { class:"file-thumb" }, "📎"),
+          h("div", { class:"file-info" },
+            h("div", { class:"file-name" }, file.name),
+            h("div", { class:"file-size" }, fmtBytes(file.size))
+          ),
+          h("button", {
+            type:"button", class:"btn danger small icon",
+            onclick: (ev) => { ev.stopPropagation(); attachedFiles.splice(idx, 1); renderAttachedFiles(); }
+          }, "✕")
+        );
+      }));
+    };
+    renderAttachedFiles();
+
+    const fileInput = h("input", {
+      type:"file", multiple:true, class:"hidden",
+      onchange: async (e) => {
+        if (!e.target.files || !e.target.files.length) return;
+        try {
+          const added = await readFilesAsDataURL(e.target.files);
+          attachedFiles.push(...added);
+          renderAttachedFiles();
+          toast("Добавлено файлов: " + added.length, "ok");
+        } catch (err) { toast(err.message, "err"); }
+      }
+    });
+
+    return h("div", {},
+      field("День недели", f.weekday),
+      h("div", { class:"row", style:{marginTop:"8px"} },
+        h("div", { class:"grow" }, field("Начало", f.start)),
+        h("div", { class:"grow" }, field("Конец", f.end))),
+      h("div", { style:{marginTop:"8px"} }, field("Предмет", f.subject)),
+      h("div", { class:"row", style:{marginTop:"8px"} },
+        h("div", { class:"grow" }, field("Аудитория", f.room)),
+        h("div", { class:"grow" }, field("Тип", f.kind))),
+      h("div", { style:{marginTop:"8px"} }, field("Преподаватель", f.teacher)),
+      h("div", { style:{marginTop:"8px"} }, field("Недели", f.parity)),
+
+      h("h2", { style:{marginTop:"16px", marginBottom:"8px"} }, "Характеристики и материалы пары"),
+      h("div", { style:{marginTop:"6px"} }, field("📌 Краткое описание", f.description)),
+      h("div", { style:{marginTop:"8px"} }, field("📚 Домашнее задание (ДЗ)", f.homework)),
+      h("div", { style:{marginTop:"8px"} }, field("📝 Информация с пары / Конспект", f.notes)),
+      h("div", { style:{marginTop:"10px"} },
+        field("📎 Файлы (ДЗ, презентации, фото конспектов)",
+          h("label", { class:"file-upload-zone" },
+            "📎 Выбрать и прикрепить файлы", fileInput)
+        ),
+        filesContainer
+      ),
+
+      h("button", { class:"btn block", style:{marginTop:"18px"}, onclick: async (e) => {
+        e.target.disabled = true;
+        const payload = {
+          id: l ? l.id : 0,
+          weekday: +f.weekday.value,
+          start: f.start.value, end: f.end.value,
+          subject: f.subject.value, room: f.room.value,
+          teacher: f.teacher.value, kind: f.kind.value,
+          parity: f.parity.value,
+          description: f.description.value.trim(),
+          homework: f.homework.value.trim(),
+          notes: f.notes.value.trim(),
+          files: attachedFiles
+        };
+        try {
+          const res = await api("/api/timetable/lesson", { method:"POST", body: payload });
+          const newId = (res && res.lesson && res.lesson.id) || (res && res.id);
+          const targetLesson = Object.assign({}, l || {}, payload, newId ? { id: newId } : {});
+          saveLessonMeta(targetLesson, payload);
+          saveLessonMeta(payload, payload);
+          close(); toast("Сохранено ✅", "ok"); render();
+        } catch (er) { toast(er.message, "err"); e.target.disabled = false; }
+      }}, "Сохранить"));
+  });
+}
+
+async function ttSettings() {
+  const t = await api("/api/timetable");
+  sheet("Настройки расписания", (close) => {
+    const par = h("select", {}, [["", "Не знаю"],["odd","Нечётная"],["even","Чётная"]]
+      .map(([v, n]) => h("option", { value: v, selected: (t.parity_now || "") === v }, n)));
+    const dig = h("button", { class:"sw" + (t.settings.digest_on ? " on" : ""),
+      onclick: (e) => e.target.classList.toggle("on") });
+    const hour = h("input", { type:"number", min:0, max:23, value: t.settings.digest_hour });
+    const rem = h("input", { type:"number", min:0, max:180, value: t.settings.remind_min });
+    return h("div", {},
+      field("Сейчас идёт неделя", par),
+      h("div", { class:"row between", style:{marginTop:"14px", marginBottom:"8px"} },
+        h("div", { class:"grow" }, h("div", {style:{fontWeight:600}}, "Утренняя сводка"),
+          h("div", { class:"sub" }, "Присылать расписание и дедлайны утром")), dig),
+      h("div", { style:{marginTop:"6px"} }, field("Час сводки (0–23)", hour)),
+      h("div", { style:{marginTop:"6px"} }, field("Напоминать о паре за (минут, 0 — выкл.)", rem)),
+      h("button", { class:"btn block", style:{marginTop:"14px"}, onclick: async () => {
+        try {
+          await api("/api/timetable/settings", { method:"POST", body: {
+            digest_on: dig.classList.contains("on"),
+            digest_hour: +hour.value, remind_min: +rem.value, parity: par.value
+          }});
+          close(); toast("Сохранено ✅", "ok"); render();
+        } catch (e) { toast(e.message, "err"); }
+      }}, "Сохранить"));
+  });
+}
+
+/* =========================================================
+   TASKS + СОЗДАНИЕ ЗАДАЧИ
+   ========================================================= */
+async function taskCreateForm(availGroups) {
+  if (!availGroups) {
+    try {
+      const d = await api("/api/tasks");
+      availGroups = d.available_groups || [];
+    } catch (e) { availGroups = []; }
+  }
+  if (!availGroups.length) {
+    availGroups = [{ chat_id: (S.me && S.me.user.id) || 1, title: "Личные напоминания", topics: [{ name: "личное", thread: 0 }] }];
+  }
+
+  sheet("➕ Новая задача", (close) => {
+    const groupSel = h("select", {}, availGroups.map((g, idx) =>
+      h("option", { value: idx }, g.title)
+    ));
+    const topicSel = h("select", {});
+    const customTopicInp = h("input", { type:"text", placeholder:"Или введите название темы вручную…" });
+
+    const kindSel = h("select", {}, [
+      ["task", "📝 Обычная задача"],
+      ["reminder", "🔔 Напоминание с уведомлением"],
+      ["timer", "⏲ Таймер ко времени"]
+    ].map(([v, label]) => h("option", { value: v }, label)));
+
+    const textInp = h("textarea", { placeholder:"Что нужно сделать или о чём напомнить…" });
+    const dateInp = h("input", { type:"date", value: S.today || iso(new Date()) });
+    const timeInp = h("input", { type:"time", value: "23:59" });
+
+    const dailySw = h("button", { class:"sw", onclick: (e) => e.target.classList.toggle("on") });
+    const pubSw = h("button", { class:"sw", onclick: (e) => e.target.classList.toggle("on") });
+    const pubRow = h("div", { class:"row between", style:{marginTop:"12px"} },
+      h("div", { class:"grow" },
+        h("div", { style:{fontWeight:600, fontSize:"0.9rem"} }, "📢 Опубликовать в тему группы"),
+        h("div", { class:"sub" }, "Отправить сообщение с задачей в выбранный топик Telegram")),
+      pubSw
+    );
+
+    const updateTopics = () => {
+      const g = availGroups[+groupSel.value] || availGroups[0];
+      const topics = g.topics || [{ name: "общая", thread: 0 }];
+      topicSel.replaceChildren(...topics.map(tp =>
+        h("option", { value: JSON.stringify(tp) }, tp.name)
+      ));
+      pubRow.style.display = g.chat_id < 0 ? "flex" : "none";
+    };
+    groupSel.addEventListener("change", updateTopics);
+    updateTopics();
+
+    return h("div", {},
+      field("Группа / Назначение", groupSel),
+      h("div", { style:{marginTop:"8px"} }, field("Тема (топик)", topicSel)),
+      h("div", { style:{marginTop:"6px"} }, customTopicInp),
+      h("div", { style:{marginTop:"8px"} }, field("Тип", kindSel)),
+      h("div", { style:{marginTop:"8px"} }, field("Текст задачи", textInp)),
+      h("div", { class:"row", style:{marginTop:"8px"} },
+        h("div", { class:"grow" }, field("Дата дедлайна", dateInp)),
+        h("div", { class:"grow" }, field("Время", timeInp))
+      ),
+      h("div", { class:"chips" },
+        h("button", { type:"button", class:"chip gray", onclick: () => { dateInp.value = S.today; timeInp.value = "23:59"; } }, "Сегодня"),
+        h("button", { type:"button", class:"chip gray", onclick: () => { dateInp.value = addDays(S.today, 1); timeInp.value = "23:59"; } }, "Завтра"),
+        h("button", { type:"button", class:"chip gray", onclick: () => {
+          const d = new Date(Date.now() + 3600 * 1000);
+          dateInp.value = iso(d);
+          timeInp.value = d.toTimeString().slice(0, 5);
+          kindSel.value = "timer";
+        }}, "+1 час (Таймер)"),
+        h("button", { type:"button", class:"chip gray", onclick: () => { dateInp.value = ""; } }, "Без срока")
+      ),
+      h("div", { class:"row between", style:{marginTop:"14px"} },
+        h("div", { class:"grow" },
+          h("div", { style:{fontWeight:600, fontSize:"0.9rem"} }, "🔔 Напоминать каждое утро"),
+          h("div", { class:"sub" }, "Присылать напоминания до выполнения")),
+        dailySw
+      ),
+      pubRow,
+      h("button", { class:"btn block", style:{marginTop:"18px"}, onclick: async (e) => {
+        const txt = textInp.value.trim();
+        if (!txt) return toast("Введите текст задачи", "err");
+        e.target.disabled = true;
+        const g = availGroups[+groupSel.value] || availGroups[0];
+        let tpObj = { name: "общая", thread: 0 };
+        try { tpObj = JSON.parse(topicSel.value); } catch (err) {}
+        const topicName = customTopicInp.value.trim() || tpObj.name || "общая";
+        const dl = dateInp.value ? (dateInp.value + (timeInp.value ? " " + timeInp.value : "")) : "";
+
+        try {
+          await api("/api/tasks", {
+            method:"POST",
+            body: {
+              chat_id: g.chat_id,
+              topic: topicName,
+              thread: customTopicInp.value.trim() ? 0 : tpObj.thread,
+              text: txt,
+              deadline: dl,
+              kind: kindSel.value,
+              remind_daily: dailySw.classList.contains("on"),
+              publish: pubSw.classList.contains("on") && g.chat_id < 0
+            }
+          });
+          pick("success"); toast("Задача добавлена ✅", "ok");
+          close();
+          render();
+        } catch (err) {
+          toast(err.message, "err");
+          e.target.disabled = false;
+        }
+      }}, "Создать задачу")
+    );
+  });
+}
+
+async function viewTasks() {
+  const d = await api("/api/tasks");
+  const availGroups = d.available_groups || [];
+  const root = h("div", {});
+
+  const total = d.total || 0;
+  root.append(h("div", { class:"page-head" },
+    h("div", {},
+      h("h1", {}, "Задачи"),
+      h("div", { class:"sub" }, total ? total + " активных задач по группам и темам" : "Всё под контролем")),
+    h("button", { class:"btn small", onclick: () => taskCreateForm(availGroups) }, "➕ Добавить")
+  ));
+
+  if (!total) {
+    root.append(empty("🎈", "Активных задач нет", "Всё сделано! Можешь добавить новую задачу или таймер.",
+      h("button", { class:"btn", onclick: () => taskCreateForm(availGroups) }, "➕ Создать задачу")));
+    root.append(h("button", { class:"fab", onclick: () => taskCreateForm(availGroups), title:"Добавить задачу" }, "+"));
+    return root;
+  }
+
+  let countTimers = 0, countReminders = 0, countRegular = 0;
+  (d.groups || []).forEach(g => (g.topics || []).forEach(tp => (tp.tasks || []).forEach(t => {
+    const ki = getTaskKindInfo(t);
+    if (ki.id === "timer") countTimers++;
+    else if (ki.id === "reminder") countReminders++;
+    else countRegular++;
+  })));
+
+  root.append(h("div", { class:"top-plank" },
+    h("div", { class:"plank-left" },
+      h("div", { class:"plank-ic" }, "🗂"),
+      h("div", { class:"grow" },
+        h("div", { class:"plank-title" }, "Группы › Темы › Задачи"),
+        h("div", { class:"plank-sub" },
+          "📝 " + countRegular + " · 🔔 " + countReminders + " · ⏲ " + countTimers)
+      )
+    ),
+    h("span", { class:"chip" }, "по дате ↑")
+  ));
+
+  const topBurningSlot = h("div", {});
+  root.append(topBurningSlot);
+
+  const search = h("input", { type:"search", placeholder:"Поиск по группе, теме или тексту…",
+    value: S.tasksQuery,
+    oninput: (e) => { S.tasksQuery = e.target.value.toLowerCase(); applyFilters(); } });
+  root.append(h("div", { class:"search-wrap" },
+    h("span", { class:"icon" }, "🔍"), search));
+
+  const filters = [["all","Все сроки"],["urgent","🔥 Срочные"],["week","📅 Эта неделя"],["no-date","Без срока"]];
+  const filterRow = h("div", { class:"chips", style:{ marginBottom:"8px", marginTop:"-4px" } });
+  filters.forEach(([id, label]) => {
+    filterRow.append(h("button", {
+      class: "chip " + (S.tasksFilter === id ? "" : "gray"),
+      onclick: () => { S.tasksFilter = id; drawTasksFilter(); applyFilters(); },
+      "data-filter": id
+    }, label));
+  });
+  root.append(filterRow);
+
+  const kindFilters = [
+    ["all", "Все типы"],
+    ["regular", "📝 Обычные"],
+    ["reminder", "🔔 Напоминания"],
+    ["timer", "⏲ Таймеры"]
+  ];
+  const kindRow = h("div", { class:"chips", style:{ marginBottom:"14px" } });
+  kindFilters.forEach(([id, label]) => {
+    kindRow.append(h("button", {
+      class: "chip " + (S.tasksKindFilter === id ? "" : "gray"),
+      onclick: () => { S.tasksKindFilter = id; drawTasksFilter(); applyFilters(); },
+      "data-kind": id
+    }, label));
+  });
+  root.append(kindRow);
+
+  function drawTasksFilter() {
+    filterRow.querySelectorAll("button").forEach(b => {
+      b.classList.toggle("gray", b.dataset.filter !== S.tasksFilter);
+    });
+    kindRow.querySelectorAll("button").forEach(b => {
+      b.classList.toggle("gray", b.dataset.kind !== S.tasksKindFilter);
+    });
+  }
+
+  const listWrap = h("div", {});
+  root.append(listWrap);
+
+  function renderBurningBanner() {
+    const activeBurning = [];
+    (d.groups || []).forEach(g => (g.topics || []).forEach(tp => (tp.tasks || []).forEach(t => {
+      if (isBurning30Min(t)) activeBurning.push(t);
+    })));
+    if (!activeBurning.length) {
+      topBurningSlot.replaceChildren();
+      return;
+    }
+    activeBurning.sort((a, b) => getTaskTimestamp(a) - getTaskTimestamp(b));
+    const nearest = activeBurning[0];
+    topBurningSlot.replaceChildren(
+      h("div", { class:"burning-banner" },
+        h("div", { class:"grow" },
+          h("div", { class:"burn-title" }, "🔥 Горят дедлайны! (< 30 мин)"),
+          h("div", { class:"sub truncate", style:{marginTop:"2px", color:"inherit", opacity:.9} }, nearest.text)
+        ),
+        h("span", { class:"burn-time", "data-burn-task": nearest.id }, fmtRemainingTime(nearest))
+      )
+    );
+  }
+
+  function applyFilters() {
+    const q = S.tasksQuery.trim();
+    const filter = S.tasksFilter;
+    const kindFilter = S.tasksKindFilter;
+    const now = new Date();
+    const weekEnd = new Date(now.getTime() + 7 * 86400 * 1000);
+    listWrap.replaceChildren();
+    let shown = 0;
+
+    const groupedMap = new Map();
+    (d.groups || []).forEach(g => {
+      const gTitle = g.title || "Без группы";
+      if (!groupedMap.has(gTitle)) groupedMap.set(gTitle, []);
+      const topicList = groupedMap.get(gTitle);
+      (g.topics || []).forEach(tp => {
+        let existingTp = topicList.find(x => x.name === tp.name);
+        if (!existingTp) {
+          existingTp = { name: tp.name || "Общее", tasks: [] };
+          topicList.push(existingTp);
+        }
+        existingTp.tasks.push(...(tp.tasks || []));
+      });
+    });
+
+    let groupIndex = 0;
+    for (const [gTitle, topics] of groupedMap.entries()) {
+      const topicNodes = [];
+      let groupTaskCount = 0;
+      let groupBurningCount = 0;
+
+      topics.forEach((tp, ti) => {
+        const filtered = tp.tasks.filter(t => {
+          const ki = getTaskKindInfo(t);
+          if (kindFilter !== "all" && ki.id !== kindFilter) return false;
+          if (q && !t.text.toLowerCase().includes(q) &&
+              !(tp.name || "").toLowerCase().includes(q) &&
+              !gTitle.toLowerCase().includes(q)) return false;
+          if (filter === "urgent" && !t.overdue && !t.soon && !isBurning30Min(t)) return false;
+          if (filter === "week") {
+            const dObj = parseTaskDateObj(t);
+            if (!dObj || dObj < now || dObj > weekEnd) return false;
+          }
+          if (filter === "no-date" && parseTaskDateObj(t)) return false;
+          return true;
+        });
+
+        if (!filtered.length) return;
+        filtered.sort((a, b) => getTaskTimestamp(a) - getTaskTimestamp(b));
+
+        shown += filtered.length;
+        groupTaskCount += filtered.length;
+
+        const topicBurning = filtered.filter(t => isBurning30Min(t));
+        groupBurningCount += topicBurning.length;
+
+        const taskElements = [];
+        let lastDayKey = null;
+
+        filtered.forEach(t => {
+          const dayKey = parseTaskDateObj(t) ? fmtDayDDMM(t) : "Без даты";
+          if (dayKey !== lastDayKey) {
+            lastDayKey = dayKey;
+            taskElements.push(
+              h("div", { class:"date-divider" },
+                h("span", { class:"date-pill" },
+                  dayKey === "Без даты" ? "📌 Без срока" : "📅 " + dayKey),
+                h("span", { class:"date-line" })
+              )
+            );
+          }
+
+          const kindInfo = getTaskKindInfo(t);
+          const burning = isBurning30Min(t);
+          const urgent = burning || t.overdue ? "red" : t.soon ? "warn" : "gray";
+          const txt = h("div", { class:"text", onclick: () => txt.classList.toggle("open") }, t.text);
+
+          taskElements.push(
+            h("div", { class:"task-card" + (burning ? " burning" : "") },
+              h("div", { class:"task-plank " + (burning ? "kind-burning" : kindInfo.cls) },
+                h("span", {}, kindInfo.icon + " " + kindInfo.label),
+                t.deadline || t.deadline_iso
+                  ? h("span", { class:"mono" }, (t.overdue ? "⏰ просрочено · " : "до ") + fmtDeadline(t))
+                  : h("span", { class:"mute" }, "без дедлайна")
+              ),
+              h("div", { class:"task-body" },
+                txt,
+                h("div", { class:"chips" },
+                  (t.deadline || t.deadline_iso) ? h("span", { class:"chip " + urgent },
+                    "📅 " + fmtDayDDMM(t)) : null,
+                  t.kind === "timer" ? h("span", { class:"chip purple", "data-burn-task": t.id },
+                    parseTaskDateObj(t) ? "⏳ " + fmtRemainingTime(t) : "⏲ таймер") : null,
+                  t.notif ? h("span", { class:"chip cyan" }, "🔔 уведомление") : null,
+                  t.file ? h("span", { class:"chip gray" }, "📎 " + t.file) : null,
+                  (t.done_by && t.done_by.length) ? h("span", { class:"chip green" }, "👥 " + t.done_by.length) : null
+                ),
+                h("div", { class:"footer" },
+                  h("button", { class:"btn small block", onclick: async () => {
+                    await api("/api/tasks/" + t.id + "/done", { method:"POST" });
+                    hap("medium"); pick("success"); toast("Готово ✅", "ok"); render();
+                  }}, "✅ Выполнено"))
+              )
+            )
+          );
+        });
+
+        const topicDet = h("details", { class:"topic-acc", open: groupIndex === 0 && ti === 0 },
+          h("summary", {},
+            h("div", { class:"topic-dot" }, "🏷"),
+            h("span", { class:"grow truncate" }, tp.name),
+            topicBurning.length ? h("span", { class:"chip red" }, "🔥 " + topicBurning.length) : null,
+            h("span", { class:"chip gray" }, filtered.length),
+            h("span", { class:"chev" })
+          ),
+          h("div", { class:"topic-body" }, ...taskElements)
+        );
+        topicNodes.push(topicDet);
+      });
+
+      if (!topicNodes.length) return;
+
+      const groupDet = h("details", { class:"group-acc", open: groupIndex === 0 },
+        h("summary", {},
+          h("div", { class:"group-icon" }, "📂"),
+          h("div", { class:"group-meta" },
+            h("div", { class:"g-title truncate" }, gTitle),
+            h("div", { class:"g-sub" }, "Тем: " + topicNodes.length + " · Задач: " + groupTaskCount)
+          ),
+          groupBurningCount ? h("span", { class:"chip red" }, "🔥") : null,
+          h("span", { class:"chip" }, groupTaskCount),
+          h("span", { class:"chev" })
+        ),
+        h("div", { class:"group-body" }, ...topicNodes)
+      );
+
+      listWrap.append(groupDet);
+      groupIndex++;
+    }
+
+    if (!shown) {
+      listWrap.append(empty("🔍", "Ничего не найдено", "Попробуй изменить запрос или фильтр"));
+    }
+  }
+
+  renderBurningBanner();
+  applyFilters();
+
+  S.timerInterval = setInterval(() => {
+    const allTasks = [];
+    (d.groups || []).forEach(g => (g.topics || []).forEach(tp => (tp.tasks || []).forEach(t => allTasks.push(t))));
+    document.querySelectorAll("[data-burn-task]").forEach(el => {
+      const tid = el.getAttribute("data-burn-task");
+      const taskObj = allTasks.find(x => String(x.id) === String(tid));
+      if (taskObj) el.textContent = fmtRemainingTime(taskObj);
+    });
+  }, 1000);
+
+  root.append(h("button", { class:"fab", onclick: () => taskCreateForm(availGroups), title:"Добавить задачу" }, "+"));
+  return root;
+}
+
+/* =========================================================
+   STUDY
+   ========================================================= */
+async function viewStudy() {
+  const root = h("div", {},
+    h("h1", { style:{marginBottom:"14px"} }, "Учёба"),
+    seg([["cards","🃏 Карточки"],["quiz","🎯 Квизы"]], S.studySub, (id) => { S.studySub = id; render(); }));
+  root.append(S.studySub === "cards" ? await cardsPane() : await quizPane());
+  return root;
+}
+
+async function cardsPane() {
+  const d = await api("/api/study");
+  const c = d.cards;
+  const pct = c.total ? Math.round(100 * c.learned / c.total) : 0;
+  const box = h("div", {});
+
+  box.append(h("div", { class:"stats" },
+    h("div", { class:"stat" }, h("b", {}, c.total), h("span", {}, "Всего")),
+    h("div", { class:"stat " + (c.due ? "warn" : "ok") }, h("b", {}, c.due), h("span", {}, "Повторить")),
+    h("div", { class:"stat ok" }, h("b", {}, c.learned), h("span", {}, "Выучено")),
+  ));
+
+  box.append(h("div", { class:"card row", style:{gap:"12px"} },
+    h("div", { class:"ring" + (pct >= 100 ? " ok" : ""), style:{ "--p": pct } }, h("div", {}, pct + "%")),
+    h("div", { class:"grow" },
+      h("div", { style:{fontWeight:700, fontSize:"0.98rem"} },
+        c.due ? "Пора повторить!" : "Всё выучено 🎉"),
+      h("div", { class:"sub" },
+        c.due ? Math.min(c.due, 10) + " карточек ждут тебя" : "Загляни завтра"),
+      h("div", { class:"btn-row", style:{marginTop:"10px"} },
+        h("button", { class:"btn small", disabled: !c.total, onclick: () => session(true) },
+          c.due ? "▶️ Учить" : "🔁 Ещё раз"),
+        h("button", { class:"btn ghost small", onclick: cardForm }, "➕ Добавить")))));
+
+  const list = await api("/api/cards");
+  if (!list.cards.length) {
+    box.append(empty("🃏", "Пока нет карточек", "Добавь слова или попроси бота составить их из текста",
+      h("button", { class:"btn", onclick: cardForm }, "➕ Создать карточку")));
+  } else {
+    list.cards.slice(0, 60).forEach(k => {
+      box.append(h("div", { class:"card tight" },
+        h("div", { class:"row between" },
+          h("div", { class:"grow" },
+            h("div", { style:{fontWeight:700} }, k.front),
+            k.ph ? h("div", { class:"sub", style:{marginTop:"2px"} }, k.ph) : null,
+            h("div", { style:{marginTop:"4px", color:"var(--text-2)"} }, k.back),
+            h("div", { class:"chips" },
+              h("span", { class:"chip gray" }, "коробка " + k.box),
+              h("span", { class:"chip gray" }, k.deck))),
+          h("button", { class:"btn danger small icon", title:"Удалить", onclick: async () => {
+            if (!confirm("Удалить карточку?")) return;
+            await api("/api/cards/" + k.id, { method:"DELETE" }); render();
+          }}, "🗑"))
+      ));
+    });
+  }
+  return box;
+}
+
+async function session() {
+  let q = (await api("/api/cards?due=1")).cards.slice(0, 10);
+  if (!q.length) q = (await api("/api/cards")).cards.sort(() => Math.random() - .5).slice(0, 10);
+  if (!q.length) return toast("Карточек нет");
+
+  let seen = 0, ok = 0;
+  const again = new Set();
+  const totalStart = q.length;
+  sheet("Повторение", (close) => {
+    const body = h("div");
+    const step = () => {
+      if (!q.length) {
+        body.replaceChildren(
+          h("div", { class:"empty" },
+            h("div", { class:"big" }, "🏁"),
+            h("h3", {}, "Сессия завершена!"),
+            h("p", {}, "Знал " + ok + " из " + seen),
+            h("button", { class:"btn", onclick: () => { close(); render(); } }, "Готово")));
+        return;
+      }
+      const k = q[0];
+      const done = totalStart - q.length;
+      const pct = Math.round(100 * done / totalStart);
+      const btns = h("div", { class:"btn-row", style:{ display:"none" } },
+        h("button", { class:"btn danger", onclick: () => answer(false) }, "❌ Не знал"),
+        h("button", { class:"btn", onclick: () => answer(true) }, "✅ Знал"));
+      const card = h("div", { class:"flip", onclick: () => {
+        card.classList.add("on"); hap();
+        btns.style.display = "flex";
+      }},
+        h("div", { class:"in" },
+          h("div", { class:"face" },
+            h("div", { class:"w" }, k.front),
+            k.ph && h("div", { class:"ph" }, k.ph),
+            h("div", { class:"sub", style:{marginTop:"14px"} }, "нажми, чтобы перевернуть")),
+          h("div", { class:"face back" },
+            h("div", { class:"w" }, k.back),
+            k.ex && h("div", { class:"ex" }, k.ex))));
+
+      const answer = async (known) => {
+        q.shift(); seen++; ok += known ? 1 : 0;
+        if (!known && !again.has(k.id)) { again.add(k.id); q.push(k); }
+        try { await api("/api/cards/" + k.id + "/review", { method:"POST", body: { known } }); }
+        catch (e) { toast(e.message, "err"); }
+        hap(known ? "light" : "heavy"); step();
+      };
+
+      body.replaceChildren(
+        h("div", { class:"session-progress" },
+          h("span", {}, (done + 1) + " / " + totalStart),
+          h("div", { class:"bar" }, h("i", { style:{ width: pct + "%" } })),
+          h("span", {}, "✓ " + ok)
+        ),
+        card,
+        btns
+      );
+    };
+    step();
+    return body;
+  });
+}
+
+function cardForm() {
+  sheet("➕ Новая карточка", (close) => {
+    const front = h("input", { type:"text", placeholder:"Термин, формула или вопрос…" });
+    const ph = h("input", { type:"text", placeholder:"Транскрипция или подсказка (необязательно)" });
+    const back = h("textarea", { placeholder:"Перевод, определение или ответ…" });
+    const ex = h("input", { type:"text", placeholder:"Пример использования (необязательно)" });
+    const deck = h("input", { type:"text", value:"общее", placeholder:"Колода (напр., Матан, Физика, English)" });
+    const aiTopic = h("input", { type:"text", placeholder:"Тема для авто-генерации ИИ (напр., Ряды Тейлора)" });
+
+    return h("div", {},
+      field("Лицевая сторона (вопрос)", front),
+      h("div", { style:{marginTop:"8px"} }, field("Подсказка / транскрипция", ph)),
+      h("div", { style:{marginTop:"8px"} }, field("Обратная сторона (ответ)", back)),
+      h("div", { style:{marginTop:"8px"} }, field("Пример", ex)),
+      h("div", { style:{marginTop:"8px"} }, field("Колода", deck)),
+      h("button", { class:"btn block", style:{marginTop:"14px"}, onclick: async (e) => {
+        if (!front.value.trim() || !back.value.trim()) return toast("Заполните вопрос и ответ", "err");
+        e.target.disabled = true;
+        try {
+          await api("/api/cards", {
+            method:"POST",
+            body: {
+              front: front.value.trim(),
+              ph: ph.value.trim(),
+              back: back.value.trim(),
+              ex: ex.value.trim(),
+              deck: deck.value.trim() || "общее"
+            }
+          });
+          pick("success"); toast("Карточка добавлена ✅", "ok");
+          close(); render();
+        } catch (err) { toast(err.message, "err"); e.target.disabled = false; }
+      }}, "Сохранить карточку"),
+
+      h("h2", { style:{marginTop:"18px", marginBottom:"8px"} }, "✨ Сгенерировать карточки с ИИ"),
+      field("Тема или раздел", aiTopic),
+      h("button", { class:"btn subtle block", style:{marginTop:"10px"}, onclick: async (e) => {
+        const topic = aiTopic.value.trim();
+        if (!topic) return toast("Укажите тему для генерации", "err");
+        e.target.disabled = true;
+        e.target.textContent = "⏳ Генерация…";
+        try {
+          await api("/api/cards/generate", { method:"POST", body: { topic, count: 8 } });
+          pick("success"); toast("Карточки созданы! 🎉", "ok");
+          close(); render();
+        } catch (err) {
+          toast(err.message, "err");
+          e.target.disabled = false;
+          e.target.textContent = "✨ Сгенерировать 8 карточек";
+        }
+      }}, "✨ Сгенерировать 8 карточек")
+    );
+  });
+}
+
+async function quizPane() {
+  let d = { quizzes: [] };
+  try { d = await api("/api/study"); } catch (e) {}
+  const box = h("div", {});
+  const topicInp = h("input", { type:"text", placeholder:"Например: Электродинамика, Матрицы, Python…" });
+  const countSel = h("select", {}, [5, 8, 10].map(n => h("option", { value: n }, n + " вопросов")));
+
+  box.append(h("div", { class:"card" },
+    h("h3", {}, "🎯 Быстрый ИИ-квиз"),
+    h("div", { class:"sub", style:{marginTop:"4px", marginBottom:"10px"} },
+      "Проверь знания по любой теме перед семинаром или зачётом"),
+    field("Тема квиза", topicInp),
+    h("div", { style:{marginTop:"8px"} }, field("Количество вопросов", countSel)),
+    h("button", { class:"btn block", style:{marginTop:"12px"}, onclick: async (e) => {
+      const topic = topicInp.value.trim();
+      if (!topic) return toast("Введите тему квиза", "err");
+      e.target.disabled = true;
+      const origTxt = e.target.textContent;
+      e.target.textContent = "⏳ ИИ составляет вопросы…";
+      try {
+        const qz = await api("/api/quiz", { method:"POST", body: { topic, count: +countSel.value } });
+        runQuizModal(qz);
+      } catch (err) {
+        toast(err.message, "err");
+      }
+      e.target.disabled = false;
+      e.target.textContent = origTxt;
+    }}, "🚀 Начать квиз")
+  ));
+
+  const history = d.quizzes || [];
+  if (history.length) {
+    box.append(h("h2", {}, "Последние результаты"));
+    history.slice(0, 15).forEach(q => {
+      const pct = q.total ? Math.round(100 * q.score / q.total) : 0;
+      box.append(h("div", { class:"card tight row between" },
+        h("div", { class:"grow" },
+          h("div", { style:{fontWeight:700} }, q.topic || "Квиз"),
+          h("div", { class:"sub" }, "Правильно: " + q.score + " из " + q.total)),
+        h("span", { class:"chip " + (pct >= 80 ? "green" : pct >= 50 ? "warn" : "red") }, pct + "%")
+      ));
+    });
+  }
+  return box;
+}
+
+function runQuizModal(qz) {
+  const questions = qz.questions || [];
+  if (!questions.length) return toast("Не удалось получить вопросы", "err");
+  let idx = 0, score = 0;
+
+  sheet(qz.title || "🎯 Квиз", (close) => {
+    const body = h("div", {});
+    const step = () => {
+      if (idx >= questions.length) {
+        const pct = Math.round(100 * score / questions.length);
+        body.replaceChildren(
+          h("div", { class:"empty" },
+            h("div", { class:"big" }, pct >= 80 ? "🏆" : pct >= 50 ? "👍" : "📚"),
+            h("h3", {}, "Результат: " + score + " из " + questions.length + " (" + pct + "%)"),
+            h("p", {}, pct >= 80 ? "Отличный результат!" : "Хорошая тренировка, продолжай в том же духе."),
+            h("button", { class:"btn block", onclick: () => { close(); render(); } }, "Готово")
+          )
+        );
+        return;
+      }
+      const item = questions[idx];
+      const optsWrap = h("div", { class:"stack", style:{marginTop:"12px"} });
+      const explainBox = h("div", { class:"info-box hidden", style:{marginTop:"12px"} });
+      const nextBtn = h("button", { class:"btn block hidden", style:{marginTop:"12px"}, onclick: () => { idx++; step(); } },
+        idx + 1 < questions.length ? "Следующий вопрос →" : "Завершить квиз 🏁");
+
+      let answered = false;
+      (item.options || []).forEach((optText, oi) => {
+        const b = h("button", {
+          class:"btn ghost",
+          style:{justifyContent:"flex-start", textAlign:"left"},
+          onclick: () => {
+            if (answered) return;
+            answered = true;
+            const correctIdx = typeof item.answer === "number" ? item.answer : item.correct;
+            const isOk = oi === correctIdx;
+            if (isOk) { score++; pick("success"); b.style.borderColor = "var(--ok)"; b.style.background = "var(--ok-soft)"; }
+            else { pick("error"); b.style.borderColor = "var(--danger)"; b.style.background = "var(--danger-soft)"; }
+            if (item.explain || item.explanation) {
+              explainBox.textContent = "💡 " + (item.explain || item.explanation);
+              explainBox.classList.remove("hidden");
+            }
+            nextBtn.classList.remove("hidden");
+          }
+        }, optText);
+        optsWrap.append(b);
+      });
+
+      body.replaceChildren(
+        h("div", { class:"session-progress" },
+          h("span", {}, "Вопрос " + (idx + 1) + " / " + questions.length),
+          h("div", { class:"bar" }, h("i", { style:{ width: Math.round(100 * idx / questions.length) + "%" } })),
+          h("span", {}, "✓ " + score)
+        ),
+        h("div", { class:"card", style:{marginTop:"8px"} },
+          h("div", { style:{fontWeight:700, fontSize:"1.02rem"} }, item.q || item.question),
+          optsWrap,
+          explainBox,
+          nextBtn
+        )
+      );
+    };
+    step();
+    return body;
+  });
+}
+
+/* =========================================================
+   CHAT, HISTORY (С ФАЙЛАМИ СВЕРХУ) & SETTINGS (README + BYOK)
+   ========================================================= */
+async function viewChat() {
+  const acc = (S.me && S.me.account) || { name: "Артём", avatar: "🧑‍💻" };
+  const root = h("div", {});
+
+  root.append(h("div", { class:"page-head" },
+    h("div", { class:"row", style:{gap:"10px"} },
+      renderAvatar(acc.avatar, "sm", openProfileEditor),
+      h("div", {},
+        h("h1", {}, "ИИ-Ассистент"),
+        h("div", { class:"sub" }, acc.name + " · " + shortModelName(S.me && S.me.model))
+      )
+    ),
+    h("div", { class:"row", style:{gap:"6px"} },
+      h("button", { class:"model-pill", onclick: openModelPicker },
+        h("span", { class:"dot" }), shortModelName(S.me && S.me.model)),
+      h("button", { class:"btn ghost small icon", onclick: openAccountSwitcher, title:"Сменить аккаунт" }, "🔄")
+    )
+  ));
+
+  root.append(seg([
+    ["chat", "💬 Диалог"],
+    ["history", "📜 История"],
+    ["settings", "⚙️ Настройки"]
+  ], S.chatSub, (id) => { S.chatSub = id; render(); }));
+
+  if (S.chatSub === "history") {
+    root.append(await chatHistoryPane());
+  } else if (S.chatSub === "settings") {
+    root.append(await chatSettingsPane());
+  } else {
+    root.append(chatDialogPane());
+  }
+  return root;
+}
+
+function renderFileChipOrCard(f) {
+  const isImg = (f.mime || f.type || "").startsWith("image/") || /\.(png|jpe?g|webp|gif)$/i.test(f.name || "");
+  return h("div", { class:"file-item", onclick: () => previewFileModal(f) },
+    h("div", { class:"file-thumb" }, isImg ? "🖼" : "📄"),
+    h("div", { class:"file-info" },
+      h("div", { class:"file-name" }, f.name || "Файл"),
+      h("div", { class:"file-size" }, (f.size ? fmtBytes(f.size) + " · " : "") + "нажми для просмотра")
+    ),
+    h("span", { class:"chip" }, "👁")
+  );
+}
+
+function chatDialogPane() {
+  const wrap = h("div", { class:"chat-wrap" });
+  const listBox = h("div", {});
+  const chatList = currentChatList();
+
+  const drawMessages = () => {
+    listBox.replaceChildren();
+    if (!chatList.length) {
+      listBox.append(empty("🤖", "Чем помочь по учёбе или коду?",
+        "Прикрепляй PDF, фото задач, код или спрашивай напрямую — контекст и README твоего профиля уже подключены.",
+        h("div", { class:"chips", style:{justifyContent:"center"} },
+          h("button", { class:"chip", onclick: () => sendQuick("Что у меня сегодня по парам и дедлайнам?") }, "📅 Сводка на сегодня"),
+          h("button", { class:"chip", onclick: () => sendQuick("Создай PDF-шпаргалку по основным формулам") }, "📄 Создать PDF")
+        )
+      ));
+      return;
+    }
+
+    chatList.forEach((m, idx) => {
+      const isMe = m.role === "user";
+      const attFiles = m.attached_files || [];
+      const botFiles = m.files || [];
+
+      const bubble = h("div", { class:"bubble " + (isMe ? "me" : "bot") },
+        attFiles.length ? h("div", { class:"msg-att-list" },
+          attFiles.map(af => h("div", { class:"msg-att-item", onclick: () => previewFileModal(af) },
+            h("div", { class:"att-thumb" }, "📎"),
+            h("div", { class:"att-meta" },
+              h("span", { class:"att-name" }, af.name || "файл"),
+              h("span", { class:"att-sub" }, (af.size ? fmtBytes(af.size) + " · " : "") + "открыть")
+            )
+          ))
+        ) : null,
+
+        m.loading
+          ? h("div", { class:"dots" }, h("span"), h("span"), h("span"))
+          : (isMe ? h("div", { style:{whiteSpace:"pre-wrap"} }, m.text) : renderMd(m.text)),
+
+        botFiles.map(bf => {
+          const dlUrl = "/api/files/" + bf.id + "?initData=" + encodeURIComponent(getInitData()) + "&acc=" + encodeURIComponent(getActiveAccountId()) + "&client=tg";
+          return h("div", { class:"bot-file-card" },
+            h("div", { class:"bf-head", style:{cursor:"pointer"}, onclick: () => previewFileModal(bf) },
+              h("div", { class:"bf-ic" }, "📄"),
+              h("div", { class:"grow" },
+                h("div", { class:"bf-name" }, bf.name),
+                h("div", { class:"bf-sub" }, fmtBytes(bf.size) + (bf.caption ? " · " + bf.caption : ""))
+              )
+            ),
+            h("div", { class:"btn-row" },
+              h("button", { class:"btn ghost small", onclick: () => previewFileModal(bf) }, "👁 Просмотр"),
+              h("a", { class:"btn ghost small", href: dlUrl, download: bf.name, target:"_blank" }, "⬇️ Скачать"),
+              h("button", { class:"btn subtle small", onclick: async (ev) => {
+                ev.target.disabled = true;
+                try {
+                  await api("/api/files/" + bf.id + "/send", { method:"POST" });
+                  pick("success"); toast("Отправлено в Telegram 📨", "ok");
+                } catch (e) { toast(e.message, "err"); }
+                ev.target.disabled = false;
+              }}, "📨 В ТГ")
+            )
+          );
+        }),
+
+        !m.loading ? h("div", { class:"meta-row" },
+          m.model ? h("span", {}, "⚡ " + shortModelName(m.model)) : null,
+          h("button", { class:"act-btn", onclick: () => {
+            navigator.clipboard.writeText(m.text || "");
+            toast("Скопировано 📋", "ok");
+          }}, "📋 Копировать"),
+          h("button", { class:"act-btn", onclick: async () => {
+            chatList.splice(idx, 1);
+            drawMessages();
+            try { await api("/api/chat/delete", { method:"POST", body: { id: m.id, ts: m.ts } }); } catch (e) {}
+          }}, "🗑")
+        ) : null
+      );
+      listBox.append(bubble);
+    });
+  };
+
+  const filesBar = h("div", { class:"chat-files-bar hidden" });
+  const drawFilesBar = () => {
+    if (!S.chatFiles.length) {
+      filesBar.classList.add("hidden");
+      filesBar.replaceChildren();
+      return;
+    }
+    filesBar.classList.remove("hidden");
+    filesBar.replaceChildren(...S.chatFiles.map((f, i) =>
+      h("div", {
+        class:"chat-file-chip",
+        onclick: () => previewFileModal(f, () => { S.chatFiles.splice(i, 1); drawFilesBar(); })
+      },
+        h("span", {}, "📎"),
+        h("span", { class:"cf-name" }, f.name),
+        h("button", {
+          onclick: (ev) => { ev.stopPropagation(); S.chatFiles.splice(i, 1); drawFilesBar(); }
+        }, "✕")
+      )
+    ));
+  };
+
+  const inp = h("input", {
+    type:"text",
+    placeholder:"Сообщение для ИИ…",
+    onkeydown: (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); doSend(); } }
+  });
+
+  const fileInp = h("input", {
+    type:"file", multiple:true, class:"hidden",
+    onchange: async (e) => {
+      if (!e.target.files || !e.target.files.length) return;
+      try {
+        const added = await readFilesAsDataURL(e.target.files);
+        S.chatFiles.push(...added.slice(0, 5));
+        drawFilesBar();
+      } catch (err) { toast(err.message, "err"); }
+      e.target.value = "";
+    }
+  });
+
+  const sendBtn = h("button", {
+    class:"send-btn",
+    onclick: () => {
+      if (S.sending && S.abortCtrl) {
+        S.abortCtrl.abort();
+        return;
+      }
+      doSend();
+    }
+  }, "➤");
+
+  function sendQuick(txt) {
+    inp.value = txt;
+    doSend();
+  }
+
+  async function doSend() {
+    if (S.sending) return;
+    const text = inp.value.trim();
+    const filesToSend = [...S.chatFiles];
+    if (!text && !filesToSend.length) return;
+
+    inp.value = "";
+    S.chatFiles = [];
+    drawFilesBar();
+
+    const uId = "u_" + Date.now();
+    const bId = "b_" + Date.now();
+    const userEntry = {
+      id: uId,
+      role: "user",
+      text: text || "📎 Прикреплён файл",
+      attached_files: filesToSend
+    };
+    const botEntry = { id: bId, role: "bot", text: "", loading: true };
+    chatList.push(userEntry, botEntry);
+    drawMessages();
+    window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
+
+    S.sending = true;
+    S.abortCtrl = new AbortController();
+    sendBtn.classList.add("stop");
+    sendBtn.textContent = "■";
+
+    try {
+      const res = await api("/api/ask", {
+        method: "POST",
+        body: { text, files: filesToSend, user_msg_id: uId, bot_msg_id: bId },
+        signal: S.abortCtrl.signal
+      });
+      botEntry.loading = false;
+      botEntry.text = res.answer || "";
+      botEntry.model = res.model;
+      botEntry.files = res.files || [];
+      botEntry.ts = res.ts;
+      if (res.attached_files && res.attached_files.length) {
+        userEntry.attached_files = res.attached_files;
+      }
+      userEntry.ts = res.ts;
+      hap("light");
+    } catch (err) {
+      botEntry.loading = false;
+      botEntry.text = err.name === "AbortError" ? "⏹ Запрос остановлен пользователем." : ("❌ Ошибка: " + err.message);
+    } finally {
+      S.sending = false;
+      S.abortCtrl = null;
+      sendBtn.classList.remove("stop");
+      sendBtn.textContent = "➤";
+      drawMessages();
+      window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
+    }
+  }
+
+  drawMessages();
+  drawFilesBar();
+
+  if (chatList.length) {
+    wrap.append(h("div", { class:"row between", style:{marginBottom:"8px"} },
+      h("span", { class:"sub" }, "Сообщений в сессии: " + chatList.length),
+      h("button", { class:"chip gray", onclick: async () => {
+        await api("/api/chat/clear", { method:"POST" });
+        chatList.length = 0;
+        drawMessages();
+        toast("Диалог очищен 🧹", "ok");
+      }}, "🧹 Очистить диалог")
+    ));
+  }
+
+  wrap.append(
+    listBox,
+    h("div", { class:"chat-dock" },
+      filesBar,
+      h("div", { class:"chatbar" },
+        h("label", { class:"attach-btn", title:"Прикрепить файл" }, "📎", fileInp),
+        inp,
+        sendBtn
+      )
+    )
+  );
+  return wrap;
+}
+
+async function chatHistoryPane() {
+  const d = await api("/api/history");
+  const items = d.items || [];
+  const box = h("div", {});
+
+  if (!items.length) {
+    box.append(empty("📜", "История пуста", "Все ваши вопросы и прикреплённые файлы будут сохраняться здесь"));
+    return box;
+  }
+
+  box.append(h("div", { class:"row between", style:{marginBottom:"10px"} },
+    h("span", { class:"sub" }, "Записей: " + items.length),
+    h("button", { class:"btn danger small", onclick: async () => {
+      if (!confirm("Очистить историю этого аккаунта?")) return;
+      await api("/api/history", { method:"DELETE" });
+      toast("История очищена"); render();
+    }}, "🗑 Очистить историю")
+  ));
+
+  items.forEach(it => {
+    const dt = it.ts ? new Date(it.ts * 1000).toLocaleString("ru-RU", { day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit" }) : "";
+    const attFiles = it.attached_files || [];
+    const botFiles = it.bot_files || [];
+    const allFiles = [...attFiles, ...botFiles];
+
+    box.append(h("details", { class:"acc" },
+      h("summary", {},
+        h("span", { class:"chip gray" }, dt),
+        allFiles.length ? h("span", { class:"chip purple" }, "📎 " + allFiles.length) : null,
+        h("span", { class:"grow truncate" }, it.q || "Запрос с файлом")
+      ),
+      h("div", { class:"content" },
+        allFiles.length ? h("div", { class:"hist-files-box" },
+          h("div", { class:"hf-title" }, "📎 Прикреплённые и созданные файлы (" + allFiles.length + ")"),
+          h("div", { class:"file-list" }, allFiles.map(f => renderFileChipOrCard(f)))
+        ) : null,
+        h("div", { class:"info-box" },
+          h("div", { class:"info-title" }, "👤 Запрос (" + (it.src || "чат") + ")"),
+          h("div", { class:"info-body" }, it.q || "—")
+        ),
+        h("div", { class:"info-box" },
+          h("div", { class:"info-title" }, "🤖 Ответ ИИ"),
+          renderMd(it.a || "")
+        )
+      )
+    ));
+  });
+
+  return box;
+}
+
+async function chatSettingsPane() {
+  const s = await api("/api/settings");
+  const acc = s.account || {};
+  const box = h("div", {});
+
+  box.append(h("div", { class:"card" },
+    h("div", { class:"row", style:{gap:"12px", marginBottom:"10px"} },
+      renderAvatar(acc.avatar, "", openProfileEditor),
+      h("div", { class:"grow" },
+        h("div", { style:{fontWeight:800, fontSize:"1.05rem"} }, acc.name || "Артём"),
+        h("div", { class:"sub" },
+          acc.has_custom_key ? "🔑 Личный API-ключ: " + acc.masked_key : "☁️ Используется общий пул ключей")
+      )
+    ),
+    h("div", { class:"btn-row" },
+      h("button", { class:"btn ghost small", onclick: openProfileEditor }, "✏️ Имя, аватар и ключ"),
+      h("button", { class:"btn ghost small", onclick: openAccountSwitcher }, "🔄 Аккаунты"),
+      h("button", { class:"btn ghost small", onclick: openAppearanceSheet }, "🎨 Тема и шрифт")
+    )
+  ));
+
+  const modeSel = h("select", {}, [
+    ["detailed", "📚 Подробный и развёрнутый"],
+    ["short", "⚡ Кратко и по делу"]
+  ].map(([v, l]) => h("option", { value: v, selected: s.answer_mode === v }, l)));
+
+  const profileArea = h("textarea", { placeholder:"Кратко о себе (курс, направление, интересы)…" }, s.user_profile || "");
+  const instrArea = h("textarea", { placeholder:"Как ИИ должен отвечать (тон, язык, формат)…" }, s.custom_instructions || "");
+  const readmeArea = h("textarea", {
+    class:"readme-box",
+    placeholder:"# Персональный README.md\nСюда можно вставить полное досье об аккаунте — ИИ знает его с первого сообщения."
+  }, s.user_readme || "");
+
+  const readmeFileInp = h("input", {
+    type:"file", accept:".md,.txt", class:"hidden",
+    onchange: (e) => {
+      const f = e.target.files && e.target.files[0];
+      if (!f) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        readmeArea.value = String(reader.result || "");
+        toast("README загружен из файла 📄", "ok");
+      };
+      reader.readAsText(f, "utf-8");
+    }
+  });
+
+  box.append(h("div", { class:"card stack" },
+    field("Режим ответов", modeSel),
+    field("О пользователе", profileArea),
+    field("Кастомные инструкции", instrArea),
+    h("div", { class:"field" },
+      h("div", { class:"row between" },
+        h("label", {}, "📄 Досье профиля (README.md)"),
+        h("label", { class:"chip", style:{cursor:"pointer"} }, "📂 Загрузить .md", readmeFileInp)
+      ),
+      readmeArea
+    ),
+    h("button", { class:"btn block", onclick: async (e) => {
+      e.target.disabled = true;
+      try {
+        await api("/api/settings", {
+          method:"POST",
+          body: {
+            answer_mode: modeSel.value,
+            user_profile: profileArea.value,
+            custom_instructions: instrArea.value,
+            user_readme: readmeArea.value
+          }
+        });
+        pick("success"); toast("Настройки сохранены ✅", "ok");
+      } catch (err) { toast(err.message, "err"); }
+      e.target.disabled = false;
+    }}, "💾 Сохранить настройки")
+  ));
+
+  if (s.keys && s.keys.length) {
+    box.append(h("h2", {}, "Состояние пула API-ключей"));
+    s.keys.forEach(line => {
+      box.append(h("div", { class:"key-card mono" }, line));
+    });
+  }
+
+  return box;
+}
+
+/* =========================================================
+   VIEWS ROUTER & INITIAL BOOT
+   ========================================================= */
+const VIEWS = {
+  home: viewHome,
+  tt: viewTT,
+  tasks: viewTasks,
+  study: viewStudy,
+  chat: viewChat
+};
+
+async function boot() {
+  drawNav();
+  try {
+    S.me = await api("/api/me");
+    if (S.me && S.me.account && S.me.account.id) {
+      setActiveAccountId(S.me.account.id);
+    }
+    S.today = (S.me && S.me.now ? S.me.now.slice(0, 10) : "") || iso(new Date());
+    if (!S.ttDate) S.ttDate = S.today;
+    await render();
+  } catch (e) {
+    document.getElementById("view").replaceChildren(
+      h("div", { class:"card" },
+        h("h3", {}, "Ошибка подключения"),
+        h("p", { class:"sub", style:{marginTop:"6px"} }, e.message),
+        h("button", { class:"btn block", style:{marginTop:"12px"}, onclick: boot }, "🔄 Повторить")
+      )
+    );
+  }
+}
+
+boot();
+</script>
+</body>
+</html>
