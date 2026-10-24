@@ -212,6 +212,100 @@ def _guest_has_own_key(uid: int) -> bool:
     return False
 
 
+GUEST_FILE = "guests.json"      # личные расписание и карточки гостей: {tg_id: {"timetable": {...}, "study": {...}}}
+GUESTS: dict = {}
+_GUEST_LOCK = asyncio.Lock()
+
+
+def _load_guests() -> None:
+    GUESTS.clear()
+    GUESTS.update(core.load_json(GUEST_FILE, {}) or {})
+
+
+def _save_guests() -> None:
+    core.save_json(GUEST_FILE, GUESTS)
+
+
+def guest_error(user: dict):
+    """None, если можно работать; иначе ответ-ошибка (гость без своего ключа не должен тратить ключи владельца)."""
+    uid = int(user.get("id") or 0)
+    if is_user_admin(uid):
+        return None
+    if not _guest_has_own_key(uid):
+        return web.json_response({"error": "Подключите свой ключ Gemini в настройках приложения"}, status=403)
+    return None
+
+
+class plugin_ctx:
+    """Подменяет состояние расписания/карточек и пул ключей на личные для гостя. Владельцу ничего не меняет."""
+
+    def __init__(self, user: dict):
+        self.uid = int(user.get("id") or 0)
+        self.guest = not is_user_admin(self.uid)
+        self.saved = []
+        self.pool = None
+
+    async def __aenter__(self):
+        if not self.guest:
+            return self
+        await _GUEST_LOCK.acquire()
+        try:
+            slot = GUESTS.setdefault(str(self.uid), {})
+            for name, key in (("ext_timetable", "timetable"), ("ext_study", "study")):
+                m = mod(name)
+                if m is None:
+                    continue
+                state = slot.get(key)
+                if not isinstance(state, dict):
+                    state = m.default_state()
+                    slot[key] = state
+                self.saved.append((m, m.ST, m.save))
+                m.ST = state
+                m.save = _save_guests
+            acc = next((a for a in ensure_accounts_store().values() if int(a.get("tg_id") or 0) == self.uid), None)
+            user_pool, is_custom = get_account_pool(acc) if acc else (None, False)
+            if user_pool is not None and is_custom:
+                self.pool = core.pool
+                core.pool = user_pool
+        except BaseException:
+            await self.__aexit__(None, None, None)
+            raise
+        return self
+
+    async def __aexit__(self, *exc):
+        if not self.guest:
+            return False
+        try:
+            for m, st, sv in self.saved:
+                m.ST, m.save = st, sv
+            if self.pool is not None:
+                core.pool = self.pool
+        finally:
+            if _GUEST_LOCK.locked():
+                _GUEST_LOCK.release()
+        return False
+
+
+def _primary_account() -> dict:
+    return next(iter(ensure_accounts_store().values()))
+
+
+_SYNC_KEYS = ("user_profile", "custom_instructions", "user_readme", "answer_mode", "media_enabled",
+              "preferred_model", "model_fallback")
+
+
+def finish_account(acc: dict) -> None:
+    """После обработки события гостя: сохранить его настройки в его аккаунт и вернуть глобальные значения владельцу."""
+    if not acc or is_primary_account(acc["id"]):
+        return
+    s = core.USER_SETTINGS
+    for k in _SYNC_KEYS:
+        if k in s:
+            acc[k] = s[k]
+    core.save_json(core.SETTINGS_FILE, s)
+    activate_account(_primary_account())
+
+
 def activate_account(acc: dict) -> None:
     global ACTIVE_ACCOUNT_ID
     if not acc:
@@ -535,10 +629,16 @@ async def api_account_save(request, user):
 
 
 async def api_home(request, user):
+    err = guest_error(user)
+    if err is not None:
+        return err
+    async with plugin_ctx(user):
+        return _home_body(user)
+
+
+def _home_body(user):
     out = {"today": None, "tasks": [], "cards_due": 0, "cards_total": 0, "parity": None}
     tt, st = mod("ext_timetable"), mod("ext_study")
-    if not is_user_admin(int(user.get("id") or 0)):
-        tt = st = None
     if tt:
         out["today"] = tt.day_payload(tt.today())
         out["parity"] = tt.parity_of(tt.today())
@@ -635,6 +735,8 @@ async def api_task_create(request, user):
         return {"error": "Введите текст задачи"}
 
     chat_id = int(body.get("chat_id") or user["id"])
+    if not is_primary_account(acc["id"]):
+        chat_id = int(user["id"])  # гость создаёт задачи только в своём личном чате
     topic_name = str(body.get("topic") or "").strip() or ("личное" if chat_id > 0 else "общая")
     thread_id = int(body.get("thread") or 0) or None
     deadline = str(body.get("deadline") or "").strip()
@@ -673,8 +775,11 @@ async def api_task_create(request, user):
 
 async def api_task_done(request, user):
     tid = int(request.match_info["id"])
+    acc = get_request_account(request, user)
     for t in core.TASKS["items"]:
         if t["id"] == tid and not t.get("done"):
+            if not is_primary_account(acc["id"]) and t.get("acc") != acc["id"]:
+                return {"ok": False}  # чужую задачу гость закрыть не может
             t["done"], t["done_at"] = True, time.time()
             core.cancel_notifications(tid)
             core.save_json(core.TASKS_FILE, core.TASKS)
@@ -1036,11 +1141,14 @@ async def compact_setup_bot_commands() -> None:
     await core.bot.set_my_commands(private, scope=BotCommandScopeAllPrivateChats())
 
 
-def owner_only(handler):
+def per_account(handler):
+    """Расписание, карточки и квиз: у владельца общие данные, у каждого гостя — свои."""
     async def inner(request, user):
-        if not is_user_admin(int(user.get("id") or 0)):
-            return web.json_response({"error": "Доступно только владельцу бота"}, status=403)
-        return await handler(request, user)
+        err = guest_error(user)
+        if err is not None:
+            return err
+        async with plugin_ctx(user):
+            return await handler(request, user)
     return inner
 
 
@@ -1049,7 +1157,7 @@ def mount(app: web.Application) -> None:
     app.router.add_get("/app", index)
     for method, path, handler in core.API_ROUTES:
         if getattr(handler, "__module__", "") in ("ext_timetable", "ext_study"):
-            handler = owner_only(handler)  # расписание и карточки принадлежат владельцу
+            handler = per_account(handler)  # у гостя — своё расписание и карточки
         app.router.add_route(method, path, wrap(handler))
     core.log.info("📱 Мини-приложение: /app (%d маршрутов API)", len(core.API_ROUTES))
 
@@ -1079,6 +1187,20 @@ def setup(c) -> None:
     core = c
     core.PLUGIN_PROMPT.append(prompt_hook)
     core.GUEST_CHECK = _guest_has_own_key
+    core.STATE_FILES = tuple(core.STATE_FILES) + (GUEST_FILE,)
+    core.PLUGIN_LOADERS.append(_load_guests)
+
+    @core.dp.callback_query.outer_middleware()
+    async def _tg_account_cb_middleware(handler, event, data):
+        u = getattr(event, "from_user", None)
+        acc = None
+        if u and getattr(u, "id", None):
+            acc = get_or_create_account({"id": u.id, "first_name": u.first_name or ""})
+            activate_account(acc)
+        try:
+            return await handler(event, data)
+        finally:
+            finish_account(acc)
 
     core.get_reply_main_menu = compact_reply_main_menu
     orig_setup_cmds = core.setup_bot_commands
@@ -1088,6 +1210,16 @@ def setup(c) -> None:
         await compact_setup_bot_commands()
 
     core.setup_bot_commands = _patched_setup_cmds
+
+    @core.dp.message.outer_middleware()
+    async def _tg_account_finish_middleware(handler, event, data):
+        """Внешний слой: после сообщения гостя вернуть глобальные настройки владельцу."""
+        u = getattr(event, "from_user", None)
+        try:
+            return await handler(event, data)
+        finally:
+            if u and getattr(u, "id", None) and not is_user_admin(int(u.id)):
+                finish_account(get_or_create_account({"id": u.id, "first_name": u.first_name or ""}))
 
     @core.dp.message.outer_middleware()
     async def _tg_account_middleware(handler, event, data):
