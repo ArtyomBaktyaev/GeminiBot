@@ -1,0 +1,24 @@
+services:
+  - type: web
+    name: academic-gemini-bot
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python bot.py
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.7
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: GEMINI_KEYS
+        sync: false
+      - key: TARGET_CHAT_ID
+        sync: false
+      - key: ADMIN_IDS
+        sync: false
+      - key: GIST_ID
+        sync: false
+      - key: GIST_TOKEN
+        sync: false

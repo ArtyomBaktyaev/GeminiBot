@@ -1,0 +1,39 @@
+name: Run bot (on demand)
+
+# Ручной запуск: GitHub → Actions → "Run bot (on demand)" → Run workflow
+# (работает и из мобильного приложения GitHub).
+on:
+  workflow_dispatch:
+    inputs:
+      hours:
+        description: "Сколько часов держать бота запущенным (1-5)"
+        default: "5"
+
+# Новый запуск автоматически останавливает старый — два polling-процесса одновременно не будет.
+concurrency:
+  group: telegram-bot
+  cancel-in-progress: true
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Start bot
+        env:
+          HOURS: ${{ inputs.hours }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          GEMINI_KEYS: ${{ secrets.GEMINI_KEYS }}
+          TARGET_CHAT_ID: ${{ secrets.TARGET_CHAT_ID }}
+          ADMIN_IDS: ${{ secrets.ADMIN_IDS }}
+          GIST_ID: ${{ secrets.GIST_ID }}
+          GIST_TOKEN: ${{ secrets.GIST_TOKEN }}
+        run: |
+          [[ "$HOURS" =~ ^[1-5]$ ]] || HOURS=5
+          timeout "${HOURS}h" python bot.py || [ $? -eq 124 ]

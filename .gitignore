@@ -1,0 +1,6 @@
+.env
+*.tmp
+__pycache__/
+bot_cache/
+tasks.json
+user_settings.json
