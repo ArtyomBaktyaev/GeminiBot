@@ -2946,9 +2946,20 @@ async def setup_bot_commands() -> None:
 
 # Если задан ADMIN_IDS — любые кнопки от не-админов отклоняем (регистрируется ПЕРВЫМ)
 PUBLIC_CB_PREFIXES = ("dn_", "qz_")  # кнопки, доступные всем участникам группы
+# Кнопки меню настроек/задач, доступные гостю со своим ключом (опасные mg_/del_/ren_/td_ сюда не входят)
+GUEST_CB_PREFIXES = ("close_settings_btn", "view_all_settings_btn", "toggle_mode_btn", "open_tasks_btn",
+                     "task_refresh", "tk_g", "tk_t_", "tk_l_", "set_profile_btn", "set_prompt_btn",
+                     "manage_topics_btn", "back_to_main_settings", "media_")
+
+
+def _guest_cb_ok(c) -> bool:
+    return bool(GUEST_CHECK and GUEST_CHECK(c.from_user.id)
+                and (c.data or "").startswith(GUEST_CB_PREFIXES))
 
 if ADMIN_IDS:
-    @dp.callback_query(lambda c: c.from_user.id not in ADMIN_IDS and not (c.data or "").startswith(PUBLIC_CB_PREFIXES))
+    @dp.callback_query(lambda c: c.from_user.id not in ADMIN_IDS
+                       and not (c.data or "").startswith(PUBLIC_CB_PREFIXES)
+                       and not _guest_cb_ok(c))
     async def cb_denied(call: types.CallbackQuery):
         await call.answer("⛔ Недостаточно прав", show_alert=True)
 
