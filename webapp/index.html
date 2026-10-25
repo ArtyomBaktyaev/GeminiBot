@@ -762,21 +762,105 @@ details.acc .content{padding:0 14px 12px}
 .theme-swatch{width:18px;height:18px;border-radius:50%;flex:none}
 
 /* =========================================================
-   GROWTH LAYER: тема «Чернила» + блок серии/уровня
+   GROWTH TAB: EDITORIAL BENTO + LIVING COMPANION AESTHETIC
    ========================================================= */
-[data-theme="ink"]{--bg:#0b0b0a;--surface:#13120f;--surface-2:#1a1814;--surface-3:#23211c;--glass:rgba(11,11,10,.92);
-  --text:#ece8df;--text-2:#8c877b;--text-3:#6b665c;--accent:#d7ff3f;--accent-2:#b8e02a;--accent-text:#0b0b0a;
-  --accent-soft:rgba(215,255,63,.13);--accent-soft-2:rgba(215,255,63,.06);--line:rgba(236,232,223,.09);--line-2:rgba(236,232,223,.16);
-  --radius:14px;--radius-lg:18px;--radius-xl:22px}
-[data-theme="ink"] h1,[data-theme="ink"] h2,[data-theme="ink"] h3{font-family:Georgia,"Iowan Old Style",serif;font-style:italic;font-weight:400;letter-spacing:0}
-[data-theme="ink"] nav .ic{display:none}[data-theme="ink"] nav button{font-family:Georgia,serif;font-style:italic;font-size:15px}
-.gr-hero{display:flex;align-items:center;gap:20px;padding:6px 2px 14px}.gr-tree{width:104px;flex:none;color:var(--text-3)}.gr-tree.w{filter:grayscale(1);opacity:.5}
-.gr-big{font:italic 400 76px/.9 Georgia,serif;color:var(--accent)}.gr-cap{color:var(--text-2);font-size:.82rem}
-.gr-dots{display:flex;gap:8px;margin:8px 0 4px}.gr-dots i{flex:0 0 28px;height:4px;border-radius:2px;background:var(--line-2)}.gr-dots i.f{background:var(--accent)}
-.gr-line{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:11px 0;border-bottom:1px solid var(--line)}.gr-line.me{color:var(--accent)}
-.gr-flip{font:italic 28px/1.25 Georgia,serif;text-align:center;padding:64px 12px;border:1px solid var(--line-2);border-radius:var(--radius-xl);margin:12px 0;min-height:180px}.gr-flip.b{color:var(--accent)}
-.gr-q{font:italic 21px/1.35 Georgia,serif;margin:10px 0}.gr-pre{white-space:pre-wrap;margin:12px 0}
-.gr-opt{display:block;width:100%;text-align:left;margin-top:8px}
+nav button .ic svg{width:21px;height:21px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;display:block}
+nav button.on .ic svg{stroke:var(--accent);filter:drop-shadow(0 2px 8px var(--accent-soft))}
+
+.g-shell{display:flex;flex-direction:column;gap:14px;animation:gFade .28s var(--ease)}
+@keyframes gFade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+
+.g-editorial-hero{
+  position:relative;overflow:hidden;
+  border-radius:var(--radius-xl);
+  background:radial-gradient(120% 110% at 85% 10%, rgba(163,230,53,0.16) 0%, rgba(16,185,129,0.08) 45%, var(--surface) 100%);
+  border:1px solid var(--line-2);
+  padding:clamp(16px,4.2vw,22px);
+  box-shadow:var(--shadow);
+}
+.g-editorial-hero.at-risk{
+  background:radial-gradient(120% 110% at 85% 10%, rgba(245,158,11,0.22) 0%, rgba(239,68,68,0.10) 48%, var(--surface) 100%);
+  border-color:rgba(245,158,11,0.45);
+}
+.g-hero-grid{display:grid;grid-template-columns:1.15fr 0.85fr;gap:12px;align-items:center}
+@media (max-width:380px){.g-hero-grid{grid-template-columns:1fr}}
+
+.g-kicker{
+  font-size:0.7rem;font-weight:800;letter-spacing:.12em;text-transform:uppercase;
+  color:#a3e635;display:inline-flex;align-items:center;gap:6px;
+}
+.g-editorial-hero.at-risk .g-kicker{color:var(--warn)}
+.g-big-streak{
+  font-size:clamp(2.5rem,9vw,3.6rem);font-weight:900;line-height:0.95;
+  letter-spacing:-.04em;margin:6px 0 4px;display:flex;align-items:baseline;gap:8px;
+}
+.g-big-streak small{font-size:0.95rem;font-weight:700;color:var(--text-2);letter-spacing:0}
+
+.g-companion-stage{
+  position:relative;height:158px;display:flex;align-items:center;justify-content:center;
+  cursor:pointer;user-select:none;
+}
+.g-companion-stage svg{width:156px;height:156px;overflow:visible;transition:transform .3s var(--ease)}
+.g-companion-stage:active svg{transform:scale(0.93)}
+.g-float-island{animation:gIslandFloat 4s ease-in-out infinite}
+@keyframes gIslandFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}
+.g-sparkle{animation:gPulseGlow 2.4s ease-in-out infinite}
+@keyframes gPulseGlow{0%,100%{opacity:.35;transform:scale(0.9)}50%{opacity:1;transform:scale(1.15)}}
+
+.g-xp-strip{
+  margin-top:14px;padding-top:12px;border-top:1px solid var(--line);
+  display:flex;flex-direction:column;gap:6px;
+}
+.g-xp-bar{height:6px;border-radius:999px;background:var(--surface-3);overflow:hidden}
+.g-xp-bar i{display:block;height:100%;background:linear-gradient(90deg,#a3e635,#10b981);border-radius:inherit;transition:width .5s var(--ease)}
+
+.g-bento-row{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.g-bento-cell{
+  background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);
+  padding:11px 10px;display:flex;flex-direction:column;justify-content:space-between;
+}
+.g-bento-cell .lbl{font-size:0.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3)}
+.g-bento-cell .val{font-size:1.25rem;font-weight:900;letter-spacing:-.02em;margin-top:4px}
+
+.g-sec-head{
+  display:flex;align-items:baseline;justify-content:space-between;gap:8px;
+  margin:8px 2px 2px;padding-bottom:6px;border-bottom:1px solid var(--line);
+}
+.g-sec-head h2{margin:0;font-size:1.05rem;font-weight:900;letter-spacing:-.02em}
+.g-sec-head .num{font-family:ui-monospace,Menlo,monospace;font-size:0.75rem;color:var(--text-3);font-weight:700}
+
+.g-quest-list{display:flex;flex-direction:column;gap:8px}
+.g-quest-item{
+  display:flex;align-items:center;gap:12px;padding:12px 14px;
+  background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);
+  cursor:pointer;transition:.18s var(--ease);
+}
+.g-quest-item:hover{border-color:var(--line-2)}
+.g-quest-item.done{background:rgba(16,185,129,0.07);border-color:rgba(16,185,129,0.28)}
+.g-quest-check{
+  width:24px;height:24px;border-radius:50%;border:2px solid var(--line-3);
+  display:grid;place-items:center;flex:none;font-size:0.8rem;font-weight:900;
+}
+.g-quest-item.done .g-quest-check{background:var(--ok);border-color:var(--ok);color:#042f1e}
+
+.g-habit-card{
+  background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);
+  padding:12px 14px;display:flex;flex-direction:column;gap:9px;
+}
+.g-heat-dots{display:grid;grid-template-columns:repeat(14,1fr);gap:4px}
+.g-heat-dot{
+  height:14px;border-radius:4px;background:var(--surface-3);
+  border:1px solid var(--line);transition:.2s var(--ease);
+}
+.g-heat-dot.on{background:#a3e635;border-color:#84cc16;box-shadow:0 0 8px rgba(163,230,53,0.35)}
+.g-heat-dot.today{outline:1.5px solid var(--text-2);outline-offset:1px}
+
+.g-rank-row{
+  display:flex;align-items:center;gap:10px;padding:10px 12px;
+  border-radius:var(--radius);background:var(--surface);border:1px solid var(--line);
+}
+.g-rank-row.me{border-color:#a3e635;background:rgba(163,230,53,0.08)}
+.g-rank-pos{width:26px;font-weight:900;font-family:ui-monospace,Menlo,monospace;color:var(--text-2);text-align:center}
 </style>
 </head>
 <body>
@@ -1293,23 +1377,35 @@ function currentChatList() {
   return S.chatsByAcc[aid];
 }
 
+const NAV_SVGS = {
+  home: '<svg viewBox="0 0 24 24"><path d="M3 10.5L12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1v-9.5z"/></svg>',
+  tt: '<svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="17" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>',
+  tasks: '<svg viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>',
+  study: '<svg viewBox="0 0 24 24"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>',
+  growth: '<svg viewBox="0 0 24 24"><path d="M12 2v20"/><path d="M17 7c-3 0-5 2-5 5 0-3-2-5-5-5"/><path d="M19 13c-4 0-7 3-7 7 0-4-3-7-7-7"/><circle cx="12" cy="5" r="2"/></svg>',
+  chat: '<svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>'
+};
+
 const TABS = [
-  ["home","🏠","Главная"],
-  ["tt","📅","Пары"],
-  ["tasks","📋","Задачи"],
-  ["study","🧠","Учёба"],
-  ["grow","🌱","Рост"],
-  ["chat","💬","Чат"],
+  ["home", "Главная"],
+  ["tt", "Пары"],
+  ["tasks", "Задачи"],
+  ["study", "Учёба"],
+  ["growth", "Рост"],
+  ["chat", "Чат"],
 ];
+
 function drawNav() {
   const nav = document.getElementById("nav");
-  nav.replaceChildren(...TABS.map(([id, ic, label]) =>
-    h("button", { class: S.tab === id ? "on" : "", onclick: () => {
+  nav.replaceChildren(...TABS.map(([id, label]) => {
+    const icSpan = h("span", { class:"ic" });
+    icSpan.innerHTML = NAV_SVGS[id] || "⚡";
+    return h("button", { class: S.tab === id ? "on" : "", onclick: () => {
       if (S.tab === id) { window.scrollTo({top:0,behavior:"smooth"}); return; }
       hap(); S.tab = id; drawNav(); render();
       window.scrollTo({top:0});
-    }},
-      h("span", { class:"ic" }, ic), label)));
+    }}, icSpan, label);
+  }));
 }
    
 async function render() {
@@ -3382,123 +3478,802 @@ async function chatSettingsPane() {
    ========================================================= */
 
 /* =========================================================
-   GROWTH: серия, XP, квест, цели, дневник, ИИ, план, дуэли, группа
+   GROWTH (РОСТ): ЖИВОЙ ОСТРОВ, КВЕСТ, ИИ-КОНСПЕКТ, ПРИВЫЧКИ,
+   ПЛАН «СДАТЬ ЗА N ДНЕЙ», ДУЭЛИ, СТОРИС-КАРТОЧКИ И ЛИДЕРБОРД
    ========================================================= */
-const G = { sub: "me", st: null };
-const gapi = (p, body, method) => api("/api/g" + p, { method: method || (body ? "POST" : "GET"), body });
-const gTree = (lv) => { let n = Math.min(lv + 3, 13), s = '<svg viewBox="0 0 120 120"><path d="M60 118V56" stroke="currentColor" stroke-width="3" fill="none"/>';
-  for (let i = 0; i < n; i++) { const a = i * 2.4, r = 7 + i * 3.4; s += `<circle cx="${60 + Math.cos(a) * r * 1.2}" cy="${60 - i * 3.7 + Math.sin(a) * 6}" r="${5 + i % 3 * 2}" fill="#d7ff3f" opacity="${.45 + .55 * i / n}"/>`; }
-  return s + "</svg>"; };
-async function gHero() {
-  const s = G.st = await gapi("/state"), t = h("div", { class: "gr-tree" + (s.risk ? " w" : "") }); t.innerHTML = gTree(s.level);
-  return h("div", { class: "card" }, h("div", { class: "gr-hero" }, t, h("div", {},
-    h("div", { class: "gr-big" }, s.streak), h("div", { class: "gr-cap" }, s.risk ? "серия под угрозой" : "дней подряд"),
-    h("div", { class: "gr-cap" }, "уровень " + s.level + " · " + s.xp + " xp" + (s.freeze ? " · заморозка ×" + s.freeze : "")))),
-    h("div", { class: "gr-cap" }, "Квест на 3 минуты"), h("div", { class: "gr-dots" }, [0, 1, 2].map(i => h("i", { class: s.done || i < s.flags.length ? "f" : "" }))),
-    h("div", { class: "gr-cap" }, s.done ? "Выполнен — серия засчитана." : "Любые три действия: карточки, вопрос ИИ, задача, цель, дневник."));
+S.growthSub = "hub"; // hub | ai | social
+
+function buildCompanionSvg(stage, atRisk, streak) {
+  const wrap = h("div", { class:"g-companion-stage", title:"Нажми на остров!" });
+  const leafColor = atRisk ? "#f59e0b" : "#a3e635";
+  const leafDark = atRisk ? "#d97706" : "#10b981";
+  const glowColor = atRisk ? "rgba(245,158,11,0.28)" : "rgba(163,230,53,0.28)";
+  const canopyScale = Math.min(1.25, 0.55 + stage * 0.13);
+
+  wrap.innerHTML = `
+  <svg viewBox="0 0 200 200" class="g-float-island">
+    <defs>
+      <radialGradient id="gOrb" cx="50%" cy="45%" r="50%">
+        <stop offset="0%" stop-color="${glowColor}"/>
+        <stop offset="100%" stop-color="transparent"/>
+      </radialGradient>
+      <linearGradient id="gIsland" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#334155"/>
+        <stop offset="100%" stop-color="#0f172a"/>
+      </linearGradient>
+    </defs>
+    <circle cx="100" cy="95" r="78" fill="url(#gOrb)"/>
+    <!-- Парящий био-остров -->
+    <path d="M40 135 Q100 152 160 135 L138 168 Q100 182 62 168 Z" fill="url(#gIsland)" stroke="rgba(255,255,255,0.15)" stroke-width="1.5"/>
+    <ellipse cx="100" cy="135" rx="60" ry="12" fill="${leafDark}" opacity="0.85"/>
+    <!-- Ствол и ветви -->
+    <path d="M100 136 Q96 105 100 ${112 - stage * 7}" stroke="#cbd5e1" stroke-width="${3 + stage}" stroke-linecap="round" fill="none"/>
+    ${stage >= 2 ? `<path d="M100 112 Q82 98 74 88" stroke="#cbd5e1" stroke-width="3" stroke-linecap="round" fill="none"/>` : ""}
+    ${stage >= 3 ? `<path d="M100 106 Q118 92 128 82" stroke="#cbd5e1" stroke-width="3" stroke-linecap="round" fill="none"/>` : ""}
+    <!-- Крона дерева -->
+    <g transform="translate(100, ${96 - stage * 5}) scale(${canopyScale})">
+      <circle cx="0" cy="0" r="24" fill="${leafDark}" opacity="0.9"/>
+      <circle cx="-16" cy="6" r="18" fill="${leafColor}" opacity="0.85"/>
+      <circle cx="16" cy="6" r="18" fill="${leafColor}" opacity="0.85"/>
+      ${stage >= 3 ? `<circle cx="0" cy="-16" r="19" fill="${leafColor}"/>` : ""}
+      ${stage >= 5 ? `<circle cx="0" cy="-24" r="8" fill="#ffffff" class="g-sparkle"/>` : ""}
+    </g>
+    <!-- Светлячки или грозовая туча при риске сгорания -->
+    ${atRisk ? `
+      <g opacity="0.92">
+        <path d="M70 42 Q85 28 105 34 Q125 28 135 44 Q145 52 130 58 L72 58 Q58 50 70 42 Z" fill="#475569"/>
+        <path d="M98 58 L90 72 L100 72 L94 86" stroke="#f59e0b" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+      </g>
+    ` : `
+      <circle cx="62" cy="72" r="3" fill="#a3e635" class="g-sparkle"/>
+      <circle cx="140" cy="66" r="2.5" fill="#38bdf8" class="g-sparkle"/>
+      <circle cx="128" cy="108" r="2" fill="#a3e635" class="g-sparkle"/>
+    `}
+  </svg>`;
+
+  wrap.addEventListener("click", () => {
+    hap("medium");
+    toast(atRisk
+      ? "🌧 Остров ждёт! Закрой 3-минутный квест, чтобы туча ушла."
+      : `🌱 Стадия ${stage}/6 · Серия ${streak} дн. Продолжай в том же духе!`, "ok");
+  });
+  return wrap;
 }
-const _viewHome = viewHome;
-viewHome = async function () { const n = await _viewHome(); try { n.prepend(await gHero()); } catch (e) {} return n; };
 
-const gBack = () => h("button", { class: "btn ghost small", onclick: () => { G.sub = "me"; render(); } }, "← назад");
-const gShrink = f => new Promise(r => { const i = new Image(); i.onload = () => { const k = Math.min(1, 1280 / Math.max(i.width, i.height)), c = h("canvas"); c.width = i.width * k; c.height = i.height * k; c.getContext("2d").drawImage(i, 0, 0, c.width, c.height); r(c.toDataURL("image/jpeg", .75)); }; i.src = URL.createObjectURL(f); });
+async function generateStoryCardModal(st) {
+  sheet("📸 Шэр-карточка для Сторис", (close) => {
+    const canvas = h("canvas", {
+      width: 1080, height: 1920,
+      style: { width:"100%", maxWidth:"310px", borderRadius:"18px", border:"1px solid var(--line-2)", display:"block", margin:"0 auto" }
+    });
+    const ctx = canvas.getContext("2d");
 
-async function viewGrow() {
-  const root = h("div", {}), hero = await gHero(), s = G.st, sb = G.sub;
-  if (sb.startsWith("play:")) return gPlay(sb.slice(5));
-  if (sb === "duelnew") return gDuelNew();
-  root.append(hero, seg([["me", "Прогресс"], ["ai", "ИИ"], ["plan", "План"], ["duel", "Дуэль"], ["grp", "Группа"]], sb, id => { G.sub = id; render(); }));
-  if (sb === "me") root.append(await gGoals(s));
-  else if (sb === "ai") root.append(gAsk());
-  else if (sb === "plan") root.append(gPlan(s));
-  else if (sb === "duel") root.append(h("div", { class: "card" }, h("h3", {}, "Дуэль знаний"), h("p", { class: "sub" }, "ИИ делает 5 вопросов по теме, вы отправляете ссылку другу — побеждает тот, кто ответил лучше."),
-    h("button", { class: "btn block", style: { marginTop: "12px" }, onclick: () => { G.sub = "duelnew"; render(); } }, "Создать дуэль")));
-  else root.append(await gGroup(s));
+    // 1. Фон Editorial Cyber-Botanical
+    const grad = ctx.createLinearGradient(0, 0, 1080, 1920);
+    grad.addColorStop(0, "#070b12");
+    grad.addColorStop(0.5, "#0f1f1c");
+    grad.addColorStop(1, "#06080e");
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, 1080, 1920);
+
+    // Световое пятно
+    const rad = ctx.createRadialGradient(540, 620, 40, 540, 620, 520);
+    rad.addColorStop(0, "rgba(163, 230, 53, 0.28)");
+    rad.addColorStop(1, "transparent");
+    ctx.fillStyle = rad;
+    ctx.fillRect(0, 0, 1080, 1920);
+
+    // Рамка тонкая редакционная
+    ctx.strokeStyle = "rgba(255,255,255,0.14)";
+    ctx.lineWidth = 3;
+    ctx.strokeRect(64, 64, 952, 1792);
+
+    // Верхний колонтитул
+    ctx.fillStyle = "#a3e635";
+    ctx.font = "800 34px -apple-system, BlinkMacSystemFont, sans-serif";
+    ctx.fillText("DAILY GROWTH PROTOCOL // " + st.today, 120, 155);
+
+    // Имя пользователя
+    ctx.fillStyle = "#f8fafc";
+    ctx.font = "900 64px -apple-system, BlinkMacSystemFont, sans-serif";
+    ctx.fillText((st.name || "Игрок").toUpperCase(), 120, 245);
+
+    // Живое дерево в центре
+    ctx.save();
+    ctx.translate(540, 660);
+    ctx.fillStyle = "#1e293b";
+    ctx.beginPath();
+    ctx.ellipse(0, 140, 220, 55, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#10b981";
+    ctx.beginPath();
+    ctx.arc(0, -20, 130, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#a3e635";
+    ctx.beginPath();
+    ctx.arc(-70, 10, 95, 0, Math.PI * 2);
+    ctx.arc(70, 10, 95, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#e2e8f0";
+    ctx.fillRect(-14, 10, 28, 135);
+    ctx.restore();
+
+    // Огромная цифра серии
+    ctx.fillStyle = "#a3e635";
+    ctx.font = "900 250px -apple-system, BlinkMacSystemFont, sans-serif";
+    ctx.fillText(String(st.streak) + "🔥", 115, 1190);
+
+    ctx.fillStyle = "#94a3b8";
+    ctx.font = "700 44px -apple-system, BlinkMacSystemFont, sans-serif";
+    ctx.fillText("ДНЕЙ БЕЗ ПРОПУСКОВ · " + (st.companion ? st.companion.title.toUpperCase() : ""), 120, 1265);
+
+    // Плашки Уровня и XP
+    ctx.fillStyle = "rgba(255,255,255,0.06)";
+    ctx.fillRect(120, 1340, 840, 210);
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "900 68px -apple-system, BlinkMacSystemFont, sans-serif";
+    ctx.fillText(`УРОВЕНЬ ${st.level}  ·  ${st.xp} XP`, 165, 1445);
+    ctx.fillStyle = "#a3e635";
+    ctx.font = "600 36px -apple-system, BlinkMacSystemFont, sans-serif";
+    ctx.fillText(`Активных привычек: ${(st.goals || []).length}  |  Заморозок: ❄️ ${st.freeze}`, 165, 1510);
+
+    // Подвал с ботом
+    ctx.fillStyle = "#64748b";
+    ctx.font = "700 34px -apple-system, BlinkMacSystemFont, sans-serif";
+    ctx.fillText(st.bot ? "@" + st.bot : "Telegram Mini App · Академический Ассистент", 120, 1785);
+
+    return h("div", {},
+      canvas,
+      h("div", { class:"btn-row", style:{marginTop:"14px"} },
+        h("button", {
+          class:"btn ghost",
+          onclick: () => {
+            const link = document.createElement("a");
+            link.download = `streak-${st.streak}-days.png`;
+            link.href = canvas.toDataURL("image/png");
+            link.click();
+            toast("Картинка сохранена 📥", "ok");
+          }
+        }, "⬇️ Скачать PNG"),
+        h("button", {
+          class:"btn",
+          onclick: async () => {
+            canvas.toBlob(async (blob) => {
+              if (!blob) return;
+              const file = new File([blob], "streak.png", { type: "image/png" });
+              if (navigator.canShare && navigator.canShare({ files: [file] })) {
+                try {
+                  await navigator.share({
+                    files: [file],
+                    title: `Моя серия: ${st.streak} дн.`,
+                    text: `🔥 Моя серия — ${st.streak} дн. (Уровень ${st.level}, ${st.xp} XP)!`
+                  });
+                  return;
+                } catch (e) {}
+              }
+              const link = document.createElement("a");
+              link.download = `streak-${st.streak}-days.png`;
+              link.href = canvas.toDataURL("image/png");
+              link.click();
+              toast("Скачано! Выложи в сторис 📸", "ok");
+            }, "image/png");
+          }
+        }, "📲 Поделиться в Сторис")
+      )
+    );
+  });
+}
+
+async function openDuelModal(duelId) {
+  let d;
+  try { d = await api("/api/g/duel/" + encodeURIComponent(duelId)); }
+  catch (e) { return toast(e.message, "err"); }
+
+  sheet("⚔️ Дуэль: " + d.topic, (close) => {
+    const box = h("div", {});
+    const qs = d.qs || [];
+    const answers = [];
+    let idx = 0;
+
+    const botLink = S.growthBot
+      ? `https://t.me/${S.growthBot}?startapp=duel_${duelId}`
+      : location.origin + `/app?duel=${duelId}`;
+
+    const renderResults = (resList, myScore) => {
+      box.replaceChildren(
+        h("div", { class:"card center" },
+          h("div", { style:{fontSize:"42px"} }, "⚔️"),
+          h("h2", { style:{margin:"6px 0"} }, myScore != null ? `Твой счёт: ${myScore} из ${qs.length}` : "Таблица дуэли"),
+          h("div", { class:"sub" }, "Код дуэли: "),
+          h("span", { class:"chip mono", style:{marginTop:"4px"} }, duelId)
+        ),
+        h("div", { class:"stack", style:{marginBottom:"14px"} },
+          ...(resList || []).map((r, i) =>
+            h("div", { class:"g-rank-row" },
+              h("span", { class:"g-rank-pos" }, "#" + (i + 1)),
+              h("span", { class:"grow", style:{fontWeight:700} }, r.name),
+              h("span", { class:"chip green" }, r.score + " / " + (r.total || 5))
+            )
+          )
+        ),
+        h("div", { class:"btn-row" },
+          h("button", {
+            class:"btn",
+            onclick: () => {
+              const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(botLink)}&text=${encodeURIComponent("⚔️ Вызываю тебя на дуэль знаний по теме «" + d.topic + "»! Код: " + duelId)}`;
+              if (tg && tg.openTelegramLink) tg.openTelegramLink(shareUrl);
+              else window.open(shareUrl, "_blank");
+            }
+          }, "📨 Бросить вызов другу"),
+          h("button", {
+            class:"btn ghost",
+            onclick: () => {
+              navigator.clipboard.writeText(duelId);
+              toast("Код " + duelId + " скопирован!", "ok");
+            }
+          }, "📋 Код: " + duelId)
+        )
+      );
+    };
+
+    if (d.played || !qs.length) {
+      renderResults(d.res, null);
+      return box;
+    }
+
+    const step = () => {
+      if (idx >= qs.length) {
+        box.replaceChildren(h("div", { class:"center sub", style:{padding:"24px"} }, "⏳ Подсчёт очков…"));
+        api("/api/g/duel/" + encodeURIComponent(duelId) + "/answer", {
+          method:"POST", body:{ a: answers }
+        }).then(r => {
+          pick("success");
+          renderResults(r.res, r.score);
+          render();
+        }).catch(err => toast(err.message, "err"));
+        return;
+      }
+      const q = qs[idx];
+      box.replaceChildren(
+        h("div", { class:"session-progress" },
+          h("span", {}, `Вопрос ${idx + 1} / ${qs.length}`),
+          h("div", { class:"bar" }, h("i", { style:{width: Math.round(100 * idx / qs.length) + "%"} }))
+        ),
+        h("div", { class:"card" },
+          h("div", { style:{fontWeight:800, fontSize:"1.02rem", marginBottom:"12px"} }, q.q),
+          h("div", { class:"stack" },
+            ...(q.a || []).map((opt, oi) =>
+              h("button", {
+                class:"btn ghost",
+                style:{justifyContent:"flex-start", textAlign:"left"},
+                onclick: () => { hap(); answers.push(oi); idx++; step(); }
+              }, opt)
+            )
+          )
+        )
+      );
+    };
+    step();
+    return box;
+  });
+}
+
+async function viewGrowth() {
+  const st = await api("/api/g/state");
+  S.growthBot = st.bot || "";
+  const comp = st.companion || { stage: 1, title: "Семя Импульса", desc: "" };
+  const root = h("div", { class:"g-shell" });
+
+  // 1. EDITORIAL HERO + ЖИВОЙ ОСТРОВ
+  root.append(
+    h("div", { class:"g-editorial-hero" + (st.risk ? " at-risk" : "") },
+      h("div", { class:"g-hero-grid" },
+        h("div", {},
+          h("div", { class:"g-kicker" },
+            st.risk ? "⚠️ СЕРИЯ ПОД УГРОЗОЙ" : `● СТАДИЯ ${comp.stage}/6 · ${comp.title}`),
+          h("div", { class:"g-big-streak" },
+            String(st.streak),
+            h("small", {}, st.done ? "дн. · квест закрыт 🔥" : "дн. подряд")
+          ),
+          h("div", { class:"sub", style:{marginTop:"4px"} },
+            st.risk
+              ? "Выполни 3 быстрых шага ниже до полуночи, чтобы спасти дерево и серию."
+              : comp.desc),
+          h("div", { class:"chips", style:{marginTop:"10px"} },
+            h("span", { class:"chip green" }, `⚡ Ур. ${st.level} (${st.xp} XP)`),
+            h("span", { class:"chip cyan" }, `❄️ Заморозок: ${st.freeze}`),
+            h("button", {
+              class:"chip purple",
+              onclick: () => generateStoryCardModal(st)
+            }, "📸 В Сторис")
+          )
+        ),
+        buildCompanionSvg(comp.stage, st.risk, st.streak)
+      ),
+      h("div", { class:"g-xp-strip" },
+        h("div", { class:"row between", style:{fontSize:"0.76rem", fontWeight:700} },
+          h("span", {}, `Прогресс до уровня ${st.level + 1}`),
+          h("span", { class:"mono" }, `${st.xp_in_level} / 100 XP`)
+        ),
+        h("div", { class:"g-xp-bar" }, h("i", { style:{width: st.xp_in_level + "%"} }))
+      )
+    )
+  );
+
+  // Переключатель режимов внутри вкладки Рост
+  root.append(seg([
+    ["hub", "🌱 Квест & Привычки"],
+    ["ai", "🧠 ИИ-Прокачка"],
+    ["social", "🏆 Лидерборд & Дуэли"]
+  ], S.growthSub, (id) => { hap(); S.growthSub = id; render(); }));
+
+  if (S.growthSub === "ai") {
+    root.append(renderGrowthAiPane(st));
+  } else if (S.growthSub === "social") {
+    root.append(await renderGrowthSocialPane(st));
+  } else {
+    root.append(renderGrowthHubPane(st));
+  }
+
   return root;
 }
 
-async function gGoals(s) {
-  const last = [...Array(14)].map((_, i) => { const d = new Date(); d.setDate(d.getDate() - 13 + i); return iso(d); });
-  const g = h("input", { placeholder: "Новая цель: спорт, английский, проект…" }), j = h("textarea", { placeholder: "Как прошёл день?" }), ai = h("p", { class: "sub", style: { marginTop: "10px" } }, s.journal[0] ? s.journal[0].ai : "");
-  return h("div", {}, h("div", { class: "card" }, h("h3", {}, "Цели"),
-    ...s.goals.map(x => h("div", { class: "gr-line" }, h("div", { class: "grow" }, x.name, h("div", { class: "gr-dots" }, last.map(d => h("i", { class: x.days.includes(d) ? "f" : "", style: { flexBasis: "14px" } })))),
-      h("button", { class: "btn small" + (x.days.includes(s.today) ? "" : " ghost"), onclick: async () => { await gapi("/goals/" + x.id + "/check", {}); hap(); render(); } }, "сегодня"),
-      h("button", { class: "btn small ghost", onclick: async () => { if (confirm("Удалить цель?")) { await gapi("/goals/" + x.id, null, "DELETE"); render(); } } }, "✕"))),
-    g, h("button", { class: "btn ghost small", style: { marginTop: "8px" }, onclick: async () => { if (!g.value.trim()) return; await gapi("/goals", { name: g.value }); render(); } }, "Добавить цель")),
-    h("div", { class: "card" }, h("h3", {}, "Дневник"), j, h("button", { class: "btn small", style: { marginTop: "8px" }, onclick: async e => { e.target.disabled = true;
-      try { ai.textContent = (await gapi("/journal", { text: j.value })).ai; j.value = ""; hap("medium"); } catch (x) { toast(x.message, "err"); } e.target.disabled = false; } }, "Записать"), ai));
+function renderGrowthHubPane(st) {
+  const box = h("div", { class:"g-shell" });
+
+  // ЕЖЕДНЕВНЫЙ КВЕСТ НА 3 МИНУТЫ
+  const doneCount = (st.quest || []).filter(q => q.done).length;
+  box.append(
+    h("div", { class:"g-sec-head" },
+      h("h2", {}, "Ежедневный квест на 3 минуты"),
+      h("span", { class:"num" }, `${doneCount}/3 ВЫПОЛНЕНО · +35 XP БОНУС`)
+    ),
+    h("div", { class:"g-quest-list" },
+      ...(st.quest || []).map(q =>
+        h("div", {
+          class: "g-quest-item" + (q.done ? " done" : ""),
+          onclick: () => {
+            hap();
+            S.tab = q.tab;
+            drawNav();
+            render();
+          }
+        },
+          h("div", { class:"g-quest-check" }, q.done ? "✓" : ""),
+          h("div", { class:"grow" },
+            h("div", { style:{fontWeight:700, fontSize:"0.94rem"} }, q.title),
+            h("div", { class:"sub" }, q.done ? "Засчитано сегодня" : "Нажми, чтобы перейти и выполнить")
+          ),
+          h("span", { class:"chip " + (q.done ? "green" : "gray") }, `+${q.xp} XP`)
+        )
+      ),
+      // Быстрый чекин посещения пар
+      h("div", {
+        class: "g-quest-item" + (st.lessons_checked ? " done" : ""),
+        onclick: async () => {
+          if (st.lessons_checked) return toast("Пары за сегодня уже отмечены ✅");
+          hap("medium");
+          await api("/api/g/checkin", { method:"POST" });
+          pick("success");
+          toast("Посещение пар отмечено! +15 XP 🎓", "ok");
+          render();
+        }
+      },
+        h("div", { class:"g-quest-check" }, st.lessons_checked ? "✓" : "🎓"),
+        h("div", { class:"grow" },
+          h("div", { style:{fontWeight:700, fontSize:"0.94rem"} }, "Был(а) сегодня на парах / учёбе"),
+          h("div", { class:"sub" }, st.lessons_checked ? "Чекин засчитан" : "Отметь посещение в 1 тап")
+        ),
+        h("span", { class:"chip " + (st.lessons_checked ? "green" : "cyan") }, "+15 XP")
+      )
+    )
+  );
+
+  // ЦЕЛИ И ПРИВЫЧКИ (МАТРИЦА 14 ДНЕЙ)
+  const last14 = Array.from({ length: 14 }, (_, i) => addDays(st.today, -(13 - i)));
+  const CAT_LABELS = {
+    body: "💪 Спорт",
+    mind: "🇬🇧 Языки & Учёба",
+    work: "💻 Проекты",
+    fin: "💎 Финансы"
+  };
+
+  box.append(
+    h("div", { class:"g-sec-head" },
+      h("h2", {}, "Цели и привычки (14 дней)"),
+      h("button", {
+        class:"chip",
+        onclick: () => {
+          sheet("➕ Новая привычка или цель", (close) => {
+            const nameInp = h("input", { type:"text", placeholder:"Напр., Зарядка, Читать 20 стр., LeetCode…" });
+            const catSel = h("select", {}, Object.entries(CAT_LABELS).map(([k, v]) => h("option", { value: k }, v)));
+            return h("div", { class:"stack" },
+              field("Название привычки", nameInp),
+              field("Сфера жизни", catSel),
+              h("button", {
+                class:"btn block",
+                onclick: async () => {
+                  if (!nameInp.value.trim()) return toast("Введите название", "err");
+                  await api("/api/g/goals", { method:"POST", body:{ name: nameInp.value.trim(), cat: catSel.value } });
+                  pick("success"); close(); render();
+                }
+              }, "Создать привычку")
+            );
+          });
+        }
+      }, "➕ Добавить")
+    )
+  );
+
+  if (!(st.goals || []).length) {
+    box.append(empty("🎯", "Привычек пока нет", "Добавь спорт, английский или пет-проект для ежедневного трекинга."));
+  } else {
+    st.goals.forEach(g => {
+      const doneToday = (g.days || []).includes(st.today);
+      box.append(
+        h("div", { class:"g-habit-card" },
+          h("div", { class:"row between" },
+            h("div", { class:"grow" },
+              h("div", { class:"row", style:{gap:"6px"} },
+                h("span", { style:{fontWeight:800, fontSize:"0.96rem"} }, g.name),
+                h("span", { class:"chip gray", style:{fontSize:"0.7rem", padding:"2px 7px"} }, CAT_LABELS[g.cat] || "🎯 Цель")
+              ),
+              h("div", { class:"sub" }, `Выполнено дней за 2 недели: ${(g.days || []).length}`)
+            ),
+            h("button", {
+              class: "btn small " + (doneToday ? "subtle" : ""),
+              onclick: async () => {
+                hap("medium");
+                await api("/api/g/goals/" + g.id + "/check", { method:"POST" });
+                render();
+              }
+            }, doneToday ? "✓ Сегодня" : "+10 XP"),
+            h("button", {
+              class:"btn ghost small icon",
+              onclick: async () => {
+                if (!confirm(`Удалить привычку «${g.name}»?`)) return;
+                await api("/api/g/goals/" + g.id, { method:"DELETE" });
+                render();
+              }
+            }, "✕")
+          ),
+          h("div", { class:"g-heat-dots" },
+            ...last14.map(dStr =>
+              h("div", {
+                class: "g-heat-dot" + ((g.days || []).includes(dStr) ? " on" : "") + (dStr === st.today ? " today" : ""),
+                title: dStr
+              })
+            )
+          )
+        )
+      );
+    });
+  }
+
+  // ВЕЧЕРНИЙ ДНЕВНИК С ИИ-РЕФЛЕКСИЕЙ
+  const jInp = h("textarea", { placeholder:"Что сегодня получилось круто? Что отняло энергию? Напиши пару мыслей…" });
+  const jReplyBox = h("div", {});
+
+  box.append(
+    h("div", { class:"g-sec-head" },
+      h("h2", {}, "Вечерний дневник & ИИ-рефлексия"),
+      h("span", { class:"num" }, "+12 XP")
+    ),
+    h("div", { class:"card stack" },
+      jInp,
+      h("button", {
+        class:"btn block",
+        onclick: async (ev) => {
+          const txt = jInp.value.trim();
+          if (!txt) return toast("Напиши хотя бы пару слов", "err");
+          ev.target.disabled = true;
+          ev.target.textContent = "⏳ ИИ анализирует запись…";
+          try {
+            const res = await api("/api/g/journal", { method:"POST", body:{ text: txt } });
+            pick("success");
+            jInp.value = "";
+            jReplyBox.replaceChildren(
+              h("div", { class:"info-box", style:{marginTop:"8px", borderColor:"#a3e635"} },
+                h("div", { class:"info-title" }, "✨ Отклик ментора"),
+                h("div", { class:"info-body" }, res.ai)
+              )
+            );
+            toast("Запись сохранена! +12 XP", "ok");
+          } catch (e) { toast(e.message, "err"); }
+          ev.target.disabled = false;
+          ev.target.textContent = "✨ Сохранить и получить рефлексию";
+        }
+      }, "✨ Сохранить и получить рефлексию"),
+      jReplyBox,
+      ...(st.journal || []).slice().reverse().slice(0, 2).map(j =>
+        h("div", { class:"info-box", style:{marginBottom:0} },
+          h("div", { class:"info-title" }, "📅 " + j.d),
+          h("div", { class:"sub", style:{marginBottom:"6px"} }, j.t),
+          h("div", { class:"info-body", style:{color:"#a3e635"} }, "💡 " + j.ai)
+        )
+      )
+    )
+  );
+
+  // УТРЕННИЙ БРИФИНГ И УВЕДОМЛЕНИЯ БОТА
+  box.append(
+    h("div", { class:"card row between wrap" },
+      h("div", { class:"grow" },
+        h("div", { style:{fontWeight:800} }, "🔔 Пуши и утренний брифинг в боте"),
+        h("div", { class:"sub" }, "08:00 — сводка пар и задач · 22:00 — защита серии от сгорания")
+      ),
+      h("div", { class:"row", style:{gap:"8px"} },
+        h("button", {
+          class:"btn ghost small",
+          onclick: async (ev) => {
+            ev.target.disabled = true;
+            try {
+              await api("/api/g/briefing", { method:"POST" });
+              pick("success"); toast("Брифинг отправлен в Telegram! 📬", "ok");
+            } catch (e) { toast(e.message, "err"); }
+            ev.target.disabled = false;
+          }
+        }, "📬 Тест в ТГ"),
+        h("button", {
+          class: "sw" + (st.notify ? " on" : ""),
+          onclick: async (ev) => {
+            ev.target.classList.toggle("on");
+            await api("/api/g/notify", { method:"POST" });
+          }
+        })
+      )
+    )
+  );
+
+  return box;
 }
 
-function gAsk() {
-  const ta = h("textarea", { placeholder: "Вопрос, тема или задача…" }), out = h("div"), fi = h("input", { type: "file", accept: "image/*", hidden: true });
-  let rec = null;
-  const send = async (kind, files) => { out.replaceChildren(h("p", { class: "sub" }, "думаю…"));
-    try { const r = await gapi("/snap", { kind, text: ta.value, files }); hap("medium");
-      out.replaceChildren(h("div", { class: "gr-pre" }, r.answer), r.cards.length ? h("button", { class: "btn ghost small", onclick: async e => { e.target.disabled = true;
-        for (const c of r.cards) await api("/api/cards", { method: "POST", body: { front: c.front, back: c.back, transcription: "", example: "" } });
-        e.target.remove(); toast("Карточки сохранены"); } }, "В карточки · " + r.cards.length) : null);
-    } catch (e) { out.replaceChildren(); toast(e.message, "err"); } };
-  fi.onchange = async () => { if (fi.files[0]) send("photo", [{ name: "photo.jpg", type: "image/jpeg", data: await gShrink(fi.files[0]) }]); };
-  const mic = async b => { if (rec) return rec.stop();
-    try { const st = await navigator.mediaDevices.getUserMedia({ audio: true }), ch = []; rec = new MediaRecorder(st);
-      rec.ondataavailable = e => ch.push(e.data);
-      rec.onstop = () => { st.getTracks().forEach(x => x.stop()); const bl = new Blob(ch, { type: rec.mimeType }); rec = null; b.textContent = "Голос";
-        const f = new FileReader(); f.onload = () => send("voice", [{ name: "lecture.webm", type: bl.type.split(";")[0], data: f.result }]); f.readAsDataURL(bl); };
-      rec.start(); b.textContent = "Стоп"; } catch (e) { toast("Нет доступа к микрофону", "err"); } };
-  return h("div", { class: "card" }, h("h3", {}, "Спросить ИИ"), ta, h("div", { class: "btn-row", style: { marginTop: "8px" } },
-    h("button", { class: "btn", onclick: () => send("ask") }, "Спросить"), h("button", { class: "btn ghost", onclick: () => fi.click() }, "Фото задачи"),
-    h("button", { class: "btn ghost", onclick: e => mic(e.target) }, "Голос")), fi, out);
+function renderGrowthAiPane(st) {
+  const box = h("div", { class:"g-shell" });
+
+  // 1. СФОТКАЛ КОНСПЕКТ / ЗАДАЧУ ИЛИ ЗАГРУЗИЛ ГОЛОСОВОЕ С ЛЕКЦИИ
+  let snapFiles = [];
+  let snapKind = "photo";
+  const fileLabel = h("span", {}, "📷 Выбрать фото задачи/конспекта или 🎤 аудио лекции");
+  const snapText = h("input", { type:"text", placeholder:"Доп. комментарий или тема (необязательно)…" });
+  const snapResult = h("div", {});
+
+  const snapInput = h("input", {
+    type:"file", accept:"image/*,audio/*,.ogg,.mp3,.m4a,.wav,.pdf", class:"hidden",
+    onchange: async (e) => {
+      if (!e.target.files || !e.target.files.length) return;
+      const f = e.target.files[0];
+      snapKind = (f.type || "").startsWith("audio/") || /\.(ogg|mp3|m4a|wav)$/i.test(f.name) ? "voice" : "photo";
+      snapFiles = await readFilesAsDataURL([f]);
+      fileLabel.textContent = (snapKind === "voice" ? "🎤 Аудио: " : "📷 Файл: ") + f.name;
+      toast("Файл готов к разбору", "ok");
+    }
+  });
+
+  box.append(
+    h("div", { class:"g-sec-head" },
+      h("h2", {}, "Сфоткал конспект / Голосовое с лекции"),
+      h("span", { class:"num" }, "РАЗБОР + КАРТОЧКИ + ТЕСТ")
+    ),
+    h("div", { class:"card stack" },
+      h("div", { class:"sub" },
+        "Загрузи фото доски/тетради или голосовое с пары — ИИ выдаст пошаговый разбор, сам добавит карточки в колоду «Учёба» и соберёт мини-тест."),
+      h("label", { class:"file-upload-zone" }, fileLabel, snapInput),
+      snapText,
+      h("button", {
+        class:"btn block",
+        onclick: async (ev) => {
+          if (!snapFiles.length && !snapText.value.trim()) {
+            return toast("Прикрепи фото/аудио или введи текст задачи", "err");
+          }
+          ev.target.disabled = true;
+          ev.target.textContent = "⏳ ИИ разбирает материал и создаёт карточки…";
+          try {
+            const r = await api("/api/g/snap", {
+              method:"POST",
+              body:{ kind: snapKind, text: snapText.value.trim(), files: snapFiles, save_cards: true }
+            });
+            pick("success");
+            snapResult.replaceChildren(
+              h("div", { class:"info-box", style:{marginTop:"10px"} },
+                h("div", { class:"row between wrap", style:{marginBottom:"8px"} },
+                  h("span", { class:"chip green" }, `🃏 Сохранено карточек: ${r.saved_cards || (r.cards || []).length}`),
+                  (r.quiz && r.quiz.length) ? h("button", {
+                    class:"btn small",
+                    onclick: () => runQuizModal({ title: r.title, questions: r.quiz })
+                  }, "🎯 Пройти тест по конспекту") : null
+                ),
+                renderMd(r.answer || "")
+              )
+            );
+            toast("Готово! Карточки добавлены в «Учёбу» 🎉", "ok");
+          } catch (e) { toast(e.message, "err"); }
+          ev.target.disabled = false;
+          ev.target.textContent = "🚀 Разобрать + создать карточки и тест";
+        }
+      }, "🚀 Разобрать + создать карточки и тест"),
+      snapResult
+    )
+  );
+
+  // 2. РЕЖИМ «СДАТЬ ЗА N ДНЕЙ» С АВТО-ЗАПИСЬЮ В РАСПИСАНИЕ ПАР
+  const subjInp = h("input", { type:"text", value: st.plan_subject || "", placeholder:"Напр., Математический анализ, Электродинамика…" });
+  const dateInp = h("input", { type:"date", value: st.plan_date || addDays(st.today, 14) });
+  const timeInp = h("input", { type:"time", value: "19:00" });
+
+  box.append(
+    h("div", { class:"g-sec-head" },
+      h("h2", {}, "Режим «Сдать экзамен за N дней»"),
+      h("span", { class:"num" }, "АВТО-СЛОТЫ В РАСПИСАНИИ")
+    ),
+    h("div", { class:"card stack" },
+      field("Предмет или экзамен", subjInp),
+      h("div", { class:"row" },
+        h("div", { class:"grow" }, field("Дата сдачи", dateInp)),
+        h("div", { class:"grow" }, field("Время слота в расписании", timeInp))
+      ),
+      h("button", {
+        class:"btn block",
+        onclick: async (ev) => {
+          if (!subjInp.value.trim() || !dateInp.value) return toast("Укажите предмет и дату", "err");
+          ev.target.disabled = true;
+          ev.target.textContent = "⏳ Строю план и ставлю в расписание…";
+          try {
+            const res = await api("/api/g/plan", {
+              method:"POST",
+              body:{ subject: subjInp.value.trim(), date: dateInp.value, time: timeInp.value, push_to_tt: true }
+            });
+            pick("success");
+            toast(`План готов! Добавлено слотов в расписание: ${res.added_to_tt}`, "ok");
+            render();
+          } catch (e) { toast(e.message, "err"); }
+          ev.target.disabled = false;
+          ev.target.textContent = "🗓 Построить план и добавить в «Пары»";
+        }
+      }, "🗓 Построить план и добавить в «Пары»"),
+      (st.plan && st.plan.length) ? h("div", { class:"stack", style:{marginTop:"8px"} },
+        ...st.plan.slice(0, 14).map(p =>
+          h("div", { class:"row", style:{padding:"8px 10px", background:"var(--surface-2)", borderRadius:"10px", border: p.d === st.today ? "1px solid #a3e635" : "1px solid var(--line)"} },
+            h("span", { class:"chip " + (p.d === st.today ? "green" : "gray") }, fmtShort(p.d)),
+            h("span", { class:"grow", style:{fontSize:"0.88rem"} }, p.t)
+          )
+        )
+      ) : null
+    )
+  );
+
+  return box;
 }
 
-function gPlan(s) {
-  const sj = h("input", { placeholder: "Предмет или экзамен" }), dt = h("input", { type: "date" }), box = h("div", {});
-  const draw = p => box.replaceChildren(...p.map(x => h("div", { class: "gr-line" + (x.d === s.today ? " me" : "") }, h("span", {}, fmtShort(x.d) + " · " + x.t))));
-  draw(s.plan);
-  return h("div", { class: "card" }, h("h3", {}, "План к экзамену"), sj, dt, h("button", { class: "btn small", style: { margin: "8px 0" }, onclick: async e => { e.target.disabled = true;
-    try { const r = await gapi("/plan", { subject: sj.value, date: dt.value }); s.plan = r.plan; draw(r.plan); hap("medium"); } catch (x) { toast(x.message, "err"); } e.target.disabled = false; } }, "Составить"), box);
-}
+async function renderGrowthSocialPane(st) {
+  const b = await api("/api/g/board");
+  const box = h("div", { class:"g-shell" });
 
-function gDuelNew() {
-  const tp = h("input", { placeholder: "Тема дуэли" }), out = h("div");
-  return h("div", { class: "card" }, gBack(), h("h3", { style: { margin: "12px 0 8px" } }, "Дуэль знаний"), tp,
-    h("button", { class: "btn small", style: { marginTop: "8px" }, onclick: async e => { e.target.disabled = true;
-      try { const r = await gapi("/duel", { topic: tp.value }), link = "https://t.me/" + G.st.bot + "?startapp=d_" + r.id;
-        out.replaceChildren(h("div", { class: "btn-row", style: { marginTop: "10px" } },
-          h("button", { class: "btn", onclick: () => tg.openTelegramLink("https://t.me/share/url?url=" + encodeURIComponent(link) + "&text=" + encodeURIComponent("Сыграем на тему «" + tp.value + "»?")) }, "Отправить другу"),
-          h("button", { class: "btn ghost", onclick: () => { G.sub = "play:" + r.id; render(); } }, "Играть самому")));
-      } catch (x) { toast(x.message, "err"); } e.target.disabled = false; } }, "Создать"), out);
-}
+  // 1. ДУЭЛЬ ЗНАНИЙ 1 НА 1 ПО ССЫЛКЕ
+  const duelTopicInp = h("input", { type:"text", placeholder:"Тема дуэли (напр., Производные, Python, История)…" });
+  const duelCodeInp = h("input", { type:"text", placeholder:"Код дуэли от друга…" });
 
-async function gPlay(id) {
-  const d = await gapi("/duel/" + id), ans = []; let i = 0; const box = h("div");
-  const fin = async () => { const r = await gapi("/duel/" + id + "/answer", { a: ans });
-    box.replaceChildren(h("div", { class: "gr-big" }, r.score + "/" + d.qs.length), h("div", { class: "gr-cap" }, "Результаты"),
-      ...r.res.sort((a, b) => b.score - a.score).map(x => h("div", { class: "gr-line" }, x.name, h("b", {}, x.score)))); };
-  const step = () => { if (i >= d.qs.length) return fin(); const q = d.qs[i];
-    box.replaceChildren(h("div", { class: "gr-cap" }, (i + 1) + " / " + d.qs.length), h("p", { class: "gr-q" }, q.q),
-      ...q.a.map((t, k) => h("button", { class: "btn ghost gr-opt", onclick: () => { ans.push(k); i++; hap(); step(); } }, t))); };
-  d.played ? fin() : step();
-  return h("div", { class: "card" }, gBack(), h("h3", { style: { margin: "12px 0" } }, d.topic), box);
-}
+  box.append(
+    h("div", { class:"g-sec-head" },
+      h("h2", {}, "Дуэль знаний (5 вопросов)"),
+      h("span", { class:"num" }, "+25 XP")
+    ),
+    h("div", { class:"card stack" },
+      h("div", { class:"row" },
+        h("div", { class:"grow" }, duelTopicInp),
+        h("button", {
+          class:"btn small",
+          onclick: async (ev) => {
+            const t = duelTopicInp.value.trim();
+            if (!t) return toast("Введите тему дуэли", "err");
+            ev.target.disabled = true;
+            try {
+              const res = await api("/api/g/duel", { method:"POST", body:{ topic: t } });
+              openDuelModal(res.id);
+            } catch (e) { toast(e.message, "err"); }
+            ev.target.disabled = false;
+          }
+        }, "⚔️ Создать")
+      ),
+      h("div", { class:"row" },
+        h("div", { class:"grow" }, duelCodeInp),
+        h("button", {
+          class:"btn ghost small",
+          onclick: () => {
+            if (!duelCodeInp.value.trim()) return toast("Введите код дуэли", "err");
+            openDuelModal(duelCodeInp.value.trim());
+          }
+        }, "Войти по коду")
+      )
+    )
+  );
 
-function gShare(s) {
-  const c = h("canvas"); c.width = 1080; c.height = 1350; const x = c.getContext("2d");
-  x.fillStyle = "#0b0b0a"; x.fillRect(0, 0, 1080, 1350); x.fillStyle = "#d7ff3f"; x.font = "italic 560px Georgia"; x.fillText(s.streak, 80, 720);
-  x.fillStyle = "#ece8df"; x.font = "italic 64px Georgia"; x.fillText("дней подряд", 96, 820); x.fillText("уровень " + s.level + " · " + s.xp + " xp", 96, 1230);
-  c.toBlob(async b => { const f = new File([b], "streak.png", { type: "image/png" });
-    if (navigator.canShare && navigator.canShare({ files: [f] })) try { return await navigator.share({ files: [f] }); } catch (e) {}
-    h("a", { href: URL.createObjectURL(b), download: "streak.png" }).click(); });
-}
+  // 2. КОМНАТА ГРУППЫ / ПОТОКА + ОБЩИЕ ДЕДЛАЙНЫ
+  box.append(
+    h("div", { class:"g-sec-head" },
+      h("h2", {}, b.title || "Лидерборд группы"),
+      h("button", {
+        class:"chip",
+        onclick: () => {
+          sheet("👥 Комната учебной группы", (close) => {
+            const codeInp = h("input", { type:"text", value: b.code || "", placeholder:"Код комнаты (напр., FPM-101)" });
+            const titleInp = h("input", { type:"text", placeholder:"Название группы (если создаёте новую)" });
+            return h("div", { class:"stack" },
+              h("div", { class:"sub" }, "Один человек создаёт код комнаты и ведёт общие дедлайны — одногруппники вводят этот же код и видят общий лидерборд и дедлайны."),
+              field("Инвайт-код группы", codeInp),
+              field("Название потока / группы", titleInp),
+              h("button", {
+                class:"btn block",
+                onclick: async () => {
+                  await api("/api/g/group/join", { method:"POST", body:{ code: codeInp.value.trim(), title: titleInp.value.trim() } });
+                  pick("success"); close(); render();
+                }
+              }, "Подключиться к группе")
+            );
+          });
+        }
+      }, b.code ? `🔑 Код: ${b.code}` : "➕ Войти в группу")
+    )
+  );
 
-async function gGroup(s) {
-  const b = await gapi("/board"), t = h("input", { placeholder: "Дедлайн группы" }), d = h("input", { type: "date" });
-  return h("div", {}, h("div", { class: "card" }, h("h3", {}, "Рейтинг группы"),
-    ...(b.rows.length ? b.rows.map((r, i) => h("div", { class: "gr-line" + (r.me ? " me" : "") }, h("span", {}, (i + 1) + "  " + r.name), h("span", {}, r.streak + " дн · " + r.xp)))
-      : [h("p", { class: "sub" }, "Откройте приложение из чата группы — рейтинг появится там.")])),
-    b.has ? h("div", { class: "card" }, h("h3", {}, "Дедлайны группы"), ...b.dl.map(x => h("div", { class: "gr-line" }, x.t, h("span", { class: "sub" }, fmtShort(x.d)))),
-      b.owner ? h("div", {}, t, d, h("button", { class: "btn ghost small", style: { marginTop: "8px" }, onclick: async () => { await gapi("/group/dl", { t: t.value, d: d.value }); render(); } }, "Добавить")) : null) : null,
-    h("div", { class: "card btn-row" }, h("button", { class: "btn", onclick: () => gShare(s) }, "Карточка серии"),
-      h("button", { class: "btn ghost", onclick: async () => { await gapi("/notify", {}); toast("Готово"); render(); } }, s.notify ? "Пуши: вкл" : "Пуши: выкл")));
+  // Общие дедлайны группы
+  if (b.has) {
+    box.append(
+      h("div", { class:"card stack" },
+        h("div", { class:"row between" },
+          h("div", { style:{fontWeight:800} }, "📌 Общие дедлайны потока"),
+          b.owner ? h("span", { class:"chip green" }, "Вы староста/ведущий") : h("span", { class:"chip gray" }, "Подписка")
+        ),
+        (b.dl && b.dl.length)
+          ? h("div", { class:"stack" }, ...b.dl.map(x =>
+              h("div", { class:"row between", style:{padding:"7px 10px", background:"var(--surface-2)", borderRadius:"8px"} },
+                h("span", { style:{fontWeight:600, fontSize:"0.9rem"} }, x.t),
+                h("span", { class:"chip warn" }, fmtShort(x.d))
+              )
+            ))
+          : h("div", { class:"sub" }, "Общих дедлайнов пока нет."),
+        b.owner ? h("button", {
+          class:"btn ghost small block",
+          onclick: () => {
+            sheet("📢 Добавить дедлайн для всей группы", (close) => {
+              const tInp = h("input", { type:"text", placeholder:"Что сдаём (напр., Коллоквиум по матану)" });
+              const dInp = h("input", { type:"date", value: addDays(st.today, 7) });
+              return h("div", { class:"stack" },
+                field("Событие или дедлайн", tInp),
+                field("Дата", dInp),
+                h("button", {
+                  class:"btn block",
+                  onclick: async () => {
+                    await api("/api/g/group/dl", { method:"POST", body:{ t: tInp.value.trim(), d: dInp.value } });
+                    pick("success"); close(); render();
+                  }
+                }, "Опубликовать для группы")
+              );
+            });
+          }
+        }, "➕ Добавить общий дедлайн") : null
+      )
+    );
+  }
+
+  // Лидерборд участников
+  box.append(
+    h("div", { class:"stack" },
+      ...(b.rows || []).map((r, i) =>
+        h("div", { class: "g-rank-row" + (r.me ? " me" : "") },
+          h("span", { class:"g-rank-pos" }, i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : `#${i + 1}`),
+          renderAvatar(r.avatar || "🧑‍💻", "sm"),
+          h("div", { class:"grow" },
+            h("div", { style:{fontWeight:800, fontSize:"0.92rem"} }, r.name),
+            h("div", { class:"sub" }, `Уровень ${r.level || 1} · 🔥 ${r.streak} дн.`)
+          ),
+          h("span", { class:"chip green mono" }, `${r.xp} XP`)
+        )
+      )
+    )
+  );
+
+  return box;
 }
 
 const VIEWS = {
@@ -3506,7 +4281,7 @@ const VIEWS = {
   tt: viewTT,
   tasks: viewTasks,
   study: viewStudy,
-  grow: viewGrow,
+  growth: viewGrowth,
   chat: viewChat
 };
 
@@ -3519,8 +4294,19 @@ async function boot() {
     }
     S.today = (S.me && S.me.now ? S.me.now.slice(0, 10) : "") || iso(new Date());
     if (!S.ttDate) S.ttDate = S.today;
-    const sp = tg && tg.initDataUnsafe && tg.initDataUnsafe.start_param;
-    if (sp && sp.startsWith("d_")) { S.tab = "grow"; G.sub = "play:" + sp.slice(2); drawNav(); }
+
+    // Авто-запуск дуэли по ссылке ?startapp=duel_XXXX или ?duel=XXXX
+    const startParam = (tg && tg.initDataUnsafe && tg.initDataUnsafe.start_param)
+      || new URLSearchParams(location.search).get("duel") || "";
+    if (startParam.startsWith("duel_")) {
+      S.tab = "growth";
+      S.growthSub = "social";
+      drawNav();
+      setTimeout(() => openDuelModal(startParam.slice(5)), 350);
+    } else if (startParam) {
+      setTimeout(() => openDuelModal(startParam), 350);
+    }
+
     await render();
   } catch (e) {
     document.getElementById("view").replaceChildren(
