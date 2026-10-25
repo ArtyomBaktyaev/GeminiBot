@@ -3693,9 +3693,9 @@ async def handle_voice(message: types.Message):
 
 
 def load_plugins() -> None:
-    """Подключает ext_webapp / ext_timetable / ext_study. Нет файла — бот просто работает без модуля."""
+    """Подключает ext_webapp / ext_timetable / ext_study / ext_growth. Нет файла — бот просто работает без модуля."""
     core = sys.modules[__name__]
-    for name in ("ext_webapp", "ext_timetable", "ext_study"):
+    for name in ("ext_webapp", "ext_timetable", "ext_study", "ext_growth"):
         try:
             importlib.import_module(name).setup(core)
             log.info("🧩 Модуль %s подключён", name)
