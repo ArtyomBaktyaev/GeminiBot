@@ -377,9 +377,11 @@ def topics_overview_html(user_id: Optional[int] = None) -> str:
     return "\n\n".join(blocks) if blocks else "У вас нет подключенных групп."
 
 
-def tasks_scope(chat) -> Optional[int]:
-    """В личке видны задачи всех групп, в группе — только её собственные."""
-    return None if chat.type == "private" else chat.id
+def tasks_scope(chat, user_id: Optional[int] = None) -> Optional[int]:
+    """В личке у владельца видны задачи всех групп, у остальных — только их личный user_id."""
+    if chat.type == "private":
+        return None if is_primary_user(user_id or chat.id) else chat.id
+    return chat.id
 
 
 # =====================================================================
@@ -3693,7 +3695,7 @@ async def handle_voice(message: types.Message):
 
 
 def load_plugins() -> None:
-    """Подключает ext_webapp / ext_timetable / ext_study / ext_growth. Нет файла — бот просто работает без модуля."""
+    """Подключает ext_webapp / ext_timetable / ext_study / ext_growth."""
     core = sys.modules[__name__]
     for name in ("ext_webapp", "ext_timetable", "ext_study", "ext_growth"):
         try:
