@@ -217,9 +217,8 @@ async def tg(uid, text):
                      json={"chat_id": int(uid), "text": text, "reply_markup": {"inline_keyboard": [[{"text": "Открыть", "web_app": {"url": base + "/app"}}]]}})
 
 
-async def pusher():
-    while True:
-        await asyncio.sleep(60)
+async def tick():
+    if core is not None:
         try:
             n = core.now_local()
             hm, t = n.strftime("%H:%M"), str(n.date())
@@ -240,19 +239,13 @@ async def pusher():
 
 
 # ---------------------------------------------------------------- подключение
-def mount(app: web.Application) -> None:
-    async def start(a):
-        a["growth"] = asyncio.create_task(pusher())
-
-    app.on_startup.append(start)
-
-
 def setup(c) -> None:
     """Подключать ПОСЛЕ ext_webapp, ext_study и ext_timetable."""
     global core
     core = c
     core.STATE_FILES = tuple(core.STATE_FILES) + (FILE,)
-    load()
+    core.PLUGIN_LOADERS.append(load)  # состояние читается после восстановления из Gist
+    core.PLUGIN_TICKS.append(tick)  # пуши: планировщик бота вызывает раз в ~30 с
     routes = [("GET", "/api/g/state", a_state), ("POST", "/api/g/snap", a_snap), ("POST", "/api/g/goals", a_goal_add),
               ("DELETE", "/api/g/goals/{id}", a_goal_del), ("POST", "/api/g/goals/{id}/check", a_goal_check),
               ("POST", "/api/g/journal", a_journal), ("POST", "/api/g/plan", a_plan), ("POST", "/api/g/duel", a_duel_new),
@@ -272,4 +265,3 @@ def setup(c) -> None:
                 return hooked
             core.API_ROUTES[i] = (m, p, make(old, hooks[p]))
     core.API_ROUTES.extend(routes)
-    core.WEB_SETUP.append(mount)
