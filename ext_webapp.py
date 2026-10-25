@@ -640,11 +640,17 @@ def _home_body(user):
     out = {"today": None, "tasks": [], "cards_due": 0, "cards_total": 0, "parity": None}
     tt, st = mod("ext_timetable"), mod("ext_study")
     if tt:
-        out["today"] = tt.day_payload(tt.today())
-        out["parity"] = tt.parity_of(tt.today())
+        try:
+            out["today"] = tt.day_payload(tt.today())
+            out["parity"] = tt.parity_of(tt.today())
+        except Exception:
+            core.log.exception("home timetable error")
     if st:
-        s = st.card_stats()
-        out["cards_due"], out["cards_total"] = s["due"], s["total"]
+        try:
+            s = st.card_stats()
+            out["cards_due"], out["cards_total"] = s["due"], s["total"]
+        except Exception:
+            core.log.exception("home study stats error")
     out["tasks"] = task_list(only_deadline=True)[:8]
     return out
 
@@ -699,22 +705,35 @@ async def api_tasks(request, user):
             tp["name"] = core.topic_label(g["chat_id"], tp["thread"], [{"topic": tp["tasks"][0]["topic"]}])
         out.append({**g, "topics": topics})
 
-    # Личные напоминания доступны всем
+    # Список недавно выполненных задач (для возможности отменить выполнение)
+    done_items = []
+    for t in reversed(core.TASKS.get("items", [])):
+        if not t.get("done"):
+            continue
+        t_acc = t.get("acc", "")
+        if primary:
+            if t_acc and t_acc != acc["id"]:
+                continue
+        elif t_acc != acc["id"]:
+            continue
+        done_items.append({
+            "id": t["id"],
+            "topic": t.get("topic") or "общая",
+            "text": core.strip_md(t.get("text", "")).strip()[:160],
+            "deadline": t.get("deadline", ""),
+            "done_at": t.get("done_at", 0),
+        })
+        if len(done_items) >= 20:
+            break
+
     avail_groups = [
         {"chat_id": user["id"], "title": "Личные напоминания", "topics": [{"name": "личное", "thread": 0}]}
     ]
-    
-    # Свои собственные группы аккаунта (если создавал сам аккаунт)
-    acc_groups = acc.get("groups", [])
-    for ag in acc_groups:
+    for ag in acc.get("groups", []):
         avail_groups.append(ag)
-
-    # Общие учебные группы показываем ТОЛЬКО в главном аккаунте Артёма
     if primary:
         for cid, g in core.enabled_groups():
-            t_list = [{"name": k, "thread": v} for k, v in (g.get("topics") or {}).items()]
-            if not t_list:
-                t_list = [{"name": "общая", "thread": 0}]
+            t_list = [{"name": k, "thread": v} for k, v in (g.get("topics") or {}).items()] or [{"name": "общая", "thread": 0}]
             avail_groups.append({
                 "chat_id": cid,
                 "title": g.get("title") or f"Группа {cid}",
@@ -723,6 +742,7 @@ async def api_tasks(request, user):
 
     return {
         "groups": out,
+        "done_tasks": done_items,
         "total": sum(len(tp["tasks"]) for g in out for tp in g["topics"]),
         "available_groups": avail_groups,
     }
@@ -782,6 +802,19 @@ async def api_task_done(request, user):
                 return {"ok": False}  # чужую задачу гость закрыть не может
             t["done"], t["done_at"] = True, time.time()
             core.cancel_notifications(tid)
+            core.save_json(core.TASKS_FILE, core.TASKS)
+            return {"ok": True}
+    return {"ok": False}
+
+async def api_task_undone(request, user):
+    tid = int(request.match_info["id"])
+    acc = get_request_account(request, user)
+    for t in core.TASKS["items"]:
+        if t["id"] == tid and t.get("done"):
+            if not is_primary_account(acc["id"]) and t.get("acc") != acc["id"]:
+                return {"ok": False}
+            t["done"] = False
+            t.pop("done_at", None)
             core.save_json(core.TASKS_FILE, core.TASKS)
             return {"ok": True}
     return {"ok": False}
@@ -1276,6 +1309,7 @@ def setup(c) -> None:
         ("GET", "/api/tasks", api_tasks),
         ("POST", "/api/tasks", api_task_create),
         ("POST", "/api/tasks/{id}/done", api_task_done),
+        ("POST", "/api/tasks/{id}/undone", api_task_undone),
         ("GET", "/api/history", api_history),
         ("DELETE", "/api/history", api_history_clear),
         ("POST", "/api/ask", api_ask),
