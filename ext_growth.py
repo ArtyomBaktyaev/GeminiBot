@@ -1,9 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-Рост v2.0: SQLite + Gist-зеркало, петля возвращения, 3-минутный квест,
-живой компаньон, умный разбор фото/лекций (с авто-карточками и тестом),
-режим «Сдать за N дней» с записью в расписание, дуэли, комнаты групп и лидерборд в ТГ.
-Подключать ПОСЛЕ ext_webapp, ext_timetable и ext_study.
+Рост v2.1:
+- Авто-починка карточек ext_study после разбора конспектов
+- Чистая математика без сырого LaTeX ($\Pi_1$, \neq -> Π₁, ≠)
+- Красивый утренний брифинг без обрезанных слов
+- Живая ИИ-рефлексия без шаблонов + удаление + группировка по дням
+- Экспорт разборов и отчёта прогресса в красивый PDF
+- Отмена чекина пар и интеграция с расписанием
 """
 import asyncio
 import functools
@@ -14,12 +17,14 @@ import secrets
 import sqlite3
 import sys
 import time
+from contextlib import closing, suppress
 from datetime import date, timedelta
 from urllib.parse import parse_qsl
 
 import aiohttp
 from aiogram.filters import Command
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
+from google.genai import types as genai_types
 
 core = None
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -33,43 +38,107 @@ XP = {
     "goal": 10,
     "journal": 12,
     "duel": 25,
-    "lesson": 15,  # чекин посещения пар
+    "lesson": 15,
 }
 QUEST_KEYS = ("cards", "task", "ask")
 DB = {"u": {}, "duels": {}, "groups": {}}
 
 
 # =====================================================================
-# 1. ХРАНИЛИЩЕ: SQLite (основное по user_id) + JSON (для Gist backup)
+# 1. КОНВЕРТЕР ФОРМУЛ (УБИРАЕТ СЫРОЙ LaTeX В КОНСПЕКТАХ И ТЕСТАХ)
+# =====================================================================
+_SUB_DIGITS = str.maketrans("0123456789+-=()nijk", "₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₙᵢⱼₖ")
+_SUP_DIGITS = str.maketrans("0123456789+-=()n", "⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁿ")
+
+
+def clean_math(text: str) -> str:
+    """Превращает $\\Pi_1: A_1x$, \\neq, \\Delta и др. в чистый читаемый вид без $ и слэшей."""
+    if not text:
+        return ""
+    s = str(text)
+    # 1. Сначала прогоняем блочные и строчные $...$ через штатный tex_plain из bot.py
+    if core and hasattr(core, "tex_plain"):
+        s = re.sub(
+            r"\$\$(.+?)\$\$|\\\[(.+?)\\\]|\\\((.+?)\\\)|\$(?!\s)([^$\n]+?)(?<!\s)\$",
+            lambda m: core.tex_plain(next(g for g in m.groups() if g is not None)),
+            s,
+            flags=re.S,
+        )
+        # Если остались одиночные команды LaTeX вне знаков $
+        for cmd, sym in getattr(core, "TEX_SYMBOLS", {}).items():
+            s = re.sub(rf"\\{re.escape(cmd)}(?![A-Za-z])", sym, s)
+    # 2. Чистим частые конструкции вроде A_1, \Pi_1, x^2, \frac{a}{b}
+    s = re.sub(r"\\(?: dfrac|tfrac|frac)\s*\{([^{}]+)\}\s*\{([^{}]+)\}", r"(\1)/(\2)", s)
+    s = re.sub(r"\\sqrt\s*\{([^{}]+)\}", r"√(\1)", s)
+    s = re.sub(r"_\{([0-9+\-=()nijk]+)\}", lambda m: m.group(1).translate(_SUB_DIGITS), s)
+    s = re.sub(r"_([0-9nijk])\b", lambda m: m.group(1).translate(_SUB_DIGITS), s)
+    s = re.sub(r"\^\{([0-9+\-=()n]+)\}", lambda m: m.group(1).translate(_SUP_DIGITS), s)
+    s = re.sub(r"\^([0-9n])\b", lambda m: m.group(1).translate(_SUP_DIGITS), s)
+    s = s.replace("$", "")
+    return s
+
+
+# =====================================================================
+# 2. ХРАНИЛИЩЕ SQLite + АВТО-ПОЧИНКА КАРТОЧЕК EXT_STUDY
 # =====================================================================
 def _init_sqlite() -> None:
-    with sqlite3.connect(DB_FILE) as con:
+    with closing(sqlite3.connect(DB_FILE, timeout=10)) as con:
         con.execute("CREATE TABLE IF NOT EXISTS kv_store (k TEXT PRIMARY KEY, v TEXT NOT NULL)")
         con.commit()
+
+
+def _repair_study_cards() -> None:
+    """Чинит карточки в ext_study и защищает /api/home от падений при проверке due."""
+    st = sys.modules.get("ext_study")
+    if not st or not hasattr(st, "ST") or not isinstance(st.ST, dict):
+        return
+    cards = st.ST.get("cards")
+    if not isinstance(cards, list):
+        return
+
+    # Определяем эталонный формат поля due по функции card_stats
+    fixed = []
+    t_str = str(day())
+    for idx, c in enumerate(cards, 1):
+        if not isinstance(c, dict) or not c.get("front") or not c.get("back"):
+            continue
+        c.setdefault("id", idx)
+        c.setdefault("ph", "")
+        c.setdefault("ex", "")
+        c.setdefault("deck", "общее")
+        c["box"] = int(c.get("box") or 1)
+        c["front"] = clean_math(str(c["front"]))
+        c["back"] = clean_math(str(c["back"]))
+        if not isinstance(c.get("due"), str) or len(str(c.get("due"))) != 10:
+            c["due"] = t_str
+        fixed.append(c)
+    st.ST["cards"] = fixed
+    if fixed:
+        st.ST["next_id"] = max(int(x.get("id") or 0) for x in fixed) + 1
+    with suppress(Exception):
+        st.save()
 
 
 def load() -> None:
     _init_sqlite()
     loaded = {}
-    with sqlite3.connect(DB_FILE) as con:
+    with closing(sqlite3.connect(DB_FILE, timeout=10)) as con:
         rows = con.execute("SELECT k, v FROM kv_store").fetchall()
         for k, v in rows:
-            try:
+            with suppress(Exception):
                 loaded[k] = json.loads(v)
-            except Exception:
-                pass
     gist_data = core.load_json(FILE, {}) or {}
-    # Если SQLite пуст (например, после редеплоя на Render), восстанавливаем из Gist JSON
     for section in ("u", "duels", "groups"):
         merged = dict(gist_data.get(section) or {})
         merged.update(loaded.get(section) or {})
         DB[section] = merged
     _save_sqlite()
+    _repair_study_cards()
 
 
 def _save_sqlite() -> None:
     try:
-        with sqlite3.connect(DB_FILE) as con:
+        with closing(sqlite3.connect(DB_FILE, timeout=10)) as con:
             for k in ("u", "duels", "groups"):
                 con.execute(
                     "INSERT OR REPLACE INTO kv_store (k, v) VALUES (?, ?)",
@@ -99,7 +168,7 @@ def gid(request) -> str:
 
 
 # =====================================================================
-# 2. ПРОФИЛЬ ИГРОКА, XP, СЕРИЯ И ЕЖЕДНЕВНЫЙ КВЕСТ
+# 3. ПРОФИЛЬ ИГРОКА, XP, СЕРИЯ И ЕЖЕДНЕВНЫЙ КВЕСТ
 # =====================================================================
 def U(request, user) -> dict:
     acc = W().get_request_account(request, user)
@@ -135,6 +204,9 @@ def U(request, user) -> dict:
     )
     for g in u.get("goals", []):
         g.setdefault("cat", "mind")
+    for j in u.get("journal", []):
+        if not j.get("id"):
+            j["id"] = secrets.token_hex(4)
     t_str = str(day())
     if u.get("qd") != t_str:
         u["qd"], u["flags"] = t_str, []
@@ -142,9 +214,7 @@ def U(request, user) -> dict:
 
 
 def award(u: dict, kind: str) -> bool:
-    """Начисляет XP и проверяет закрытие ежедневного квеста (3 разных действия за день)."""
-    u["xp"] = int(u.get("xp", 0)) + XP.get(kind, 5)
-    # Привычка или дневник тоже засчитываются как шаг «задача» для квеста, если дедлайнов нет
+    u["xp"] = max(0, int(u.get("xp", 0)) + XP.get(kind, 5))
     quest_alias = "task" if kind in ("task", "goal", "lesson") else ("ask" if kind in ("ask", "journal", "duel") else kind)
     if kind not in u["flags"]:
         u["flags"].append(kind)
@@ -154,8 +224,6 @@ def award(u: dict, kind: str) -> bool:
     t = day()
     t_str = str(t)
     quest_completed = sum(1 for k in QUEST_KEYS if k in u["flags"]) >= 3 or len(set(u["flags"])) >= 3
-    leveled_streak = False
-
     if quest_completed and u.get("last") != t_str:
         if u.get("last") == str(t - timedelta(days=1)):
             u["streak"] = int(u.get("streak", 0)) + 1
@@ -166,11 +234,11 @@ def award(u: dict, kind: str) -> bool:
             u["streak"] = 1
         u["best_streak"] = max(int(u.get("best_streak", 0)), u["streak"])
         u["last"] = t_str
-        u["xp"] += 35  # бонус за закрытие дня
+        u["xp"] += 35
         if u["streak"] % 7 == 0:
             u["freeze"] = min(3, int(u.get("freeze", 0)) + 1)
-        leveled_streak = True
-    return leveled_streak
+        return True
+    return False
 
 
 async def ai(request, user, prompt: str, files=None) -> str:
@@ -192,10 +260,35 @@ async def ai(request, user, prompt: str, files=None) -> str:
     return "".join(p.text for p in (resp.candidates[0].content.parts or []) if getattr(p, "text", None)).strip()
 
 
+async def ai_direct(request, user, system_prompt: str, user_text: str, temp: float = 0.7) -> str:
+    """Прямой вызов Gemini без примешивания академического досье README (для живой рефлексии)."""
+    w = W()
+    acc = w.get_request_account(request, user)
+    pool_to_use, _ = w.get_account_pool(acc)
+    if pool_to_use is None:
+        raise RuntimeError("Подключите свой API-ключ Gemini в настройках профиля.")
+    cfg = genai_types.GenerateContentConfig(system_instruction=system_prompt, temperature=temp)
+    for model_name in pool_to_use.get_model_order():
+        idx = pool_to_use.pick_for_model(model_name)
+        if idx is None:
+            continue
+        try:
+            resp = await asyncio.wait_for(
+                pool_to_use.client(idx).aio.models.generate_content(
+                    model=model_name, contents=[user_text], config=cfg
+                ),
+                timeout=14,
+            )
+            return "".join(p.text for p in (resp.candidates[0].content.parts or []) if getattr(p, "text", None)).strip()
+        except Exception:
+            continue
+    return await ai(request, user, f"{system_prompt}\n\nЗапись пользователя: {user_text}")
+
+
 def jl(text: str) -> dict:
     m = re.search(r"\{.*\}", text, re.S)
     if not m:
-        raise ValueError("ИИ вернул некорректный формат, попробуйте ещё раз")
+        raise ValueError("ИИ вернул некорректный ответ, попробуйте ещё раз")
     return json.loads(m.group(0))
 
 
@@ -209,7 +302,7 @@ def _companion_stage(streak: int, level: int) -> dict:
         (35, "Парящий Эдем", "Легендарная дисциплина. Дерево резонирует на пике формы."),
         (60, "Древо Сингулярности", "Абсолютный мастер привычек и знаний."),
     ]
-    cur = stages[0]
+    cur = (1, stages[0][1], stages[0][2])
     for idx, st in enumerate(stages):
         if score >= st[0]:
             cur = (idx + 1, st[1], st[2])
@@ -217,7 +310,7 @@ def _companion_stage(streak: int, level: int) -> dict:
 
 
 # =====================================================================
-# 3. API ОБРАБОТЧИКИ
+# 4. API ОБРАБОТЧИКИ
 # =====================================================================
 async def a_state(request, user):
     u, g = U(request, user), gid(request)
@@ -257,7 +350,7 @@ async def a_state(request, user):
         "today": t,
         "lessons_checked": u.get("lessons_checked") == t,
         "goals": [{**x, "days": x["days"][-14:]} for x in u["goals"]],
-        "journal": u["journal"][-5:],
+        "journal": u["journal"][-30:],
         "plan": u["plan"],
         "plan_subject": u.get("plan_subject", ""),
         "plan_date": u.get("plan_date", ""),
@@ -267,18 +360,23 @@ async def a_state(request, user):
 
 
 async def a_checkin_lessons(request, user):
-    """Чекин посещения пар за сегодня (+15 XP)."""
+    """Переключатель (можно отметить и отменить отметку посещения пар за сегодня)."""
     u, t = U(request, user), str(day())
     if u.get("lessons_checked") == t:
-        return {"ok": True, "already": True, "xp": u["xp"]}
+        u["lessons_checked"] = ""
+        if "lesson" in u["flags"]:
+            u["flags"].remove("lesson")
+        u["xp"] = max(0, int(u.get("xp", 0)) - XP["lesson"])
+        save()
+        return {"ok": True, "undone": True, "xp": u["xp"]}
     u["lessons_checked"] = t
     award(u, "lesson")
     save()
-    return {"ok": True, "xp": u["xp"]}
+    return {"ok": True, "undone": False, "xp": u["xp"]}
 
 
 async def a_snap(request, user):
-    """Умный разбор фото задачи/конспекта или аудио лекции -> разбор + авто-карточки в ext_study + мини-тест."""
+    """Разбор фото конспекта/задачи или голосового -> чистые формулы + карточки + тест."""
     b, u = await request.json(), U(request, user)
     kind = b.get("kind", "photo")
     hint = {
@@ -288,11 +386,12 @@ async def a_snap(request, user):
     q = str(b.get("text") or "Разбери материал.").strip()[:3000]
 
     prompt = (
-        f"{hint}\nЯзык: русский, без сырого LaTeX (используй читаемые символы: ², √, π, →).\n"
+        f"{hint}\nЯзык: русский. КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО использовать LaTeX ($...$, \\Pi, \\neq, \\Delta, _1). "
+        "Все формулы, греческие буквы и индексы пиши сразу готовыми Unicode-символами (Π₁, A₁, x², ≠, ≤, ≥, Δ, α, √, →).\n"
         "Верни СТРОГО валидный JSON следующего формата:\n"
         '{\n'
         '  "title": "Краткое название темы",\n'
-        '  "answer": "Подробный разбор в Markdown (с заголовками, списками и ключевыми выводами)",\n'
+        '  "answer": "Подробный разбор в Markdown (заголовки ##, списки, жирный текст, формулы в Unicode)",\n'
         '  "cards": [{"front": "Термин или вопрос", "back": "Краткое определение или формула"}],\n'
         '  "quiz": [{"q": "Вопрос на проверку понимания", "options": ["Вариант 1","Вариант 2","Вариант 3","Вариант 4"], "answer": 0, "explain": "Пояснение"}]\n'
         '}\n'
@@ -300,30 +399,53 @@ async def a_snap(request, user):
         f"Запрос/контекст: {q}"
     )
     r = jl(await ai(request, user, prompt, b.get("files")))
-    cards = [c for c in (r.get("cards") or []) if c.get("front") and c.get("back")][:8]
-    quiz = [qz for qz in (r.get("quiz") or []) if qz.get("q") and isinstance(qz.get("options"), list)][:5]
-    deck_title = str(r.get("title") or "Конспект ИИ").strip()[:40]
+    deck_title = clean_math(str(r.get("title") or "Конспект ИИ").strip())[:40]
+    clean_ans = clean_math(str(r.get("answer") or ""))
 
-    # Автоматически сохраняем карточки в модуль Учёбы (ext_study), если он подключён
+    cards = []
+    for c in (r.get("cards") or [])[:8]:
+        if isinstance(c, dict) and c.get("front") and c.get("back"):
+            cards.append({
+                "front": clean_math(str(c["front"]).strip())[:200],
+                "back": clean_math(str(c["back"]).strip())[:400],
+            })
+
+    quiz = []
+    for qz in (r.get("quiz") or [])[:5]:
+        if isinstance(qz, dict) and qz.get("q") and isinstance(qz.get("options"), list) and len(qz["options"]) >= 2:
+            ans_idx = 0
+            with suppress(Exception):
+                ans_idx = max(0, min(len(qz["options"]) - 1, int(qz.get("answer", 0))))
+            quiz.append({
+                "q": clean_math(str(qz["q"]).strip()),
+                "options": [clean_math(str(o).strip()) for o in qz["options"][:4]],
+                "answer": ans_idx,
+                "explain": clean_math(str(qz.get("explain") or "").strip()),
+            })
+
+    # Безопасное сохранение карточек через штатный обработчик ext_study
     saved_cards = 0
     st = sys.modules.get("ext_study")
     if st and cards and b.get("save_cards", True):
         try:
             async with W().plugin_ctx(user):
-                for c in cards:
-                    st.ST["cards"].append({
-                        "id": st.ST["next_id"],
-                        "front": str(c["front"]).strip()[:200],
-                        "ph": "",
-                        "back": str(c["back"]).strip()[:400],
-                        "ex": "",
-                        "deck": deck_title,
-                        "box": 1,
-                        "due": str(day()),
-                    })
-                    st.ST["next_id"] += 1
-                    saved_cards += 1
-                st.save()
+                if isinstance(st.ST, dict) and isinstance(st.ST.get("cards"), list):
+                    next_id = max([int(x.get("id") or 0) for x in st.ST["cards"]] + [int(st.ST.get("next_id") or 1)])
+                    for c in cards:
+                        next_id += 1
+                        st.ST["cards"].append({
+                            "id": next_id,
+                            "front": c["front"],
+                            "ph": "",
+                            "back": c["back"],
+                            "ex": "",
+                            "deck": deck_title,
+                            "box": 1,
+                            "due": str(day()),
+                        })
+                        saved_cards += 1
+                    st.ST["next_id"] = next_id + 1
+                    _repair_study_cards()
         except Exception:
             core.log.exception("auto save cards")
 
@@ -333,11 +455,59 @@ async def a_snap(request, user):
     save()
     return {
         "title": deck_title,
-        "answer": str(r.get("answer", "")),
+        "answer": clean_ans,
         "cards": cards,
         "saved_cards": saved_cards,
         "quiz": quiz,
     }
+
+
+async def a_pdf_export(request, user):
+    """Генерирует красивый PDF для разбора конспекта или отчёта прогресса без съезжания текста."""
+    b, u = await request.json(), U(request, user)
+    kind = str(b.get("kind") or "report")
+    if kind == "snap":
+        title = clean_math(str(b.get("title") or "Конспект разбора").strip())
+        content = clean_math(str(b.get("content") or "").strip())
+    else:
+        title = f"Отчёт прогресса — {u['name']} ({day():%d.%m.%Y})"
+        comp = _companion_stage(int(u.get("streak", 0)), int(u.get("xp", 0)) // 100 + 1)
+        lines = [
+            f"# Профиль роста: {u['name']}",
+            f"- **Серия без пропусков:** {u.get('streak', 0)} дн. (рекорд: {u.get('best_streak', u.get('streak', 0))} дн.)",
+            f"- **Уровень и опыт:** Уровень {int(u.get('xp', 0)) // 100 + 1} ({u.get('xp', 0)} XP)",
+            f"- **Стадия острова:** {comp['title']} (стадия {comp['stage']} из 6)",
+            f"- **Запас заморозок:** {u.get('freeze', 0)} шт.",
+            "",
+            "## Активные цели и привычки (за 14 дней)",
+        ]
+        if u.get("goals"):
+            lines.append("| Привычка | Выполнено дней (14 дн.) | Статус сегодня |")
+            lines.append("| --- | --- | --- |")
+            for g in u["goals"]:
+                done_now = "Выполнено" if str(day()) in (g.get("days") or []) else "Ожидает"
+                lines.append(f"| {clean_math(g['name'])} | {len(g.get('days') or [])} дн. | {done_now} |")
+        else:
+            lines.append("Привычки ещё не добавлены.")
+
+        if u.get("plan"):
+            lines.extend(["", f"## План подготовки: {clean_math(u.get('plan_subject') or 'Экзамен')}"])
+            lines.append("| Дата | План на день |")
+            lines.append("| --- | --- |")
+            for p in u["plan"][:30]:
+                lines.append(f"| {p['d']} | {clean_math(p['t'])} |")
+
+        if u.get("journal"):
+            lines.extend(["", "## Последние записи дневника рефлексии"])
+            for j in reversed(u["journal"][-10:]):
+                lines.append(f"### {j['d']}")
+                lines.append(f"**Запись:** {clean_math(j['t'])}")
+                lines.append(f"> **Отклик ментора:** {clean_math(j['ai'])}")
+        content = "\n".join(lines)
+
+    data, filename, mime = await asyncio.to_thread(core.build_document, "pdf", title, content)
+    fid = W()._store_generated_file(data, filename, mime)
+    return {"id": fid, "name": filename, "size": len(data), "mime": mime}
 
 
 async def a_goal_add(request, user):
@@ -359,39 +529,66 @@ async def a_goal_del(request, user):
 
 async def a_goal_check(request, user):
     u, t = U(request, user), str(day())
+    toggled_on = False
     for g in u["goals"]:
         if g["id"] == request.match_info["id"]:
             if t in g["days"]:
                 g["days"].remove(t)
+                u["xp"] = max(0, int(u.get("xp", 0)) - XP["goal"])
+                toggled_on = False
             else:
                 g["days"].append(t)
                 award(u, "goal")
+                toggled_on = True
     save()
-    return {"ok": True}
+    return {"ok": True, "checked": toggled_on, "xp": u["xp"]}
 
 
 async def a_journal(request, user):
     text, u = str((await request.json()).get("text") or "").strip()[:2500], U(request, user)
     if not text:
-        raise ValueError("Напишите хотя бы пару строк о сегодняшнем дне")
-    reply = await ai(
-        request,
-        user,
-        "Ты мудрый, тёплый и структурный вечерний ментор. На русском языке (2–4 предложения): "
-        "поддержи пользователя, подсвети главный инсайт из его записи и задай один глубокий вопрос на завтра.\n\n"
-        + text,
+        raise ValueError("Напишите хотя бы пару слов о сегодняшнем дне")
+
+    # Проверяем, не написал ли пользователь одно-два тестовых/случайных слова вроде «шала», «лала», «тест»
+    words = re.findall(r"[A-Za-zА-Яа-яЁё0-9]+", text)
+    is_short_or_random = len(text) < 8 or (len(words) <= 2 and len(text) < 18)
+
+    sys_prompt = (
+        "Ты живой, умный и искренний собеседник для вечернего дневника. Язык: русский.\n"
+        "ЖЕСТКИЕ ПРАВИЛА:\n"
+        "1. КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО использовать шаблонные фразы: «сегодня ты проделал огромную/отличную работу», "
+        "«главный инсайт дня», «системность и чёткая структура побеждают хаос», «бесценный опыт». Никакого инфоцыганского пафоса!\n"
+        "2. Отвечай СТРОГО по сути того, что написал человек, не придумывай за него про математику или задачи, если он об этом не писал.\n"
+        "3. Если человек написал короткую бессмыслицу, проверочное слово («шала», «лала», «тест», «абырвалг») или одно слово без контекста — "
+        "ответь с лёгкой доброй иронией в 1–2 предложениях (например: обыграй это слово и спроси, устал ли он так сильно, что сил хватило только на него, или как реально прошёл день)."
     )
-    first = not (u["journal"] and u["journal"][-1]["d"] == str(day()))
-    u["journal"].append({"d": str(day()), "t": text, "ai": reply})
-    del u["journal"][:-30]
-    if first:
+    user_msg = (
+        f"Пользователь написал очень короткую или тестовую фразу: «{text}». Ответь живо и с юмором без шаблонов!"
+        if is_short_or_random
+        else f"Запись пользователя в вечернем дневнике ({u['name']}):\n{text}\n\nДай тёплый, конкретный отклик по сути его текста (2–3 предложения) и один живой вопрос."
+    )
+
+    reply = clean_math(await ai_direct(request, user, sys_prompt, user_msg, temp=0.75))
+    first = not any(j.get("d") == str(day()) for j in u["journal"])
+    entry = {"id": secrets.token_hex(4), "d": str(day()), "t": text, "ai": reply}
+    u["journal"].append(entry)
+    del u["journal"][:-50]
+    if first and not is_short_or_random:
         award(u, "journal")
     save()
-    return {"ai": reply}
+    return {"ai": reply, "entry": entry}
+
+
+async def a_journal_del(request, user):
+    """Удаление конкретной записи рефлексии по ID."""
+    u = U(request, user)
+    jid = request.match_info["id"]
+    u["journal"] = [j for j in u.get("journal", []) if j.get("id") != jid]
+    save()
+    return {"ok": True}
 
 
 async def a_plan(request, user):
-    """Режим «Сдать за N дней»: строит план и подкидывает слоты подготовки в расписание пар и задачи."""
     b, u = await request.json(), U(request, user)
     subj = str(b.get("subject") or "").strip()[:100]
     target_date = str(b.get("date") or "").strip()
@@ -408,24 +605,25 @@ async def a_plan(request, user):
         await ai(
             request,
             user,
-            f'Составь чёткий план подготовки к экзамену/зачёту по предмету «{subj}»: '
-            f'дней до сдачи: {n}, старт: {day()}, по одному конкретному блоку тем/практики в день, '
-            'последние 1–2 дня — генеральный прогон по билетам. '
-            'Ответ СТРОГО JSON: {"days":[{"d":"YYYY-MM-DD","t":"конкретная тема и задача на день"}]}',
+            f'Составь чёткий план подготовки к экзамену по предмету «{subj}»: '
+            f'дней до сдачи: {n}, старт: {day()}, по одному конкретному блоку тем в день, '
+            'без LaTeX. Ответ СТРОГО JSON: {"days":[{"d":"YYYY-MM-DD","t":"что делать"}]}',
         )
     )
-    plan_days = [x for x in (r.get("days") or []) if x.get("d") and x.get("t")][:60]
+    plan_days = [
+        {"d": str(x["d"]), "t": clean_math(str(x["t"]))}
+        for x in (r.get("days") or [])
+        if x.get("d") and x.get("t")
+    ][:60]
     u["plan"] = plan_days
     u["plan_subject"] = subj
     u["plan_date"] = target_date
 
-    # Подкидываем слоты подготовки прямо в расписание (ext_timetable) как разовые занятия
     added_to_tt = 0
     tt = sys.modules.get("ext_timetable")
     if tt and push_tt:
         try:
             async with W().plugin_ctx(user):
-                # Удаляем старые слоты подготовки к этому же предмету, чтобы не дублировать
                 tt.ST["exceptions"] = [
                     ex for ex in tt.ST.get("exceptions", [])
                     if not (ex.get("kind") == "add" and str(ex.get("subject", "")).startswith(f"🎯 Подготовка: {subj}"))
@@ -433,7 +631,7 @@ async def a_plan(request, user):
                 h_start, m_start = [int(x) for x in (slot_time.split(":") if ":" in slot_time else ("19", "00"))[:2]]
                 end_total = min(23 * 60 + 50, h_start * 60 + m_start + 45)
                 end_time = f"{end_total // 60:02d}:{end_total % 60:02d}"
-                for item in plan_days[:21]:  # до 3 недель вперёд в календарь пар
+                for item in plan_days[:21]:
                     tt.ST["exceptions"].append({
                         "id": tt.ST["next_id"],
                         "date": str(item["d"]),
@@ -464,13 +662,20 @@ async def a_duel_new(request, user):
         await ai(
             request,
             user,
-            f'Составьте 5 интересных тестовых вопросов по-русски на тему «{topic}» (по 4 варианта ответа). '
-            'Ответ СТРОГО JSON: {"qs":[{"q":"Текст вопроса","a":["Вариант 1","Вариант 2","Вариант 3","Вариант 4"],"c":0}]}, '
-            'где c — индекс верного ответа (0..3).',
+            f'Составьте 5 тестовых вопросов по-русски на тему «{topic}» (без сырого LaTeX, используй Unicode-символы). '
+            'Ответ СТРОГО JSON: {"qs":[{"q":"Текст вопроса","a":["Вариант 1","Вариант 2","Вариант 3","Вариант 4"],"c":0}]}',
         )
     )
     i = secrets.token_urlsafe(4).replace("-", "").replace("_", "")[:6]
-    DB["duels"][i] = {"id": i, "topic": topic, "qs": r["qs"][:5], "res": {}, "created": time.time()}
+    qs = [
+        {
+            "q": clean_math(str(q["q"])),
+            "a": [clean_math(str(opt)) for opt in (q.get("a") or [])[:4]],
+            "c": int(q.get("c", 0)),
+        }
+        for q in (r.get("qs") or [])[:5]
+    ]
+    DB["duels"][i] = {"id": i, "topic": topic, "qs": qs, "res": {}, "created": time.time()}
     save()
     return {"id": i, "topic": topic}
 
@@ -502,7 +707,7 @@ async def a_duel_ans(request, user):
 
 
 # =====================================================================
-# 4. ГРУППОВЫЕ КОМНАТЫ, ЛИДЕРБОРД И ОБЩИЕ ДЕДЛАЙНЫ
+# 5. ГРУППОВЫЕ КОМНАТЫ И ЛИДЕРБОРД
 # =====================================================================
 def _active_group(request, u: dict) -> tuple:
     g = gid(request) or (u["gids"][-1] if u.get("gids") else "")
@@ -513,38 +718,21 @@ def _active_group(request, u: dict) -> tuple:
 async def a_board(request, user):
     u = U(request, user)
     g, gr = _active_group(request, u)
-    if gr:
-        rows = sorted(
-            (
-                {
-                    "name": v["name"],
-                    "avatar": v.get("avatar", "🧑‍💻"),
-                    "xp": int(v.get("xp", 0)),
-                    "level": int(v.get("xp", 0)) // 100 + 1,
-                    "streak": int(v.get("streak", 0)),
-                    "me": v["id"] == u["id"],
-                }
-                for v in DB["u"].values()
-                if g in v.get("gids", [])
-            ),
-            key=lambda r: (-r["xp"], -r["streak"]),
-        )[:30]
-    else:
-        # Глобальный топ, если пользователь ещё не вступил в комнату группы
-        rows = sorted(
-            (
-                {
-                    "name": v["name"],
-                    "avatar": v.get("avatar", "🧑‍💻"),
-                    "xp": int(v.get("xp", 0)),
-                    "level": int(v.get("xp", 0)) // 100 + 1,
-                    "streak": int(v.get("streak", 0)),
-                    "me": v["id"] == u["id"],
-                }
-                for v in DB["u"].values()
-            ),
-            key=lambda r: (-r["xp"], -r["streak"]),
-        )[:20]
+    pool_users = [v for v in DB["u"].values() if g in v.get("gids", [])] if gr else list(DB["u"].values())
+    rows = sorted(
+        (
+            {
+                "name": v["name"],
+                "avatar": v.get("avatar", "🧑‍💻"),
+                "xp": int(v.get("xp", 0)),
+                "level": int(v.get("xp", 0)) // 100 + 1,
+                "streak": int(v.get("streak", 0)),
+                "me": v["id"] == u["id"],
+            }
+            for v in pool_users
+        ),
+        key=lambda r: (-r["xp"], -r["streak"]),
+    )[:30]
 
     return {
         "rows": rows,
@@ -557,7 +745,6 @@ async def a_board(request, user):
 
 
 async def a_group_join(request, user):
-    """Создание или вход в комнату группы по коду (например, FPM-2026)."""
     b, u = await request.json(), U(request, user)
     code = re.sub(r"[^A-Za-zА-Яа-я0-9_-]", "", str(b.get("code") or "")).upper()[:16]
     title = str(b.get("title") or "").strip()[:50]
@@ -582,7 +769,6 @@ async def a_group_join(request, user):
 
 
 async def a_dl_add(request, user):
-    """Староста/ведущий добавляет общий дедлайн группы — он появляется у всех участников."""
     b, u = await request.json(), U(request, user)
     _, gr = _active_group(request, u)
     if not gr or gr["owner"] != u["id"]:
@@ -604,43 +790,98 @@ async def a_notify(request, user):
 
 
 # =====================================================================
-# 5. УТРЕННИЙ БРИФИНГ И ВЕЧЕРНИЙ ПУШ СПАСЕНИЯ СЕРИИ
+# 6. АККУРАТНЫЙ УТРЕННИЙ БРИФИНГ (БЕЗ ОБРЫВКОВ СЛОВ И МУСОРА)
 # =====================================================================
+def _clean_task_summary(raw_text: str, max_len: int = 85) -> str:
+    """Вычищает служебные строки («Ссылка на...», «Дедлайн:...») и обрезает строго по целым словам."""
+    txt = clean_math(core.strip_md(raw_text or ""))
+    cleaned_lines = []
+    for line in txt.splitlines():
+        s = line.strip(" \t•-*—")
+        if not s:
+            continue
+        low = s.lower()
+        if any(low.startswith(p) for p in ("дедлайн:", "📅 срок:", "срок:", "ссылка", "🔗", "✅ выполнил", "напоминание:")):
+            # Если строка начинается с «Напоминание: сдать лабу», оставляем саму суть после двоеточия
+            if low.startswith("напоминание:") and len(s) > 13:
+                s = s[12:].strip()
+            else:
+                continue
+        if re.fullmatch(r"https?://\S+", s):
+            continue
+        cleaned_lines.append(s)
+
+    joined = re.sub(r"\s+", " ", " · ".join(cleaned_lines)).strip()
+    if not joined:
+        joined = re.sub(r"\s+", " ", txt).strip()
+    if len(joined) <= max_len:
+        return joined
+    cut = joined.rfind(" ", 0, max_len)
+    return (joined[:cut] if cut > max_len // 2 else joined[:max_len]).rstrip(" .,;:-·") + "…"
+
+
+def _fmt_nice_deadline(raw_dl: str) -> str:
+    d_obj = core.parse_deadline(raw_dl)
+    if not d_obj:
+        return raw_dl
+    if len(str(raw_dl).strip()) <= 10 or (d_obj.hour == 23 and d_obj.minute == 59):
+        return d_obj.strftime("%d.%m.%Y")
+    return d_obj.strftime("%d.%m в %H:%M")
+
+
 def build_briefing_text(u: dict) -> str:
     t_date = day()
     t_str = str(t_date)
-    lines = [f"☀️ <b>Утренний брифинг · {u.get('name', 'Друг')}</b>"]
-    lines.append(f"🔥 Серия: <b>{u.get('streak', 0)} дн.</b> · ⚡ Уровень <b>{int(u.get('xp', 0)) // 100 + 1}</b> ({u.get('xp', 0)} XP)")
+    lvl = int(u.get("xp", 0)) // 100 + 1
+    lines = [
+        f"☀️ <b>Доброе утро, {core.esc(u.get('name', 'Друг'))}!</b>",
+        f"🔥 Серия: <b>{u.get('streak', 0)} дн.</b> · ⚡ Уровень <b>{lvl}</b> ({u.get('xp', 0)} XP)",
+    ]
 
-    # 1. Пары на сегодня из ext_timetable
+    # 1. Пары на сегодня
     tt = sys.modules.get("ext_timetable")
     if tt:
-        try:
+        with suppress(Exception):
             dp = tt.day_payload(t_date)
             lessons = dp.get("lessons") or []
             if lessons:
-                lines.append("\n📅 <b>Пары на сегодня:</b>")
+                lines.append("\n📅 <b>Расписание на сегодня:</b>")
                 for l in lessons[:5]:
-                    room = f" (ауд. {l['room']})" if l.get("room") else ""
+                    room = f" · ауд. {l['room']}" if l.get("room") else ""
                     lines.append(f"  • <code>{l['start']}–{l['end']}</code> <b>{core.esc(l['subject'])}</b>{core.esc(room)}")
             else:
-                lines.append("\n🎉 <b>Сегодня пар нет</b> — отличное время для фокуса на своих целях.")
-        except Exception:
-            pass
+                lines.append("\n🎉 <b>Сегодня пар по расписанию нет!</b>")
 
-    # 2. Горящие задачи / дедлайны
-    active = [t for t in core.active_tasks() if t.get("deadline")]
-    if active:
-        lines.append("\n⏳ <b>Главные дедлайны:</b>")
-        for task in active[:3]:
-            snippet = core.esc(core.strip_md(task["text"]).strip()[:70])
-            lines.append(f"  • до <b>{core.esc(task['deadline'])}</b> — {snippet}")
+    # 2. Ближайшие актуальные дедлайны (отсортированные по дате, без мусора и обрывков)
+    now = core.now_local()
+    uid = u.get("tg")
+    is_main = core.is_primary_user(uid)
+    candidates = []
+    for task in core.active_tasks():
+        if not is_main and task.get("acc") != u.get("id"):
+            continue
+        dl_raw = task.get("deadline", "")
+        if not dl_raw:
+            continue
+        dl_dt = core.parse_deadline(dl_raw)
+        if dl_dt and dl_dt < now - timedelta(days=1):
+            continue  # старые просроченные не спамим в утреннюю сводку
+        candidates.append((dl_dt or now + timedelta(days=365), task))
 
-    # 3. Пункт из плана «Сдать за N дней»
+    candidates.sort(key=lambda x: x[0])
+    if candidates:
+        lines.append("\n⏳ <b>Ближайшие дедлайны:</b>")
+        for _, task in candidates[:4]:
+            nice_dl = core.esc(_fmt_nice_deadline(task["deadline"]))
+            summary = core.esc(_clean_task_summary(task["text"], 82))
+            topic = f" <i>({core.esc(task['topic'])})</i>" if task.get("topic") else ""
+            lines.append(f"  • <b>до {nice_dl}</b>{topic} — {summary}")
+
+    # 3. Пункт из плана подготовки к экзамену
     plan_item = next((p["t"] for p in u.get("plan", []) if p.get("d") == t_str), "")
     if plan_item:
         subj = core.esc(u.get("plan_subject") or "Экзамен")
-        lines.append(f"\n🎯 <b>План «{subj}» на сегодня:</b>\n  • {core.esc(plan_item)}")
+        lines.append(f"\n🎯 <b>План подготовки ({subj}):</b>\n  • {core.esc(plan_item)}")
 
     lines.append("\n⚡ <i>Закрой 3-минутный квест в приложении, чтобы продлить серию!</i>")
     return "\n".join(lines)
@@ -648,9 +889,7 @@ def build_briefing_text(u: dict) -> str:
 
 async def send_tg_push(uid: int, html_text: str) -> None:
     url = core.webapp_url()
-    kb = None
-    if url:
-        kb = {"inline_keyboard": [[{"text": "📱 Открыть приложение", "web_app": {"url": url}}]]}
+    kb = {"inline_keyboard": [[{"text": "📱 Открыть приложение", "web_app": {"url": url}}]]} if url else None
     payload = {"chat_id": int(uid), "text": html_text, "parse_mode": "HTML"}
     if kb:
         payload["reply_markup"] = kb
@@ -659,7 +898,6 @@ async def send_tg_push(uid: int, html_text: str) -> None:
 
 
 async def a_briefing_now(request, user):
-    """Ручная отправка красивого утреннего брифинга в Telegram (для проверки и удобства)."""
     u = U(request, user)
     if not u.get("tg"):
         raise ValueError("Не найден Telegram ID профиля")
@@ -695,7 +933,7 @@ async def tick() -> None:
 
 
 # =====================================================================
-# 6. ПОДКЛЮЧЕНИЕ МАРШРУТОВ И КОМАНДЫ /top В TELEGRAM
+# 7. ПОДКЛЮЧЕНИЕ МАРШРУТОВ И КОМАНДЫ /top
 # =====================================================================
 def setup(c) -> None:
     global core
@@ -706,7 +944,6 @@ def setup(c) -> None:
     core.PLUGIN_TICKS.append(tick)
     load()
 
-    # Вирусная команда /top или /leaderboard прямо в Telegram-чате
     @core.dp.message(Command("top", "leaderboard"))
     async def cmd_top_leaderboard(message):
         rows = sorted(
@@ -735,10 +972,12 @@ def setup(c) -> None:
         ("GET", "/api/g/state", a_state),
         ("POST", "/api/g/checkin", a_checkin_lessons),
         ("POST", "/api/g/snap", a_snap),
+        ("POST", "/api/g/pdf", a_pdf_export),
         ("POST", "/api/g/goals", a_goal_add),
         ("DELETE", "/api/g/goals/{id}", a_goal_del),
         ("POST", "/api/g/goals/{id}/check", a_goal_check),
         ("POST", "/api/g/journal", a_journal),
+        ("DELETE", "/api/g/journal/{id}", a_journal_del),
         ("POST", "/api/g/plan", a_plan),
         ("POST", "/api/g/duel", a_duel_new),
         ("GET", "/api/g/duel/{id}", a_duel_get),
