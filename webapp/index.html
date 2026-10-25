@@ -767,7 +767,7 @@ details.acc .content{padding:0 14px 12px}
 nav button .ic svg{width:21px;height:21px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;display:block}
 nav button.on .ic svg{stroke:var(--accent);filter:drop-shadow(0 2px 8px var(--accent-soft))}
 
-.g-shell{display:flex;flex-direction:column;gap:14px;animation:gFade .28s var(--ease)}
+.g-shell{display:flex;flex-direction:column;gap:14px;padding-bottom:28px;animation:gFade .28s var(--ease)}
 @keyframes gFade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
 
 .g-editorial-hero{
@@ -786,21 +786,23 @@ nav button.on .ic svg{stroke:var(--accent);filter:drop-shadow(0 2px 8px var(--ac
 @media (max-width:380px){.g-hero-grid{grid-template-columns:1fr}}
 
 .g-kicker{
-  font-size:0.7rem;font-weight:800;letter-spacing:.12em;text-transform:uppercase;
-  color:#a3e635;display:inline-flex;align-items:center;gap:6px;
+  font-size:0.7rem;font-weight:800;letter-spacing:.1em;text-transform:uppercase;
+  color:#84cc16;display:inline-flex;align-items:center;gap:6px;
 }
+[data-theme="light"] .g-kicker{color:#15803d}
 .g-editorial-hero.at-risk .g-kicker{color:var(--warn)}
+
 .g-big-streak{
-  font-size:clamp(2.5rem,9vw,3.6rem);font-weight:900;line-height:0.95;
-  letter-spacing:-.04em;margin:6px 0 4px;display:flex;align-items:baseline;gap:8px;
+  font-size:clamp(2.4rem,8.5vw,3.4rem);font-weight:900;line-height:0.95;
+  letter-spacing:-.04em;margin:6px 0 4px;display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;
 }
-.g-big-streak small{font-size:0.95rem;font-weight:700;color:var(--text-2);letter-spacing:0}
+.g-big-streak small{font-size:0.92rem;font-weight:700;color:var(--text-2);letter-spacing:0}
 
 .g-companion-stage{
-  position:relative;height:158px;display:flex;align-items:center;justify-content:center;
+  position:relative;height:152px;display:flex;align-items:center;justify-content:center;
   cursor:pointer;user-select:none;
 }
-.g-companion-stage svg{width:156px;height:156px;overflow:visible;transition:transform .3s var(--ease)}
+.g-companion-stage svg{width:150px;height:150px;overflow:visible;transition:transform .3s var(--ease)}
 .g-companion-stage:active svg{transform:scale(0.93)}
 .g-float-island{animation:gIslandFloat 4s ease-in-out infinite}
 @keyframes gIslandFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}
@@ -812,22 +814,14 @@ nav button.on .ic svg{stroke:var(--accent);filter:drop-shadow(0 2px 8px var(--ac
   display:flex;flex-direction:column;gap:6px;
 }
 .g-xp-bar{height:6px;border-radius:999px;background:var(--surface-3);overflow:hidden}
-.g-xp-bar i{display:block;height:100%;background:linear-gradient(90deg,#a3e635,#10b981);border-radius:inherit;transition:width .5s var(--ease)}
-
-.g-bento-row{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
-.g-bento-cell{
-  background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);
-  padding:11px 10px;display:flex;flex-direction:column;justify-content:space-between;
-}
-.g-bento-cell .lbl{font-size:0.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3)}
-.g-bento-cell .val{font-size:1.25rem;font-weight:900;letter-spacing:-.02em;margin-top:4px}
+.g-xp-bar i{display:block;height:100%;background:linear-gradient(90deg,#84cc16,#10b981);border-radius:inherit;transition:width .5s var(--ease)}
 
 .g-sec-head{
-  display:flex;align-items:baseline;justify-content:space-between;gap:8px;
-  margin:8px 2px 2px;padding-bottom:6px;border-bottom:1px solid var(--line);
+  display:flex;align-items:center;justify-content:space-between;gap:8px;
+  margin:8px 2px 2px;padding-bottom:6px;border-bottom:1px solid var(--line);flex-wrap:wrap;
 }
-.g-sec-head h2{margin:0;font-size:1.05rem;font-weight:900;letter-spacing:-.02em}
-.g-sec-head .num{font-family:ui-monospace,Menlo,monospace;font-size:0.75rem;color:var(--text-3);font-weight:700}
+.g-sec-head h2{margin:0;font-size:1.03rem;font-weight:900;letter-spacing:-.02em}
+.g-sec-head .num{font-family:ui-monospace,Menlo,monospace;font-size:0.74rem;color:var(--text-3);font-weight:700}
 
 .g-quest-list{display:flex;flex-direction:column;gap:8px}
 .g-quest-item{
@@ -835,31 +829,35 @@ nav button.on .ic svg{stroke:var(--accent);filter:drop-shadow(0 2px 8px var(--ac
   background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);
   cursor:pointer;transition:.18s var(--ease);
 }
-.g-quest-item:hover{border-color:var(--line-2)}
-.g-quest-item.done{background:rgba(16,185,129,0.07);border-color:rgba(16,185,129,0.28)}
+.g-quest-item.done{background:rgba(16,185,129,0.08);border-color:rgba(16,185,129,0.32)}
 .g-quest-check{
-  width:24px;height:24px;border-radius:50%;border:2px solid var(--line-3);
-  display:grid;place-items:center;flex:none;font-size:0.8rem;font-weight:900;
+  flex:0 0 26px;width:26px;height:26px;border-radius:50%;border:2px solid var(--line-3);
+  display:grid;place-items:center;font-size:0.8rem;font-weight:900;
 }
-.g-quest-item.done .g-quest-check{background:var(--ok);border-color:var(--ok);color:#042f1e}
+.g-quest-item.done .g-quest-check{background:var(--ok);border-color:var(--ok);color:#ffffff}
 
 .g-habit-card{
   background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);
-  padding:12px 14px;display:flex;flex-direction:column;gap:9px;
+  padding:13px 14px;display:flex;flex-direction:column;gap:10px;
 }
+.g-habit-top{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
+.g-habit-title{font-weight:800;font-size:1rem;line-height:1.3;word-break:break-word}
 .g-heat-dots{display:grid;grid-template-columns:repeat(14,1fr);gap:4px}
 .g-heat-dot{
   height:14px;border-radius:4px;background:var(--surface-3);
   border:1px solid var(--line);transition:.2s var(--ease);
 }
-.g-heat-dot.on{background:#a3e635;border-color:#84cc16;box-shadow:0 0 8px rgba(163,230,53,0.35)}
+.g-heat-dot.on{background:#84cc16;border-color:#65a30d;box-shadow:0 0 6px rgba(132,204,22,0.3)}
 .g-heat-dot.today{outline:1.5px solid var(--text-2);outline-offset:1px}
+
+.g-ai-reply{color:#a3e635;font-weight:500}
+[data-theme="light"] .g-ai-reply{color:#15803d}
 
 .g-rank-row{
   display:flex;align-items:center;gap:10px;padding:10px 12px;
   border-radius:var(--radius);background:var(--surface);border:1px solid var(--line);
 }
-.g-rank-row.me{border-color:#a3e635;background:rgba(163,230,53,0.08)}
+.g-rank-row.me{border-color:#84cc16;background:rgba(132,204,22,0.09)}
 .g-rank-pos{width:26px;font-weight:900;font-family:ui-monospace,Menlo,monospace;color:var(--text-2);text-align:center}
 </style>
 </head>
@@ -1300,8 +1298,36 @@ function previewFileModal(fileObj, onRemove) {
    ========================================================= */
 const INLINE_MD_RE = /(`[^`\n]+`|\*\*[^*\n]+\*\*|__[^_\n]+__|\[[^\]\n]+\]\(https?:\/\/[^\s)]+\)|(?<![\w*])\*[^*\n]+\*(?![\w*]))/g;
 
+const _UI_SUB = {"0":"₀","1":"₁","2":"₂","3":"₃","4":"₄","5":"₅","6":"₆","7":"₇","8":"₈","9":"₉","+":"₊","-":"₋","=":"₌","(":"₍",")":"₎","n":"ₙ","i":"ᵢ","j":"ⱼ","k":"ₖ"};
+const _UI_SUP = {"0":"⁰","1":"¹","2":"²","3":"³","4":"⁴","5":"⁵","6":"⁶","7":"⁷","8":"⁸","9":"⁹","+":"⁺","-":"⁻","=":"⁼","(":"⁽",")":"⁾","n":"ⁿ"};
+const _UI_TEX = {
+  "\\neq":"≠","\\ne":"≠","\\leq":"≤","\\le":"≤","\\geq":"≥","\\ge":"≥","\\approx":"≈","\\equiv":"≡",
+  "\\pm":"±","\\mp":"∓","\\times":"×","\\cdot":"·","\\div":"÷","\\infty":"∞","\\partial":"∂","\\nabla":"∇",
+  "\\forall":"∀","\\exists":"∃","\\in":"∈","\\notin":"∉","\\subset":"⊂","\\subseteq":"⊆","\\cup":"∪","\\cap":"∩",
+  "\\sum":"∑","\\prod":"∏","\\int":"∫","\\Rightarrow":"⇒","\\implies":"⇒","\\Leftrightarrow":"⇔","\\iff":"⇔",
+  "\\rightarrow":"→","\\to":"→","\\leftarrow":"←","\\perp":"⊥","\\parallel":"∥","\\angle":"∠","\\triangle":"△",
+  "\\alpha":"α","\\beta":"β","\\gamma":"γ","\\delta":"δ","\\epsilon":"ε","\\varepsilon":"ε","\\theta":"θ",
+  "\\lambda":"λ","\\mu":"μ","\\pi":"π","\\rho":"ρ","\\sigma":"σ","\\tau":"τ","\\phi":"φ","\\varphi":"φ","\\omega":"ω",
+  "\\Gamma":"Γ","\\Delta":"Δ","\\Theta":"Θ","\\Lambda":"Λ","\\Pi":"Π","\\Sigma":"Σ","\\Phi":"Φ","\\Omega":"Ω"
+};
+
+function cleanMathUi(str) {
+  let s = String(str || "");
+  s = s.replace(/\\(?:dfrac|tfrac|frac)\s*\{([^{}]+)\}\s*\{([^{}]+)\}/g, "($1)/($2)");
+  s = s.replace(/\\sqrt\s*\{([^{}]+)\}/g, "√($1)");
+  for (const [k, v] of Object.entries(_UI_TEX)) {
+    s = s.split(k).join(v);
+  }
+  s = s.replace(/_\{([0-9+\-=()nijk]+)\}/g, (_, g) => g.split("").map(c => _UI_SUB[c] || c).join(""));
+  s = s.replace(/_([0-9nijk])\b/g, (_, c) => _UI_SUB[c] || c);
+  s = s.replace(/\^\{([0-9+\-=()n]+)\}/g, (_, g) => g.split("").map(c => _UI_SUP[c] || c).join(""));
+  s = s.replace(/\^([0-9n])\b/g, (_, c) => _UI_SUP[c] || c);
+  s = s.replace(/\$\$(.+?)\$\$/gs, "$1").replace(/\$(?!\s)([^$\n]+?)(?<!\s)\$/g, "$1");
+  return s;
+}
+
 function renderInlineMd(text) {
-  const parts = String(text || "").split(INLINE_MD_RE);
+  const parts = cleanMathUi(text).split(INLINE_MD_RE);
   const nodes = [];
   for (const part of parts) {
     if (!part) continue;
@@ -2515,6 +2541,41 @@ async function viewTasks() {
       h("div", { class:"sub" }, total ? total + " активных задач по группам и темам" : "Всё под контролем")),
     h("button", { class:"btn small", onclick: () => taskCreateForm(availGroups) }, "➕ Добавить")
   ));
+
+  if (d.done_tasks && d.done_tasks.length) {
+    root.append(
+      h("details", { class:"group-acc", style:{marginTop:"14px"} },
+        h("summary", {},
+          h("div", { class:"group-icon" }, "✅"),
+          h("div", { class:"group-meta" },
+            h("div", { class:"g-title" }, "Недавно выполненные"),
+            h("div", { class:"g-sub" }, "Можно отменить выполнение и вернуть задачу в работу")
+          ),
+          h("span", { class:"chip green" }, d.done_tasks.length),
+          h("span", { class:"chev" })
+        ),
+        h("div", { class:"group-body" },
+          ...d.done_tasks.map(dt =>
+            h("div", { class:"card tight row between", style:{marginBottom:0} },
+              h("div", { class:"grow" },
+                h("div", { style:{fontWeight:600, fontSize:"0.9rem", textDecoration:"line-through", opacity:0.8} }, dt.text),
+                h("div", { class:"sub" }, "🏷 " + dt.topic + (dt.deadline ? " · было до " + dt.deadline : ""))
+              ),
+              h("button", {
+                class:"btn ghost small",
+                onclick: async () => {
+                  await api("/api/tasks/" + dt.id + "/undone", { method:"POST" });
+                  hap("medium");
+                  toast("Задача возвращена в работу ↩️", "ok");
+                  render();
+                }
+              }, "↩️ Вернуть")
+            )
+          )
+        )
+      )
+    );
+  }
 
   if (!total) {
     root.append(empty("🎈", "Активных задач нет", "Всё сделано! Можешь добавить новую задачу или таймер.",
@@ -3764,7 +3825,6 @@ async function viewGrowth() {
   const comp = st.companion || { stage: 1, title: "Семя Импульса", desc: "" };
   const root = h("div", { class:"g-shell" });
 
-  // 1. EDITORIAL HERO + ЖИВОЙ ОСТРОВ
   root.append(
     h("div", { class:"g-editorial-hero" + (st.risk ? " at-risk" : "") },
       h("div", { class:"g-hero-grid" },
@@ -3785,7 +3845,19 @@ async function viewGrowth() {
             h("button", {
               class:"chip purple",
               onclick: () => generateStoryCardModal(st)
-            }, "📸 В Сторис")
+            }, "📸 В Сторис"),
+            h("button", {
+              class:"chip",
+              onclick: async (ev) => {
+                ev.target.disabled = true;
+                toast("Готовлю PDF-отчёт прогресса…");
+                try {
+                  const f = await api("/api/g/pdf", { method:"POST", body:{ kind:"report" } });
+                  previewFileModal(f);
+                } catch (e) { toast(e.message, "err"); }
+                ev.target.disabled = false;
+              }
+            }, "📄 PDF-отчёт")
           )
         ),
         buildCompanionSvg(comp.stage, st.risk, st.streak)
@@ -3800,7 +3872,6 @@ async function viewGrowth() {
     )
   );
 
-  // Переключатель режимов внутри вкладки Рост
   root.append(seg([
     ["hub", "🌱 Квест & Привычки"],
     ["ai", "🧠 ИИ-Прокачка"],
@@ -3820,9 +3891,8 @@ async function viewGrowth() {
 
 function renderGrowthHubPane(st) {
   const box = h("div", { class:"g-shell" });
-
-  // ЕЖЕДНЕВНЫЙ КВЕСТ НА 3 МИНУТЫ
   const doneCount = (st.quest || []).filter(q => q.done).length;
+
   box.append(
     h("div", { class:"g-sec-head" },
       h("h2", {}, "Ежедневный квест на 3 минуты"),
@@ -3847,29 +3917,31 @@ function renderGrowthHubPane(st) {
           h("span", { class:"chip " + (q.done ? "green" : "gray") }, `+${q.xp} XP`)
         )
       ),
-      // Быстрый чекин посещения пар
       h("div", {
         class: "g-quest-item" + (st.lessons_checked ? " done" : ""),
         onclick: async () => {
-          if (st.lessons_checked) return toast("Пары за сегодня уже отмечены ✅");
           hap("medium");
-          await api("/api/g/checkin", { method:"POST" });
-          pick("success");
-          toast("Посещение пар отмечено! +15 XP 🎓", "ok");
+          const res = await api("/api/g/checkin", { method:"POST" });
+          if (res.undone) {
+            toast("Отметка посещения пар снята ↩️");
+          } else {
+            pick("success");
+            toast("Посещение пар отмечено! +15 XP 🎓", "ok");
+          }
           render();
         }
       },
         h("div", { class:"g-quest-check" }, st.lessons_checked ? "✓" : "🎓"),
         h("div", { class:"grow" },
           h("div", { style:{fontWeight:700, fontSize:"0.94rem"} }, "Был(а) сегодня на парах / учёбе"),
-          h("div", { class:"sub" }, st.lessons_checked ? "Чекин засчитан" : "Отметь посещение в 1 тап")
+          h("div", { class:"sub" }, st.lessons_checked ? "Чекин засчитан (нажми, чтобы отменить)" : "Отметь посещение в 1 тап")
         ),
-        h("span", { class:"chip " + (st.lessons_checked ? "green" : "cyan") }, "+15 XP")
+        h("span", { class:"chip " + (st.lessons_checked ? "green" : "cyan") }, st.lessons_checked ? "↩️ Отменить" : "+15 XP")
       )
     )
   );
 
-  // ЦЕЛИ И ПРИВЫЧКИ (МАТРИЦА 14 ДНЕЙ)
+  // ЦЕЛИ И ПРИВЫЧКИ (БЕЗ СЪЕЗЖАНИЯ ТЕКСТА)
   const last14 = Array.from({ length: 14 }, (_, i) => addDays(st.today, -(13 - i)));
   const CAT_LABELS = {
     body: "💪 Спорт",
@@ -3912,30 +3984,32 @@ function renderGrowthHubPane(st) {
       const doneToday = (g.days || []).includes(st.today);
       box.append(
         h("div", { class:"g-habit-card" },
-          h("div", { class:"row between" },
-            h("div", { class:"grow" },
-              h("div", { class:"row", style:{gap:"6px"} },
-                h("span", { style:{fontWeight:800, fontSize:"0.96rem"} }, g.name),
-                h("span", { class:"chip gray", style:{fontSize:"0.7rem", padding:"2px 7px"} }, CAT_LABELS[g.cat] || "🎯 Цель")
-              ),
-              h("div", { class:"sub" }, `Выполнено дней за 2 недели: ${(g.days || []).length}`)
-            ),
-            h("button", {
-              class: "btn small " + (doneToday ? "subtle" : ""),
-              onclick: async () => {
-                hap("medium");
-                await api("/api/g/goals/" + g.id + "/check", { method:"POST" });
-                render();
-              }
-            }, doneToday ? "✓ Сегодня" : "+10 XP"),
-            h("button", {
-              class:"btn ghost small icon",
-              onclick: async () => {
-                if (!confirm(`Удалить привычку «${g.name}»?`)) return;
-                await api("/api/g/goals/" + g.id, { method:"DELETE" });
-                render();
-              }
-            }, "✕")
+          h("div", { class:"g-habit-top" },
+            h("span", { class:"chip gray" }, CAT_LABELS[g.cat] || "🎯 Цель"),
+            h("div", { class:"row", style:{gap:"6px"} },
+              h("button", {
+                class: "btn small " + (doneToday ? "subtle" : ""),
+                onclick: async () => {
+                  hap("medium");
+                  const r = await api("/api/g/goals/" + g.id + "/check", { method:"POST" });
+                  toast(r.checked ? "Привычка отмечена! +10 XP ✅" : "Отметка снята ↩️", r.checked ? "ok" : "");
+                  render();
+                }
+              }, doneToday ? "✓ Сегодня (отменить)" : "Отметить (+10 XP)"),
+              h("button", {
+                class:"btn ghost small icon",
+                title:"Удалить привычку",
+                onclick: async () => {
+                  if (!confirm(`Удалить привычку «${g.name}»?`)) return;
+                  await api("/api/g/goals/" + g.id, { method:"DELETE" });
+                  render();
+                }
+              }, "✕")
+            )
+          ),
+          h("div", {},
+            h("div", { class:"g-habit-title" }, g.name),
+            h("div", { class:"sub", style:{marginTop:"2px"} }, `Выполнено дней за 2 недели: ${(g.days || []).length} из 14`)
           ),
           h("div", { class:"g-heat-dots" },
             ...last14.map(dStr =>
@@ -3950,9 +4024,55 @@ function renderGrowthHubPane(st) {
     });
   }
 
-  // ВЕЧЕРНИЙ ДНЕВНИК С ИИ-РЕФЛЕКСИЕЙ
-  const jInp = h("textarea", { placeholder:"Что сегодня получилось круто? Что отняло энергию? Напиши пару мыслей…" });
-  const jReplyBox = h("div", {});
+  // ВЕЧЕРНИЙ ДНЕВНИК С РАЗБИВКОЙ ПО ДНЯМ И УДАЛЕНИЕМ
+  const jInp = h("textarea", { placeholder:"Как реально прошёл день? Что получилось, а что устал делать?…" });
+  const groupedJournal = new Map();
+  (st.journal || []).slice().reverse().forEach(j => {
+    const dKey = j.d || st.today;
+    if (!groupedJournal.has(dKey)) groupedJournal.set(dKey, []);
+    groupedJournal.get(dKey).push(j);
+  });
+
+  const journalDaysNodes = [];
+  let dayIdx = 0;
+  for (const [dKey, entries] of groupedJournal.entries()) {
+    const isToday = dKey === st.today;
+    journalDaysNodes.push(
+      h("details", { class:"group-acc", open: dayIdx === 0, style:{marginBottom:"8px"} },
+        h("summary", {},
+          h("div", { class:"group-icon" }, "📅"),
+          h("div", { class:"group-meta" },
+            h("div", { class:"g-title" }, isToday ? `Сегодня (${fmtShort(dKey)})` : fmtShort(dKey)),
+            h("div", { class:"g-sub" }, `Записей за день: ${entries.length}`)
+          ),
+          h("span", { class:"chip gray" }, entries.length),
+          h("span", { class:"chev" })
+        ),
+        h("div", { class:"group-body" },
+          ...entries.map(j =>
+            h("div", { class:"info-box", style:{marginBottom:0} },
+              h("div", { class:"row between", style:{marginBottom:"6px"} },
+                h("span", { class:"info-title", style:{marginBottom:0} }, "✍️ Запись"),
+                j.id ? h("button", {
+                  class:"btn danger small icon",
+                  title:"Удалить запись",
+                  onclick: async () => {
+                    if (!confirm("Удалить эту запись рефлексии?")) return;
+                    await api("/api/g/journal/" + j.id, { method:"DELETE" });
+                    toast("Запись удалена 🗑");
+                    render();
+                  }
+                }, "🗑") : null
+              ),
+              h("div", { style:{marginBottom:"8px", whiteSpace:"pre-wrap", fontWeight:500} }, j.t),
+              h("div", { class:"info-body g-ai-reply" }, "💡 " + j.ai)
+            )
+          )
+        )
+      )
+    );
+    dayIdx++;
+  }
 
   box.append(
     h("div", { class:"g-sec-head" },
@@ -3967,35 +4087,24 @@ function renderGrowthHubPane(st) {
           const txt = jInp.value.trim();
           if (!txt) return toast("Напиши хотя бы пару слов", "err");
           ev.target.disabled = true;
-          ev.target.textContent = "⏳ ИИ анализирует запись…";
+          ev.target.textContent = "⏳ ИИ отвечает…";
           try {
-            const res = await api("/api/g/journal", { method:"POST", body:{ text: txt } });
+            await api("/api/g/journal", { method:"POST", body:{ text: txt } });
             pick("success");
             jInp.value = "";
-            jReplyBox.replaceChildren(
-              h("div", { class:"info-box", style:{marginTop:"8px", borderColor:"#a3e635"} },
-                h("div", { class:"info-title" }, "✨ Отклик ментора"),
-                h("div", { class:"info-body" }, res.ai)
-              )
-            );
-            toast("Запись сохранена! +12 XP", "ok");
-          } catch (e) { toast(e.message, "err"); }
-          ev.target.disabled = false;
-          ev.target.textContent = "✨ Сохранить и получить рефлексию";
+            toast("Рефлексия сохранена!", "ok");
+            render();
+          } catch (e) {
+            toast(e.message, "err");
+            ev.target.disabled = false;
+            ev.target.textContent = "✨ Сохранить и получить рефлексию";
+          }
         }
-      }, "✨ Сохранить и получить рефлексию"),
-      jReplyBox,
-      ...(st.journal || []).slice().reverse().slice(0, 2).map(j =>
-        h("div", { class:"info-box", style:{marginBottom:0} },
-          h("div", { class:"info-title" }, "📅 " + j.d),
-          h("div", { class:"sub", style:{marginBottom:"6px"} }, j.t),
-          h("div", { class:"info-body", style:{color:"#a3e635"} }, "💡 " + j.ai)
-        )
-      )
-    )
+      }, "✨ Сохранить и получить рефлексию")
+    ),
+    ...journalDaysNodes
   );
 
-  // УТРЕННИЙ БРИФИНГ И УВЕДОМЛЕНИЯ БОТА
   box.append(
     h("div", { class:"card row between wrap" },
       h("div", { class:"grow" },
@@ -4022,6 +4131,136 @@ function renderGrowthHubPane(st) {
           }
         })
       )
+    )
+  );
+
+  return box;
+}
+
+function renderGrowthAiPane(st) {
+  const box = h("div", { class:"g-shell" });
+  let snapFiles = [];
+  let snapKind = "photo";
+  const fileLabel = h("span", {}, "📷 Выбрать фото задачи/конспекта или 🎤 аудио лекции");
+  const snapText = h("input", { type:"text", placeholder:"Доп. комментарий или тема (необязательно)…" });
+  const snapResult = h("div", {});
+
+  const snapInput = h("input", {
+    type:"file", accept:"image/*,audio/*,.ogg,.mp3,.m4a,.wav,.pdf", class:"hidden",
+    onchange: async (e) => {
+      if (!e.target.files || !e.target.files.length) return;
+      const f = e.target.files[0];
+      snapKind = (f.type || "").startsWith("audio/") || /\.(ogg|mp3|m4a|wav)$/i.test(f.name) ? "voice" : "photo";
+      snapFiles = await readFilesAsDataURL([f]);
+      fileLabel.textContent = (snapKind === "voice" ? "🎤 Аудио: " : "📷 Файл: ") + f.name;
+      toast("Файл готов к разбору", "ok");
+    }
+  });
+
+  box.append(
+    h("div", { class:"g-sec-head" },
+      h("h2", {}, "Сфоткал конспект / Голосовое с лекции"),
+      h("span", { class:"num" }, "РАЗБОР + КАРТОЧКИ + ТЕСТ + PDF")
+    ),
+    h("div", { class:"card stack" },
+      h("div", { class:"sub" },
+        "Загрузи фото доски/тетради или голосовое с пары — ИИ сделает разбор с чистыми формулами, сохранит карточки в «Учёбу», соберёт тест и позволит скачать конспект в PDF."),
+      h("label", { class:"file-upload-zone" }, fileLabel, snapInput),
+      snapText,
+      h("button", {
+        class:"btn block",
+        onclick: async (ev) => {
+          if (!snapFiles.length && !snapText.value.trim()) {
+            return toast("Прикрепи фото/аудио или введи текст задачи", "err");
+          }
+          ev.target.disabled = true;
+          ev.target.textContent = "⏳ ИИ разбирает материал и создаёт карточки…";
+          try {
+            const r = await api("/api/g/snap", {
+              method:"POST",
+              body:{ kind: snapKind, text: snapText.value.trim(), files: snapFiles, save_cards: true }
+            });
+            pick("success");
+            snapResult.replaceChildren(
+              h("div", { class:"info-box", style:{marginTop:"10px"} },
+                h("div", { class:"row between wrap", style:{marginBottom:"10px", gap:"6px"} },
+                  h("span", { class:"chip green" }, `🃏 Сохранено карточек: ${r.saved_cards || (r.cards || []).length}`),
+                  h("div", { class:"row wrap", style:{gap:"6px"} },
+                    (r.quiz && r.quiz.length) ? h("button", {
+                      class:"btn small",
+                      onclick: () => runQuizModal({ title: r.title, questions: r.quiz })
+                    }, "🎯 Пройти тест") : null,
+                    h("button", {
+                      class:"btn ghost small",
+                      onclick: async (btnEv) => {
+                        btnEv.target.disabled = true;
+                        try {
+                          const pdfFile = await api("/api/g/pdf", {
+                            method:"POST",
+                            body:{ kind:"snap", title: r.title || "Конспект", content: r.answer || "" }
+                          });
+                          previewFileModal(pdfFile);
+                        } catch (err) { toast(err.message, "err"); }
+                        btnEv.target.disabled = false;
+                      }
+                    }, "📄 Скачать в PDF")
+                  )
+                ),
+                renderMd(r.answer || "")
+              )
+            );
+            toast("Готово! Карточки добавлены в «Учёбу» 🎉", "ok");
+          } catch (e) { toast(e.message, "err"); }
+          ev.target.disabled = false;
+          ev.target.textContent = "🚀 Разобрать + создать карточки и тест";
+        }
+      }, "🚀 Разобрать + создать карточки и тест"),
+      snapResult
+    )
+  );
+
+  const subjInp = h("input", { type:"text", value: st.plan_subject || "", placeholder:"Напр., Математический анализ, Электродинамика…" });
+  const dateInp = h("input", { type:"date", value: st.plan_date || addDays(st.today, 14) });
+  const timeInp = h("input", { type:"time", value: "19:00" });
+
+  box.append(
+    h("div", { class:"g-sec-head" },
+      h("h2", {}, "Режим «Сдать экзамен за N дней»"),
+      h("span", { class:"num" }, "АВТО-СЛОТЫ В РАСПИСАНИИ")
+    ),
+    h("div", { class:"card stack" },
+      field("Предмет или экзамен", subjInp),
+      h("div", { class:"row" },
+        h("div", { class:"grow" }, field("Дата сдачи", dateInp)),
+        h("div", { class:"grow" }, field("Время слота в расписании", timeInp))
+      ),
+      h("button", {
+        class:"btn block",
+        onclick: async (ev) => {
+          if (!subjInp.value.trim() || !dateInp.value) return toast("Укажите предмет и дату", "err");
+          ev.target.disabled = true;
+          ev.target.textContent = "⏳ Строю план и ставлю в расписание…";
+          try {
+            const res = await api("/api/g/plan", {
+              method:"POST",
+              body:{ subject: subjInp.value.trim(), date: dateInp.value, time: timeInp.value, push_to_tt: true }
+            });
+            pick("success");
+            toast(`План готов! Добавлено слотов в расписание: ${res.added_to_tt}`, "ok");
+            render();
+          } catch (e) { toast(e.message, "err"); }
+          ev.target.disabled = false;
+          ev.target.textContent = "🗓 Построить план и добавить в «Пары»";
+        }
+      }, "🗓 Построить план и добавить в «Пары»"),
+      (st.plan && st.plan.length) ? h("div", { class:"stack", style:{marginTop:"8px"} },
+        ...st.plan.slice(0, 14).map(p =>
+          h("div", { class:"row", style:{padding:"8px 10px", background:"var(--surface-2)", borderRadius:"10px", border: p.d === st.today ? "1px solid #84cc16" : "1px solid var(--line)"} },
+            h("span", { class:"chip " + (p.d === st.today ? "green" : "gray") }, fmtShort(p.d)),
+            h("span", { class:"grow", style:{fontSize:"0.88rem"} }, p.t)
+          )
+        )
+      ) : null
     )
   );
 
