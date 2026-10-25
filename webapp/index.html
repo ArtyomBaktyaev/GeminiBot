@@ -760,6 +760,23 @@ details.acc .content{padding:0 14px 12px}
 }
 .theme-tile.active{border-color:var(--accent);background:var(--accent-soft)}
 .theme-swatch{width:18px;height:18px;border-radius:50%;flex:none}
+
+/* =========================================================
+   GROWTH LAYER: тема «Чернила» + блок серии/уровня
+   ========================================================= */
+[data-theme="ink"]{--bg:#0b0b0a;--surface:#13120f;--surface-2:#1a1814;--surface-3:#23211c;--glass:rgba(11,11,10,.92);
+  --text:#ece8df;--text-2:#8c877b;--text-3:#6b665c;--accent:#d7ff3f;--accent-2:#b8e02a;--accent-text:#0b0b0a;
+  --accent-soft:rgba(215,255,63,.13);--accent-soft-2:rgba(215,255,63,.06);--line:rgba(236,232,223,.09);--line-2:rgba(236,232,223,.16);
+  --radius:14px;--radius-lg:18px;--radius-xl:22px}
+[data-theme="ink"] h1,[data-theme="ink"] h2,[data-theme="ink"] h3{font-family:Georgia,"Iowan Old Style",serif;font-style:italic;font-weight:400;letter-spacing:0}
+[data-theme="ink"] nav .ic{display:none}[data-theme="ink"] nav button{font-family:Georgia,serif;font-style:italic;font-size:15px}
+.gr-hero{display:flex;align-items:center;gap:20px;padding:6px 2px 14px}.gr-tree{width:104px;flex:none;color:var(--text-3)}.gr-tree.w{filter:grayscale(1);opacity:.5}
+.gr-big{font:italic 400 76px/.9 Georgia,serif;color:var(--accent)}.gr-cap{color:var(--text-2);font-size:.82rem}
+.gr-dots{display:flex;gap:8px;margin:8px 0 4px}.gr-dots i{flex:0 0 28px;height:4px;border-radius:2px;background:var(--line-2)}.gr-dots i.f{background:var(--accent)}
+.gr-line{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:11px 0;border-bottom:1px solid var(--line)}.gr-line.me{color:var(--accent)}
+.gr-flip{font:italic 28px/1.25 Georgia,serif;text-align:center;padding:64px 12px;border:1px solid var(--line-2);border-radius:var(--radius-xl);margin:12px 0;min-height:180px}.gr-flip.b{color:var(--accent)}
+.gr-q{font:italic 21px/1.35 Georgia,serif;margin:10px 0}.gr-pre{white-space:pre-wrap;margin:12px 0}
+.gr-opt{display:block;width:100%;text-align:left;margin-top:8px}
 </style>
 </head>
 <body>
@@ -814,6 +831,7 @@ const FONTS_MAP = {
   serif: 'Georgia,"Times New Roman",serif'
 };
 const THEMES_LIST = [
+  { id: "ink", name: "Чернила", color: "#d7ff3f" },
   { id: "sapphire", name: "Сапфир", color: "#3b82f6" },
   { id: "violet", name: "Аметист", color: "#8b5cf6" },
   { id: "emerald", name: "Изумруд", color: "#10b981" },
@@ -826,14 +844,14 @@ const AVATAR_EMOJIS = ["🧑‍💻","🎓","🦊","⚡","🚀","🐱","🔥","�
 
 function loadUiPrefs() {
   try {
-    return Object.assign({ theme: "sapphire", font: "system", scale: 1.0 }, JSON.parse(localStorage.getItem(UI_PREFS_KEY) || "{}"));
+    return Object.assign({ theme: "ink", font: "system", scale: 1.0 }, JSON.parse(localStorage.getItem(UI_PREFS_KEY) || "{}"));
   } catch (e) {
-    return { theme: "sapphire", font: "system", scale: 1.0 };
+    return { theme: "ink", font: "system", scale: 1.0 };
   }
 }
 function applyUiPrefs(prefs) {
   prefs = prefs || loadUiPrefs();
-  document.documentElement.setAttribute("data-theme", prefs.theme || "sapphire");
+  document.documentElement.setAttribute("data-theme", prefs.theme || "ink");
   document.documentElement.style.setProperty("--font-main", FONTS_MAP[prefs.font] || FONTS_MAP.system);
   document.documentElement.style.setProperty("--ui-scale", String(prefs.scale || 1.0));
   try { localStorage.setItem(UI_PREFS_KEY, JSON.stringify(prefs)); } catch (e) {}
@@ -1280,6 +1298,7 @@ const TABS = [
   ["tt","📅","Пары"],
   ["tasks","📋","Задачи"],
   ["study","🧠","Учёба"],
+  ["grow","🌱","Рост"],
   ["chat","💬","Чат"],
 ];
 function drawNav() {
@@ -3361,11 +3380,133 @@ async function chatSettingsPane() {
 /* =========================================================
    VIEWS ROUTER & INITIAL BOOT
    ========================================================= */
+
+/* =========================================================
+   GROWTH: серия, XP, квест, цели, дневник, ИИ, план, дуэли, группа
+   ========================================================= */
+const G = { sub: "me", st: null };
+const gapi = (p, body, method) => api("/api/g" + p, { method: method || (body ? "POST" : "GET"), body });
+const gTree = (lv) => { let n = Math.min(lv + 3, 13), s = '<svg viewBox="0 0 120 120"><path d="M60 118V56" stroke="currentColor" stroke-width="3" fill="none"/>';
+  for (let i = 0; i < n; i++) { const a = i * 2.4, r = 7 + i * 3.4; s += `<circle cx="${60 + Math.cos(a) * r * 1.2}" cy="${60 - i * 3.7 + Math.sin(a) * 6}" r="${5 + i % 3 * 2}" fill="#d7ff3f" opacity="${.45 + .55 * i / n}"/>`; }
+  return s + "</svg>"; };
+async function gHero() {
+  const s = G.st = await gapi("/state"), t = h("div", { class: "gr-tree" + (s.risk ? " w" : "") }); t.innerHTML = gTree(s.level);
+  return h("div", { class: "card" }, h("div", { class: "gr-hero" }, t, h("div", {},
+    h("div", { class: "gr-big" }, s.streak), h("div", { class: "gr-cap" }, s.risk ? "серия под угрозой" : "дней подряд"),
+    h("div", { class: "gr-cap" }, "уровень " + s.level + " · " + s.xp + " xp" + (s.freeze ? " · заморозка ×" + s.freeze : "")))),
+    h("div", { class: "gr-cap" }, "Квест на 3 минуты"), h("div", { class: "gr-dots" }, [0, 1, 2].map(i => h("i", { class: s.done || i < s.flags.length ? "f" : "" }))),
+    h("div", { class: "gr-cap" }, s.done ? "Выполнен — серия засчитана." : "Любые три действия: карточки, вопрос ИИ, задача, цель, дневник."));
+}
+const _viewHome = viewHome;
+viewHome = async function () { const n = await _viewHome(); try { n.prepend(await gHero()); } catch (e) {} return n; };
+
+const gBack = () => h("button", { class: "btn ghost small", onclick: () => { G.sub = "me"; render(); } }, "← назад");
+const gShrink = f => new Promise(r => { const i = new Image(); i.onload = () => { const k = Math.min(1, 1280 / Math.max(i.width, i.height)), c = h("canvas"); c.width = i.width * k; c.height = i.height * k; c.getContext("2d").drawImage(i, 0, 0, c.width, c.height); r(c.toDataURL("image/jpeg", .75)); }; i.src = URL.createObjectURL(f); });
+
+async function viewGrow() {
+  const root = h("div", {}), hero = await gHero(), s = G.st, sb = G.sub;
+  if (sb.startsWith("play:")) return gPlay(sb.slice(5));
+  if (sb === "duelnew") return gDuelNew();
+  root.append(hero, seg([["me", "Прогресс"], ["ai", "ИИ"], ["plan", "План"], ["duel", "Дуэль"], ["grp", "Группа"]], sb, id => { G.sub = id; render(); }));
+  if (sb === "me") root.append(await gGoals(s));
+  else if (sb === "ai") root.append(gAsk());
+  else if (sb === "plan") root.append(gPlan(s));
+  else if (sb === "duel") root.append(h("div", { class: "card" }, h("h3", {}, "Дуэль знаний"), h("p", { class: "sub" }, "ИИ делает 5 вопросов по теме, вы отправляете ссылку другу — побеждает тот, кто ответил лучше."),
+    h("button", { class: "btn block", style: { marginTop: "12px" }, onclick: () => { G.sub = "duelnew"; render(); } }, "Создать дуэль")));
+  else root.append(await gGroup(s));
+  return root;
+}
+
+async function gGoals(s) {
+  const last = [...Array(14)].map((_, i) => { const d = new Date(); d.setDate(d.getDate() - 13 + i); return iso(d); });
+  const g = h("input", { placeholder: "Новая цель: спорт, английский, проект…" }), j = h("textarea", { placeholder: "Как прошёл день?" }), ai = h("p", { class: "sub", style: { marginTop: "10px" } }, s.journal[0] ? s.journal[0].ai : "");
+  return h("div", {}, h("div", { class: "card" }, h("h3", {}, "Цели"),
+    ...s.goals.map(x => h("div", { class: "gr-line" }, h("div", { class: "grow" }, x.name, h("div", { class: "gr-dots" }, last.map(d => h("i", { class: x.days.includes(d) ? "f" : "", style: { flexBasis: "14px" } })))),
+      h("button", { class: "btn small" + (x.days.includes(s.today) ? "" : " ghost"), onclick: async () => { await gapi("/goals/" + x.id + "/check", {}); hap(); render(); } }, "сегодня"),
+      h("button", { class: "btn small ghost", onclick: async () => { if (confirm("Удалить цель?")) { await gapi("/goals/" + x.id, null, "DELETE"); render(); } } }, "✕"))),
+    g, h("button", { class: "btn ghost small", style: { marginTop: "8px" }, onclick: async () => { if (!g.value.trim()) return; await gapi("/goals", { name: g.value }); render(); } }, "Добавить цель")),
+    h("div", { class: "card" }, h("h3", {}, "Дневник"), j, h("button", { class: "btn small", style: { marginTop: "8px" }, onclick: async e => { e.target.disabled = true;
+      try { ai.textContent = (await gapi("/journal", { text: j.value })).ai; j.value = ""; hap("medium"); } catch (x) { toast(x.message, "err"); } e.target.disabled = false; } }, "Записать"), ai));
+}
+
+function gAsk() {
+  const ta = h("textarea", { placeholder: "Вопрос, тема или задача…" }), out = h("div"), fi = h("input", { type: "file", accept: "image/*", hidden: true });
+  let rec = null;
+  const send = async (kind, files) => { out.replaceChildren(h("p", { class: "sub" }, "думаю…"));
+    try { const r = await gapi("/snap", { kind, text: ta.value, files }); hap("medium");
+      out.replaceChildren(h("div", { class: "gr-pre" }, r.answer), r.cards.length ? h("button", { class: "btn ghost small", onclick: async e => { e.target.disabled = true;
+        for (const c of r.cards) await api("/api/cards", { method: "POST", body: { front: c.front, back: c.back, transcription: "", example: "" } });
+        e.target.remove(); toast("Карточки сохранены"); } }, "В карточки · " + r.cards.length) : null);
+    } catch (e) { out.replaceChildren(); toast(e.message, "err"); } };
+  fi.onchange = async () => { if (fi.files[0]) send("photo", [{ name: "photo.jpg", type: "image/jpeg", data: await gShrink(fi.files[0]) }]); };
+  const mic = async b => { if (rec) return rec.stop();
+    try { const st = await navigator.mediaDevices.getUserMedia({ audio: true }), ch = []; rec = new MediaRecorder(st);
+      rec.ondataavailable = e => ch.push(e.data);
+      rec.onstop = () => { st.getTracks().forEach(x => x.stop()); const bl = new Blob(ch, { type: rec.mimeType }); rec = null; b.textContent = "Голос";
+        const f = new FileReader(); f.onload = () => send("voice", [{ name: "lecture.webm", type: bl.type.split(";")[0], data: f.result }]); f.readAsDataURL(bl); };
+      rec.start(); b.textContent = "Стоп"; } catch (e) { toast("Нет доступа к микрофону", "err"); } };
+  return h("div", { class: "card" }, h("h3", {}, "Спросить ИИ"), ta, h("div", { class: "btn-row", style: { marginTop: "8px" } },
+    h("button", { class: "btn", onclick: () => send("ask") }, "Спросить"), h("button", { class: "btn ghost", onclick: () => fi.click() }, "Фото задачи"),
+    h("button", { class: "btn ghost", onclick: e => mic(e.target) }, "Голос")), fi, out);
+}
+
+function gPlan(s) {
+  const sj = h("input", { placeholder: "Предмет или экзамен" }), dt = h("input", { type: "date" }), box = h("div", {});
+  const draw = p => box.replaceChildren(...p.map(x => h("div", { class: "gr-line" + (x.d === s.today ? " me" : "") }, h("span", {}, fmtShort(x.d) + " · " + x.t))));
+  draw(s.plan);
+  return h("div", { class: "card" }, h("h3", {}, "План к экзамену"), sj, dt, h("button", { class: "btn small", style: { margin: "8px 0" }, onclick: async e => { e.target.disabled = true;
+    try { const r = await gapi("/plan", { subject: sj.value, date: dt.value }); s.plan = r.plan; draw(r.plan); hap("medium"); } catch (x) { toast(x.message, "err"); } e.target.disabled = false; } }, "Составить"), box);
+}
+
+function gDuelNew() {
+  const tp = h("input", { placeholder: "Тема дуэли" }), out = h("div");
+  return h("div", { class: "card" }, gBack(), h("h3", { style: { margin: "12px 0 8px" } }, "Дуэль знаний"), tp,
+    h("button", { class: "btn small", style: { marginTop: "8px" }, onclick: async e => { e.target.disabled = true;
+      try { const r = await gapi("/duel", { topic: tp.value }), link = "https://t.me/" + G.st.bot + "?startapp=d_" + r.id;
+        out.replaceChildren(h("div", { class: "btn-row", style: { marginTop: "10px" } },
+          h("button", { class: "btn", onclick: () => tg.openTelegramLink("https://t.me/share/url?url=" + encodeURIComponent(link) + "&text=" + encodeURIComponent("Сыграем на тему «" + tp.value + "»?")) }, "Отправить другу"),
+          h("button", { class: "btn ghost", onclick: () => { G.sub = "play:" + r.id; render(); } }, "Играть самому")));
+      } catch (x) { toast(x.message, "err"); } e.target.disabled = false; } }, "Создать"), out);
+}
+
+async function gPlay(id) {
+  const d = await gapi("/duel/" + id), ans = []; let i = 0; const box = h("div");
+  const fin = async () => { const r = await gapi("/duel/" + id + "/answer", { a: ans });
+    box.replaceChildren(h("div", { class: "gr-big" }, r.score + "/" + d.qs.length), h("div", { class: "gr-cap" }, "Результаты"),
+      ...r.res.sort((a, b) => b.score - a.score).map(x => h("div", { class: "gr-line" }, x.name, h("b", {}, x.score)))); };
+  const step = () => { if (i >= d.qs.length) return fin(); const q = d.qs[i];
+    box.replaceChildren(h("div", { class: "gr-cap" }, (i + 1) + " / " + d.qs.length), h("p", { class: "gr-q" }, q.q),
+      ...q.a.map((t, k) => h("button", { class: "btn ghost gr-opt", onclick: () => { ans.push(k); i++; hap(); step(); } }, t))); };
+  d.played ? fin() : step();
+  return h("div", { class: "card" }, gBack(), h("h3", { style: { margin: "12px 0" } }, d.topic), box);
+}
+
+function gShare(s) {
+  const c = h("canvas"); c.width = 1080; c.height = 1350; const x = c.getContext("2d");
+  x.fillStyle = "#0b0b0a"; x.fillRect(0, 0, 1080, 1350); x.fillStyle = "#d7ff3f"; x.font = "italic 560px Georgia"; x.fillText(s.streak, 80, 720);
+  x.fillStyle = "#ece8df"; x.font = "italic 64px Georgia"; x.fillText("дней подряд", 96, 820); x.fillText("уровень " + s.level + " · " + s.xp + " xp", 96, 1230);
+  c.toBlob(async b => { const f = new File([b], "streak.png", { type: "image/png" });
+    if (navigator.canShare && navigator.canShare({ files: [f] })) try { return await navigator.share({ files: [f] }); } catch (e) {}
+    h("a", { href: URL.createObjectURL(b), download: "streak.png" }).click(); });
+}
+
+async function gGroup(s) {
+  const b = await gapi("/board"), t = h("input", { placeholder: "Дедлайн группы" }), d = h("input", { type: "date" });
+  return h("div", {}, h("div", { class: "card" }, h("h3", {}, "Рейтинг группы"),
+    ...(b.rows.length ? b.rows.map((r, i) => h("div", { class: "gr-line" + (r.me ? " me" : "") }, h("span", {}, (i + 1) + "  " + r.name), h("span", {}, r.streak + " дн · " + r.xp)))
+      : [h("p", { class: "sub" }, "Откройте приложение из чата группы — рейтинг появится там.")])),
+    b.has ? h("div", { class: "card" }, h("h3", {}, "Дедлайны группы"), ...b.dl.map(x => h("div", { class: "gr-line" }, x.t, h("span", { class: "sub" }, fmtShort(x.d)))),
+      b.owner ? h("div", {}, t, d, h("button", { class: "btn ghost small", style: { marginTop: "8px" }, onclick: async () => { await gapi("/group/dl", { t: t.value, d: d.value }); render(); } }, "Добавить")) : null) : null,
+    h("div", { class: "card btn-row" }, h("button", { class: "btn", onclick: () => gShare(s) }, "Карточка серии"),
+      h("button", { class: "btn ghost", onclick: async () => { await gapi("/notify", {}); toast("Готово"); render(); } }, s.notify ? "Пуши: вкл" : "Пуши: выкл")));
+}
+
 const VIEWS = {
   home: viewHome,
   tt: viewTT,
   tasks: viewTasks,
   study: viewStudy,
+  grow: viewGrow,
   chat: viewChat
 };
 
@@ -3378,6 +3519,8 @@ async function boot() {
     }
     S.today = (S.me && S.me.now ? S.me.now.slice(0, 10) : "") || iso(new Date());
     if (!S.ttDate) S.ttDate = S.today;
+    const sp = tg && tg.initDataUnsafe && tg.initDataUnsafe.start_param;
+    if (sp && sp.startsWith("d_")) { S.tab = "grow"; G.sub = "play:" + sp.slice(2); drawNav(); }
     await render();
   } catch (e) {
     document.getElementById("view").replaceChildren(
