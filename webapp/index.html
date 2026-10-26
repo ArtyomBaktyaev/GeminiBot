@@ -2068,7 +2068,7 @@ S.pomoTimer = null;
 
 async function viewHome() {
   const [d, gState] = await Promise.all([
-    api("/api/home"),
+    api("/api/home").catch(() => ({ today: null, tasks: [], cards_due: 0, cards_total: 0, parity: null })),
     api("/api/g/state").catch(() => null)
   ]);
   const me = S.me;
@@ -2086,6 +2086,52 @@ async function viewHome() {
   } else if (nextLesson) {
     liveStatusText = `⏳ Следующая пара в ${nextLesson.start}: ${nextLesson.subject}${nextLesson.room ? " (ауд. " + nextLesson.room + ")" : ""}`;
   }
+
+  // ОБЪЯВЛЯЕМ ВСЕ ПЕРЕМЕННЫЕ ДО ВЁРСТКИ (чтобы не было ошибок is not defined)
+  const pctCards = d.cards_total ? Math.round(100 * (d.cards_total - d.cards_due) / d.cards_total) : 100;
+
+  const pomoDisplay = h("div", {
+    class:"mono",
+    style:{fontSize:"1.45rem", fontWeight:900, letterSpacing:"-0.03em", margin:"2px 0"}
+  });
+  const updatePomoText = () => {
+    const m = String(Math.floor(S.pomoSec / 60)).padStart(2, "0");
+    const s = String(S.pomoSec % 60).padStart(2, "0");
+    pomoDisplay.textContent = `${m}:${s}`;
+  };
+  updatePomoText();
+
+  const pomoBtn = h("button", {
+    class:"btn small",
+    onclick: () => {
+      hap();
+      if (S.pomoRun) {
+        S.pomoRun = false;
+        clearInterval(S.pomoTimer);
+        pomoBtn.textContent = "▶️ Старт";
+      } else {
+        S.pomoRun = true;
+        pomoBtn.textContent = "⏸ Пауза";
+        S.pomoTimer = setInterval(async () => {
+          if (S.pomoSec > 0) {
+            S.pomoSec--;
+            updatePomoText();
+          } else {
+            clearInterval(S.pomoTimer);
+            S.pomoRun = false;
+            S.pomoSec = 25 * 60;
+            updatePomoText();
+            pomoBtn.textContent = "▶️ Старт";
+            pick("success");
+            try {
+              await api("/api/g/pomodoro", { method:"POST" });
+              toast("🍅 Фокус-сессия завершена! +15 XP", "ok");
+            } catch (e) {}
+          }
+        }, 1000);
+      }
+    }
+  }, S.pomoRun ? "⏸ Пауза" : "▶️ Старт");
 
   const root = h("div", { class:"g-shell" });
 
@@ -2122,7 +2168,7 @@ async function viewHome() {
     )
   ));
 
-// 2. BENTO-СЕТКА (2x2): БЕЗ ОБРЕЗАНИЯ ТЕКСТА
+  // 2. BENTO-СЕТКА (2x2): БЕЗ ОБРЕЗАНИЯ ТЕКСТА
   root.append(
     h("div", { style:{display:"grid", gridTemplateColumns:"1fr 1fr", gap:"10px"} },
       // Плитка 1: Фокус-таймер Pomodoro
@@ -2225,8 +2271,9 @@ async function viewHome() {
   }
 
   // 5. ДЕДЛАЙНЫ
-  if (d.tasks.length) {
-    const sortedHomeTasks = [...d.tasks].sort((a, b) => getTaskTimestamp(a) - getTaskTimestamp(b));
+  const tasksList = (d.tasks && Array.isArray(d.tasks)) ? d.tasks : [];
+  if (tasksList.length) {
+    const sortedHomeTasks = [...tasksList].sort((a, b) => getTaskTimestamp(a) - getTaskTimestamp(b));
     const urgentCount = sortedHomeTasks.filter(k => k.overdue || k.soon || isBurning30Min(k)).length;
     const nearest = sortedHomeTasks[0];
 
