@@ -902,7 +902,7 @@ function syncBackProtection() {
 }
 
 function handleAppBackGesture() {
-  // 1. Если открыто модальное окно (sheet) — закрываем только его
+  // 1. Если открыта шторка или модалка — закрываем её
   const overlays = document.querySelectorAll(".overlay");
   if (overlays.length > 0) {
     const topOv = overlays[overlays.length - 1];
@@ -911,7 +911,7 @@ function handleAppBackGesture() {
     syncBackProtection();
     return true;
   }
-  // 2. Если мы внутри подразделов Роста / Чата / Учёбы — возвращаемся в основной подраздел
+  // 2. Если внутри подвкладок Роста / Чата / Учёбы — возвращаемся в корень вкладки
   if (S.tab === "growth" && S.growthSub && S.growthSub !== "hub") {
     S.growthSub = "hub";
     render();
@@ -922,11 +922,10 @@ function handleAppBackGesture() {
     render();
     return true;
   }
-  // 3. Если мы не на Главной вкладке — возвращаемся на предыдущую вкладку или на Главную
+  // 3. Если на другой вкладке — возвращаемся на Главную
   if (S.tab !== "home") {
     TAB_HISTORY.pop();
-    const prevTab = TAB_HISTORY.pop() || "home";
-    S.tab = prevTab;
+    S.tab = TAB_HISTORY.pop() || "home";
     drawNav();
     render();
     window.scrollTo({ top: 0 });
@@ -937,14 +936,17 @@ function handleAppBackGesture() {
 
 if (tg) {
   tg.ready(); tg.expand();
-  try { tg.enableClosingConfirmation(); } catch (e) {}
+  // Официальная защита Telegram: подтверждение перед выходом из приложения при свайпе
+  try { tg.enableClosingConfirmation && tg.enableClosingConfirmation(); } catch (e) {}
   try { tg.disableVerticalSwipes && tg.disableVerticalSwipes(); } catch (e) {}
   try { tg.setHeaderColor("secondary_bg_color"); } catch (e) {}
   try { tg.setBackgroundColor("secondary_bg_color"); } catch (e) {}
   try {
-    tg.BackButton && tg.BackButton.onClick(() => {
-      handleAppBackGesture();
-    });
+    if (tg.BackButton) {
+      tg.BackButton.onClick(() => {
+        handleAppBackGesture();
+      });
+    }
   } catch (e) {}
   if (tg.initData) {
     try {
@@ -953,16 +955,6 @@ if (tg) {
     } catch (e) {}
   }
 }
-
-// Перехватываем системный свайп «Назад» (Android / iOS WebView), чтобы он не закрывал WebApp
-try {
-  history.replaceState({ appGuard: true }, "");
-  history.pushState({ appGuard: true }, "");
-  window.addEventListener("popstate", () => {
-    history.pushState({ appGuard: true }, "");
-    handleAppBackGesture();
-  });
-} catch (e) {}
 
 /* =========================================================
    APPEARANCE ENGINE (ТЕМА, ШРИФТ, МАСШТАБ ЭКРАНА)
@@ -2087,7 +2079,7 @@ async function viewHome() {
     liveStatusText = `⏳ Следующая пара в ${nextLesson.start}: ${nextLesson.subject}${nextLesson.room ? " (ауд. " + nextLesson.room + ")" : ""}`;
   }
 
-  // ОБЪЯВЛЯЕМ ВСЕ ПЕРЕМЕННЫЕ ДО ВЁРСТКИ (чтобы не было ошибок is not defined)
+  // 1. Создаём элементы таймера и карточек заранее
   const pctCards = d.cards_total ? Math.round(100 * (d.cards_total - d.cards_due) / d.cards_total) : 100;
 
   const pomoDisplay = h("div", {
@@ -2135,7 +2127,7 @@ async function viewHome() {
 
   const root = h("div", { class:"g-shell" });
 
-  // 1. АВТОРСКИЙ HERO-БЛОК С ЖИВЫМ СТАТУСОМ ДНЯ
+  // 2. Шапка профиля
   root.append(h("div", { class:"hero", style:{marginBottom:"2px"} },
     h("div", { class:"row", style:{gap:"12px", marginBottom:"10px"} },
       renderAvatar(acc.avatar, "", openProfileEditor),
@@ -2168,14 +2160,13 @@ async function viewHome() {
     )
   ));
 
-  // 2. BENTO-СЕТКА (2x2): БЕЗ ОБРЕЗАНИЯ ТЕКСТА
+  // 3. Bento-сетка таймера и карточек
   root.append(
     h("div", { style:{display:"grid", gridTemplateColumns:"1fr 1fr", gap:"10px"} },
-      // Плитка 1: Фокус-таймер Pomodoro
       h("div", { class:"card tight", style:{marginBottom:0, display:"flex", flexDirection:"column", justifyContent:"space-between", gap:"4px"} },
         h("div", { style:{display:"flex", flexDirection:"column", gap:"4px", alignItems:"flex-start"} },
           h("span", { class:"sub", style:{fontWeight:800, textTransform:"uppercase", fontSize:"0.7rem"} }, "🍅 Фокус 25м"),
-          h("span", { class:"chip green", style:{fontSize:"0.68rem", padding:"2px 7px"} }, "+15 XP за сессию")
+          h("span", { class:"chip green", style:{fontSize:"0.68rem", padding:"2px 7px"} }, "+15 XP")
         ),
         pomoDisplay,
         h("div", { class:"row", style:{gap:"6px"} },
@@ -2193,7 +2184,6 @@ async function viewHome() {
           }, "↺")
         )
       ),
-      // Плитка 2: Карточки
       h("div", {
         class:"card tight tappable",
         style:{marginBottom:0, display:"flex", flexDirection:"column", justifyContent:"space-between", gap:"4px"},
@@ -2210,10 +2200,10 @@ async function viewHome() {
     )
   );
 
-  // 3. БЫСТРЫЙ ЧЕРНОВИК (КНОПКИ СНИЗУ ПО ШИРИНЕ — НИЧЕГО НЕ ВЫЛЕЗАЕТ)
+  // 4. Быстрый черновик
   const noteKey = "home_quick_scratchpad_" + (getActiveAccountId() || "def");
   const noteInput = h("textarea", {
-    placeholder:"⚡ Быстрая заметка: запиши сюда формулу, номер аудитории, идею или тему, чтобы не забыть…",
+    placeholder:"⚡ Быстрая заметка: запиши сюда формулу, аудиторию, идею…",
     style:{minHeight:"66px", fontSize:"0.88rem"},
     oninput: (e) => {
       try { localStorage.setItem(noteKey, e.target.value); } catch (err) {}
@@ -2245,7 +2235,7 @@ async function viewHome() {
     )
   );
 
-  // 4. РАСПИСАНИЕ НА СЕГОДНЯ
+  // 5. Расписание на сегодня
   const t = d.today;
   root.append(
     h("div", { class:"g-sec-head" },
@@ -2270,7 +2260,7 @@ async function viewHome() {
     });
   }
 
-  // 5. ДЕДЛАЙНЫ
+  // 6. Дедлайны
   const tasksList = (d.tasks && Array.isArray(d.tasks)) ? d.tasks : [];
   if (tasksList.length) {
     const sortedHomeTasks = [...tasksList].sort((a, b) => getTaskTimestamp(a) - getTaskTimestamp(b));
