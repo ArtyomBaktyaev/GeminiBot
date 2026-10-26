@@ -888,55 +888,22 @@ window.onerror = function(msg, src, line) {
 
 const NL = String.fromCharCode(10);
 const tg = window.Telegram && window.Telegram.WebApp;
-const TAB_HISTORY = ["home"];
 
 function syncBackProtection() {
   try {
+    // Стрелку «Назад» в шапке Telegram показываем ТОЛЬКО если открыто модальное окно/шторка
     const hasOverlay = Boolean(document.querySelector(".overlay"));
-    const canGoBack = hasOverlay || S.tab !== "home";
     if (tg && tg.BackButton) {
-      if (canGoBack) tg.BackButton.show();
+      if (hasOverlay) tg.BackButton.show();
       else tg.BackButton.hide();
     }
   } catch (e) {}
 }
 
-function handleAppBackGesture() {
-  // 1. Если открыта шторка или модалка — закрываем её
-  const overlays = document.querySelectorAll(".overlay");
-  if (overlays.length > 0) {
-    const topOv = overlays[overlays.length - 1];
-    document.body.style.overflow = "";
-    topOv.remove();
-    syncBackProtection();
-    return true;
-  }
-  // 2. Если внутри подвкладок Роста / Чата / Учёбы — возвращаемся в корень вкладки
-  if (S.tab === "growth" && S.growthSub && S.growthSub !== "hub") {
-    S.growthSub = "hub";
-    render();
-    return true;
-  }
-  if (S.tab === "chat" && S.chatSub && S.chatSub !== "chat") {
-    S.chatSub = "chat";
-    render();
-    return true;
-  }
-  // 3. Если на другой вкладке — возвращаемся на Главную
-  if (S.tab !== "home") {
-    TAB_HISTORY.pop();
-    S.tab = TAB_HISTORY.pop() || "home";
-    drawNav();
-    render();
-    window.scrollTo({ top: 0 });
-    return true;
-  }
-  return false;
-}
-
 if (tg) {
-  tg.ready(); tg.expand();
-  // Официальная защита Telegram: подтверждение перед выходом из приложения при свайпе
+  tg.ready();
+  tg.expand();
+  // Официальная защита Telegram: подтверждение при попытке случайно смахнуть и закрыть приложение
   try { tg.enableClosingConfirmation && tg.enableClosingConfirmation(); } catch (e) {}
   try { tg.disableVerticalSwipes && tg.disableVerticalSwipes(); } catch (e) {}
   try { tg.setHeaderColor("secondary_bg_color"); } catch (e) {}
@@ -944,7 +911,14 @@ if (tg) {
   try {
     if (tg.BackButton) {
       tg.BackButton.onClick(() => {
-        handleAppBackGesture();
+        // При нажатии кнопки «Назад» закрываем только открытую шторку
+        const overlays = document.querySelectorAll(".overlay");
+        if (overlays.length > 0) {
+          const topOv = overlays[overlays.length - 1];
+          document.body.style.overflow = "";
+          topOv.remove();
+          syncBackProtection();
+        }
       });
     }
   } catch (e) {}
@@ -955,7 +929,6 @@ if (tg) {
     } catch (e) {}
   }
 }
-
 /* =========================================================
    APPEARANCE ENGINE (ТЕМА, ШРИФТ, МАСШТАБ ЭКРАНА)
    ========================================================= */
@@ -1498,16 +1471,33 @@ const TABS = [
   ["chat", "Чат"],
 ];
 
+function switchTab(id) {
+  if (S.tab === id) {
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    return;
+  }
+  hap();
+  S.tab = id;
+  drawNav();
+  render();
+  window.scrollTo({ top: 0 });
+}
+
 function drawNav() {
   const nav = document.getElementById("nav");
+  if (!nav) return;
   nav.replaceChildren(...TABS.map(([id, label]) => {
-    const icSpan = h("span", { class:"ic" });
+    const icSpan = h("span", { class: "ic" });
     icSpan.innerHTML = NAV_SVGS[id] || "⚡";
-    return h("button", { class: S.tab === id ? "on" : "", onclick: () => {
-      if (S.tab === id) { window.scrollTo({top:0,behavior:"smooth"}); return; }
-      hap(); TAB_HISTORY.push(id); S.tab = id; drawNav(); render();
-      window.scrollTo({top:0});
-    }}, icSpan, label);
+    return h("button", {
+      type: "button",
+      class: S.tab === id ? "on" : "",
+      onclick: (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        switchTab(id);
+      }
+    }, icSpan, label);
   }));
 }
    
@@ -2065,11 +2055,11 @@ async function viewHome() {
   ]);
   const me = S.me;
   const now = new Date().toTimeString().slice(0, 5);
-  const dateStr = new Date().toLocaleDateString("ru-RU", { weekday:"long", day:"numeric", month:"long" });
+  const dateStr = new Date().toLocaleDateString("ru-RU", { weekday: "long", day: "numeric", month: "long" });
   const acc = (me && me.account) || { name: "Артём", avatar: "🧑‍💻" };
   const accName = acc.name || "Артём";
 
-  const lessons = (d.today && d.today.lessons) || [];
+  const lessons = (d.today && Array.isArray(d.today.lessons)) ? d.today.lessons : [];
   const curLesson = lessons.find(l => l.start <= now && now <= l.end);
   const nextLesson = lessons.find(l => l.start > now);
   let liveStatusText = "✨ Свободный фокус-режим — пар больше нет";
@@ -2079,12 +2069,12 @@ async function viewHome() {
     liveStatusText = `⏳ Следующая пара в ${nextLesson.start}: ${nextLesson.subject}${nextLesson.room ? " (ауд. " + nextLesson.room + ")" : ""}`;
   }
 
-  // 1. Создаём элементы таймера и карточек заранее
+  // 1. Создаём элементы Pomodoro и Карточек до сборки сетки
   const pctCards = d.cards_total ? Math.round(100 * (d.cards_total - d.cards_due) / d.cards_total) : 100;
 
   const pomoDisplay = h("div", {
-    class:"mono",
-    style:{fontSize:"1.45rem", fontWeight:900, letterSpacing:"-0.03em", margin:"2px 0"}
+    class: "mono",
+    style: { fontSize: "1.45rem", fontWeight: 900, letterSpacing: "-0.03em", margin: "2px 0" }
   });
   const updatePomoText = () => {
     const m = String(Math.floor(S.pomoSec / 60)).padStart(2, "0");
@@ -2094,7 +2084,7 @@ async function viewHome() {
   updatePomoText();
 
   const pomoBtn = h("button", {
-    class:"btn small",
+    class: "btn small",
     onclick: () => {
       hap();
       if (S.pomoRun) {
@@ -2116,7 +2106,7 @@ async function viewHome() {
             pomoBtn.textContent = "▶️ Старт";
             pick("success");
             try {
-              await api("/api/g/pomodoro", { method:"POST" });
+              await api("/api/g/pomodoro", { method: "POST" });
               toast("🍅 Фокус-сессия завершена! +15 XP", "ok");
             } catch (e) {}
           }
@@ -2125,55 +2115,55 @@ async function viewHome() {
     }
   }, S.pomoRun ? "⏸ Пауза" : "▶️ Старт");
 
-  const root = h("div", { class:"g-shell" });
+  const root = h("div", { class: "g-shell" });
 
   // 2. Шапка профиля
-  root.append(h("div", { class:"hero", style:{marginBottom:"2px"} },
-    h("div", { class:"row", style:{gap:"12px", marginBottom:"10px"} },
+  root.append(h("div", { class: "hero", style: { marginBottom: "2px" } },
+    h("div", { class: "row", style: { gap: "12px", marginBottom: "10px" } },
       renderAvatar(acc.avatar, "", openProfileEditor),
-      h("div", { class:"grow" },
-        h("h1", { style:{cursor:"pointer"}, onclick: openProfileEditor }, "Привет, " + accName + " 👋"),
-        h("div", { class:"sub", style:{marginTop:"2px"} },
+      h("div", { class: "grow" },
+        h("h1", { style: { cursor: "pointer" }, onclick: openProfileEditor }, "Привет, " + accName + " 👋"),
+        h("div", { class: "sub", style: { marginTop: "2px" } },
           dateStr.charAt(0).toUpperCase() + dateStr.slice(1) + (d.parity ? " · " + PARITY[d.parity] : ""))
       ),
-      h("button", { class:"btn ghost small icon", onclick: openAppearanceSheet, title:"Оформление и масштаб" }, "🎨")
+      h("button", { class: "btn ghost small icon", onclick: openAppearanceSheet, title: "Оформление и масштаб" }, "🎨")
     ),
     h("div", {
-      style:{
-        padding:"8px 12px", borderRadius:"12px", background:"var(--surface-2)",
-        border:"1px solid var(--line-2)", fontSize:"0.84rem", fontWeight:700, marginBottom:"10px"
+      style: {
+        padding: "8px 12px", borderRadius: "12px", background: "var(--surface-2)",
+        border: "1px solid var(--line-2)", fontSize: "0.84rem", fontWeight: 700, marginBottom: "10px"
       }
     }, liveStatusText),
-    h("div", { class:"row wrap", style:{gap:"6px"} },
-      h("button", { class:"acc-pill", onclick: openProfileEditor },
+    h("div", { class: "row wrap", style: { gap: "6px" } },
+      h("button", { class: "acc-pill", onclick: openProfileEditor },
         renderAvatar(acc.avatar, "sm"),
-        h("span", { class:"truncate" }, accName),
-        h("span", { style:{opacity:.6, fontSize:"0.7rem"} }, "✏️")),
-      h("button", { class:"model-pill", onclick: openModelPicker },
-        h("span", { class:"dot" }),
+        h("span", { class: "truncate" }, accName),
+        h("span", { style: { opacity: .6, fontSize: "0.7rem" } }, "✏️")),
+      h("button", { class: "model-pill", onclick: openModelPicker },
+        h("span", { class: "dot" }),
         shortModelName(me && me.model),
         acc.has_custom_key ? " 🔑" : ""),
       gState ? h("button", {
-        class:"chip green",
-        onclick: () => { S.tab = "growth"; drawNav(); render(); }
+        class: "chip green",
+        onclick: () => switchTab("growth")
       }, `🔥 ${gState.streak} дн. · ⚡ Ур. ${gState.level}`) : null
     )
   ));
 
-  // 3. Bento-сетка таймера и карточек
+  // 3. Bento-плитки: Pomodoro + Карточки
   root.append(
-    h("div", { style:{display:"grid", gridTemplateColumns:"1fr 1fr", gap:"10px"} },
-      h("div", { class:"card tight", style:{marginBottom:0, display:"flex", flexDirection:"column", justifyContent:"space-between", gap:"4px"} },
-        h("div", { style:{display:"flex", flexDirection:"column", gap:"4px", alignItems:"flex-start"} },
-          h("span", { class:"sub", style:{fontWeight:800, textTransform:"uppercase", fontSize:"0.7rem"} }, "🍅 Фокус 25м"),
-          h("span", { class:"chip green", style:{fontSize:"0.68rem", padding:"2px 7px"} }, "+15 XP")
+    h("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" } },
+      h("div", { class: "card tight", style: { marginBottom: 0, display: "flex", flexDirection: "column", justifyContent: "space-between", gap: "4px" } },
+        h("div", { style: { display: "flex", flexDirection: "column", gap: "4px", alignItems: "flex-start" } },
+          h("span", { class: "sub", style: { fontWeight: 800, textTransform: "uppercase", fontSize: "0.7rem" } }, "🍅 Фокус 25м"),
+          h("span", { class: "chip green", style: { fontSize: "0.68rem", padding: "2px 7px" } }, "+15 XP")
         ),
         pomoDisplay,
-        h("div", { class:"row", style:{gap:"6px"} },
+        h("div", { class: "row", style: { gap: "6px" } },
           pomoBtn,
           h("button", {
-            class:"btn ghost small icon",
-            title:"Сбросить таймер",
+            class: "btn ghost small icon",
+            title: "Сбросить таймер",
             onclick: () => {
               clearInterval(S.pomoTimer);
               S.pomoRun = false;
@@ -2185,17 +2175,17 @@ async function viewHome() {
         )
       ),
       h("div", {
-        class:"card tight tappable",
-        style:{marginBottom:0, display:"flex", flexDirection:"column", justifyContent:"space-between", gap:"4px"},
-        onclick: () => { S.tab = "study"; S.studySub = "cards"; drawNav(); render(); }
+        class: "card tight tappable",
+        style: { marginBottom: 0, display: "flex", flexDirection: "column", justifyContent: "space-between", gap: "4px" },
+        onclick: () => { S.studySub = "cards"; switchTab("study"); }
       },
-        h("div", { style:{display:"flex", flexDirection:"column", gap:"4px", alignItems:"flex-start"} },
-          h("span", { class:"sub", style:{fontWeight:800, textTransform:"uppercase", fontSize:"0.7rem"} }, "🃏 Карточки"),
-          h("span", { class:"chip " + (d.cards_due ? "warn" : "green"), style:{fontSize:"0.68rem", padding:"2px 7px"} },
+        h("div", { style: { display: "flex", flexDirection: "column", gap: "4px", alignItems: "flex-start" } },
+          h("span", { class: "sub", style: { fontWeight: 800, textTransform: "uppercase", fontSize: "0.7rem" } }, "🃏 Карточки"),
+          h("span", { class: "chip " + (d.cards_due ? "warn" : "green"), style: { fontSize: "0.68rem", padding: "2px 7px" } },
             d.cards_due ? `К повтору: ${d.cards_due}` : "✓ Всё выучено")
         ),
-        h("div", { style:{fontSize:"1.45rem", fontWeight:900, margin:"2px 0"} }, `${pctCards}%`),
-        h("div", { class:"sub", style:{fontSize:"0.78rem"} }, `Всего: ${d.cards_total} шт. →`)
+        h("div", { style: { fontSize: "1.45rem", fontWeight: 900, margin: "2px 0" } }, `${pctCards}%`),
+        h("div", { class: "sub", style: { fontSize: "0.78rem" } }, `Всего: ${d.cards_total} шт. →`)
       )
     )
   );
@@ -2203,20 +2193,20 @@ async function viewHome() {
   // 4. Быстрый черновик
   const noteKey = "home_quick_scratchpad_" + (getActiveAccountId() || "def");
   const noteInput = h("textarea", {
-    placeholder:"⚡ Быстрая заметка: запиши сюда формулу, аудиторию, идею…",
-    style:{minHeight:"66px", fontSize:"0.88rem"},
+    placeholder: "⚡ Быстрая заметка: запиши сюда формулу, аудиторию, идею…",
+    style: { minHeight: "66px", fontSize: "0.88rem" },
     oninput: (e) => {
       try { localStorage.setItem(noteKey, e.target.value); } catch (err) {}
     }
   }, localStorage.getItem(noteKey) || "");
 
   root.append(
-    h("div", { class:"card tight", style:{marginBottom:0} },
-      h("div", { style:{fontWeight:800, fontSize:"0.9rem", marginBottom:"6px"} }, "📌 Быстрый черновик (Инбокс)"),
+    h("div", { class: "card tight", style: { marginBottom: 0 } },
+      h("div", { style: { fontWeight: 800, fontSize: "0.9rem", marginBottom: "6px" } }, "📌 Быстрый черновик (Инбокс)"),
       noteInput,
-      h("div", { class:"btn-row", style:{marginTop:"8px"} },
+      h("div", { class: "btn-row", style: { marginTop: "8px" } },
         h("button", {
-          class:"btn subtle small",
+          class: "btn subtle small",
           onclick: () => {
             const txt = noteInput.value.trim();
             if (!txt) return toast("Черновик пуст", "err");
@@ -2224,7 +2214,7 @@ async function viewHome() {
           }
         }, "📋 Создать задачу"),
         h("button", {
-          class:"btn ghost small",
+          class: "btn ghost small",
           onclick: () => {
             noteInput.value = "";
             localStorage.removeItem(noteKey);
@@ -2238,22 +2228,22 @@ async function viewHome() {
   // 5. Расписание на сегодня
   const t = d.today;
   root.append(
-    h("div", { class:"g-sec-head" },
+    h("div", { class: "g-sec-head" },
       h("h2", {}, "Пары на сегодня"),
-      h("button", { class:"chip gray", onclick: () => lessonForm(null, S.today) }, "➕ Пара")
+      h("button", { class: "chip gray", onclick: () => lessonForm(null, S.today) }, "➕ Пара")
     )
   );
   if (!t) {
     root.append(empty("📅", "Модуль расписания не подключён", null));
-  } else if (!t.lessons.length) {
-    root.append(h("div", { class:"card tight row between", style:{marginBottom:0} },
+  } else if (!lessons.length) {
+    root.append(h("div", { class: "card tight row between", style: { marginBottom: 0 } },
       h("div", {},
-        h("div", { style:{fontWeight:700} }, "🎉 Сегодня пар по расписанию нет"),
-        h("div", { class:"sub" }, "Отличный день для своих проектов или отдыха")),
-      h("button", { class:"btn ghost small", onclick: () => { S.tab = "tt"; drawNav(); render(); } }, "Неделя →")
+        h("div", { style: { fontWeight: 700 } }, "🎉 Сегодня пар по расписанию нет"),
+        h("div", { class: "sub" }, "Отличный день для своих проектов или отдыха")),
+      h("button", { class: "btn ghost small", onclick: () => switchTab("tt") }, "Неделя →")
     ));
   } else {
-    t.lessons.forEach(l => {
+    lessons.forEach(l => {
       const el = lessonRow(l, now);
       el.addEventListener("click", () => lessonActions(l, { date: S.today }));
       root.append(el);
@@ -2269,39 +2259,39 @@ async function viewHome() {
 
     root.append(
       h("details", {
-        class:"group-acc",
-        style:{marginBottom:0},
+        class: "group-acc",
+        style: { marginBottom: 0 },
         open: S.homeDeadlinesOpen,
         ontoggle: (e) => { S.homeDeadlinesOpen = e.target.open; }
       },
         h("summary", {},
-          h("div", { class:"group-icon" }, "⏳"),
-          h("div", { class:"group-meta" },
-            h("div", { class:"g-title" }, "Ближайшие дедлайны"),
-            h("div", { class:"g-sub truncate" },
+          h("div", { class: "group-icon" }, "⏳"),
+          h("div", { class: "group-meta" },
+            h("div", { class: "g-title" }, "Ближайшие дедлайны"),
+            h("div", { class: "g-sub truncate" },
               nearest ? "Ближайший: " + fmtDeadline(nearest) + " — " + nearest.text : "Нажмите, чтобы развернуть")
           ),
-          urgentCount ? h("span", { class:"chip red" }, "🔥 " + urgentCount) : null,
-          h("span", { class:"chip" }, sortedHomeTasks.length),
-          h("span", { class:"chev" })
+          urgentCount ? h("span", { class: "chip red" }, "🔥 " + urgentCount) : null,
+          h("span", { class: "chip" }, sortedHomeTasks.length),
+          h("span", { class: "chev" })
         ),
-        h("div", { class:"group-body" },
+        h("div", { class: "group-body" },
           ...sortedHomeTasks.map(k => {
             const burning = isBurning30Min(k);
             const urgent = burning || k.overdue ? "red" : k.soon ? "warn" : "gray";
             const kindInfo = getTaskKindInfo(k);
-            return h("div", { class:"card tight", style:{marginBottom:0} },
-              h("div", { class:"row" },
-                h("div", { class:"grow" },
-                  h("div", { class:"line-clamp-2", style:{fontWeight:600, fontSize:"0.92rem"} }, k.text),
-                  h("div", { class:"chips" },
-                    h("span", { class:"chip " + (kindInfo.chipCls || "gray") }, kindInfo.icon + " " + kindInfo.label),
-                    h("span", { class:"chip " + urgent },
+            return h("div", { class: "card tight", style: { marginBottom: 0 } },
+              h("div", { class: "row" },
+                h("div", { class: "grow" },
+                  h("div", { class: "line-clamp-2", style: { fontWeight: 600, fontSize: "0.92rem" } }, k.text),
+                  h("div", { class: "chips" },
+                    h("span", { class: "chip " + (kindInfo.chipCls || "gray") }, kindInfo.icon + " " + kindInfo.label),
+                    h("span", { class: "chip " + urgent },
                       (k.overdue ? "⏰ просрочено · " : "📅 ") + fmtDeadline(k)),
-                    h("span", { class:"chip gray" }, k.topic)
+                    h("span", { class: "chip gray" }, k.topic)
                   )),
-                h("button", { class:"btn small", title:"Отметить выполненным", onclick: async () => {
-                  await api("/api/tasks/" + k.id + "/done", { method:"POST" });
+                h("button", { class: "btn small", title: "Отметить выполненным", onclick: async () => {
+                  await api("/api/tasks/" + k.id + "/done", { method: "POST" });
                   hap("medium"); pick("success"); toast("Готово ✅", "ok"); render();
                 }}, "✅"))
             );
