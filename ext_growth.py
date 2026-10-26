@@ -170,7 +170,13 @@ def save() -> None:
 
 
 def day() -> date:
-    return core.now_local().date()
+    """Логические сутки обновляются каждый день в 06:00 утра."""
+    return (core.now_local() - timedelta(hours=6)).date()
+
+
+def week_monday() -> date:
+    d = day()
+    return d - timedelta(days=d.weekday())
 
 
 def W():
@@ -201,10 +207,17 @@ def U(request, user) -> dict:
             "flags": [],
             "xp_log": [],
             "goals": [
-                {"id": "g_sport", "name": "Спорт / Разминка", "cat": "body", "days": []},
-                {"id": "g_eng", "name": "Английский 15 мин", "cat": "mind", "days": []},
-                {"id": "g_code", "name": "Код / Пет-проект", "cat": "work", "days": []},
+                {"id": "g_sport", "name": "Спорт / Разминка", "cat": "body", "target": [1, 3, 5], "days": []},
+                {"id": "g_eng", "name": "Английский 15 мин", "cat": "mind", "target": [0, 1, 2, 3, 4], "days": []},
+                {"id": "g_code", "name": "Код / Пет-проект", "cat": "work", "target": [0, 2, 4, 6], "days": []},
             ],
+            "focus_presets": [
+                {"id": "fp_math", "subject": "Математический анализ", "minutes": 45},
+                {"id": "fp_code", "subject": "Программирование C/C++", "minutes": 50},
+                {"id": "fp_geom", "subject": "Аналитическая геометрия", "minutes": 30},
+            ],
+            "focus_sessions": [],
+            "focus_report": "",
             "journal": [],
             "journal_analysis": "",
             "plan": [],
@@ -219,6 +232,12 @@ def U(request, user) -> dict:
     u.setdefault("xp_log", [])
     u.setdefault("journal_analysis", "")
     u.setdefault("plan_analysis", "")
+    u.setdefault("focus_presets", [
+        {"id": "fp_math", "subject": "Математический анализ", "minutes": 45},
+        {"id": "fp_code", "subject": "Программирование C/C++", "minutes": 50},
+    ])
+    u.setdefault("focus_sessions", [])
+    u.setdefault("focus_report", "")
     u.update(
         id=acc["id"],
         tg=int(user["id"]),
@@ -227,6 +246,8 @@ def U(request, user) -> dict:
     )
     for g in u.get("goals", []):
         g.setdefault("cat", "mind")
+        g.setdefault("target", [0, 1, 2, 3, 4, 5, 6])
+        g.setdefault("days", [])
     for j in u.get("journal", []):
         if not j.get("id"):
             j["id"] = secrets.token_hex(4)
@@ -371,6 +392,9 @@ async def a_state(request, user):
             u["gids"].append(g)
         save()
     t = str(day())
+    mon = week_monday()
+    week_days = [str(mon + timedelta(days=i)) for i in range(7)]
+
     xp = int(u.get("xp", 0))
     level = xp // 100 + 1
     streak = int(u.get("streak", 0))
@@ -383,6 +407,20 @@ async def a_state(request, user):
         {"id": "task", "title": "Закрыть задачу или привычку", "done": any(x in u["flags"] for x in ("task", "goal", "lesson", "pomodoro")), "xp": XP["task"], "tab": "tasks"},
         {"id": "ask", "title": "Вопрос ИИ / Разбор / Дневник", "done": any(x in u["flags"] for x in ("ask", "journal", "duel")), "xp": XP["ask"], "tab": "chat"},
     ]
+
+    goals_payload = []
+    for x in u["goals"]:
+        all_days = sorted(set(x.get("days") or []))
+        week_done = [d_s for d_s in all_days if d_s in week_days]
+        goals_payload.append({
+            "id": x["id"],
+            "name": x["name"],
+            "cat": x.get("cat", "mind"),
+            "target": x.get("target") or [0, 1, 2, 3, 4, 5, 6],
+            "days": all_days[-60:],
+            "week_done": week_done,
+            "fire": len(all_days),  # Несгораемый накопительный огонёк привычки
+        })
 
     return {
         "name": u["name"],
@@ -400,8 +438,13 @@ async def a_state(request, user):
         "risk": risk,
         "companion": comp,
         "today": t,
+        "week_days": week_days,
+        "reset_Info": "Сброс ежедневных заданий в 06:00 утра",
         "lessons_checked": u.get("lessons_checked") == t,
-        "goals": [{**x, "days": x["days"][-14:]} for x in u["goals"]],
+        "goals": goals_payload,
+        "focus_presets": u.get("focus_presets", []),
+        "focus_sessions": list(reversed(u.get("focus_sessions", [])[-40:])),
+        "focus_report": u.get("focus_report", ""),
         "journal": u["journal"][-30:],
         "journal_analysis": u.get("journal_analysis", ""),
         "plan": u["plan"],
@@ -414,7 +457,6 @@ async def a_state(request, user):
 
 
 async def a_quest_undo(request, user):
-    """Отмена любого шага ежедневного квеста (карточки, задача, вопрос ИИ)."""
     b, u = await request.json(), U(request, user)
     qid = str(b.get("id") or "")
     t_str = str(day())
@@ -433,7 +475,6 @@ async def a_quest_undo(request, user):
         pts = XP.get(qid, 5)
         u["xp"] = max(0, int(u.get("xp", 0)) - pts)
         _log_xp(u, qid, -pts, f"↩️ Отмена: {XP_LABELS.get(qid, qid)}")
-        # Если из-за отмены квест дня перестал быть закрытым — откатываем сегодняшний бонус
         if sum(1 for k in QUEST_KEYS if k in u["flags"]) < 3 and u.get("last") == t_str:
             u["last"] = u.get("prev_last", "")
             u["streak"] = max(0, int(u.get("streak", 1)) - 1)
@@ -444,7 +485,6 @@ async def a_quest_undo(request, user):
 
 
 async def a_card_undo(request, user):
-    """Откат только что отвеченной карточки во время сессии повторения."""
     b, u = await request.json(), U(request, user)
     cid = int(b.get("id") or 0)
     prev_box = int(b.get("box") or 1)
@@ -464,15 +504,92 @@ async def a_card_undo(request, user):
 
 
 async def a_pomodoro_done(request, user):
-    """Начисление опыта за завершённый 25-минутный фокус-таймер на Главной."""
+    """Сохраняет фокус-сессию по предмету вместе со всеми паузами и начисляет +15 XP."""
+    b = {}
+    with suppress(Exception):
+        b = await request.json()
     u = U(request, user)
-    award(u, "pomodoro")
+    subj = str(b.get("subject") or "Самоподготовка").strip()[:80]
+    planned_min = max(1, int(b.get("planned_min") or 25))
+    focused_sec = max(10, int(b.get("focused_sec") or (planned_min * 60)))
+    pauses = []
+    for p in (b.get("pauses") or [])[:30]:
+        if isinstance(p, dict):
+            pauses.append({"at": str(p.get("at") or ""), "sec": max(1, int(p.get("sec") or 0))})
+    pause_total_sec = sum(x["sec"] for x in pauses)
+
+    sess = {
+        "id": "fs_" + secrets.token_hex(3),
+        "d": str(day()),
+        "ts": time.time(),
+        "subject": subj,
+        "planned_min": planned_min,
+        "focused_sec": focused_sec,
+        "pauses": pauses,
+        "pause_total_sec": pause_total_sec,
+    }
+    u.setdefault("focus_sessions", []).append(sess)
+    del u["focus_sessions"][:-80]
+    award(u, "pomodoro", f"🍅 Фокус: {subj} ({round(focused_sec / 60)} мин)")
     save()
-    return {"ok": True, "xp": u["xp"]}
+    return {"ok": True, "xp": u["xp"], "session": sess}
+
+
+async def a_focus_preset(request, user):
+    """Добавление или удаление сохранённого таймера по предмету."""
+    b, u = await request.json(), U(request, user)
+    act = str(b.get("action") or "add")
+    presets = u.setdefault("focus_presets", [])
+    if act == "del":
+        pid = str(b.get("id") or "")
+        presets[:] = [p for p in presets if p.get("id") != pid]
+    else:
+        subj = str(b.get("subject") or "").strip()[:70]
+        mins = max(1, min(240, int(b.get("minutes") or 25)))
+        if not subj:
+            raise ValueError("Введите название предмета или задачи")
+        presets.append({"id": "fp_" + secrets.token_hex(3), "subject": subj, "minutes": mins})
+    save()
+    return {"ok": True, "presets": presets}
+
+
+async def a_focus_report(request, user):
+    """ИИ-отчёт по фокус-таймерам и паузам за неделю с советами по улучшению."""
+    u = U(request, user)
+    cutoff = str(day() - timedelta(days=7))
+    recent = [s for s in u.get("focus_sessions", []) if str(s.get("d", "")) >= cutoff]
+    if not recent:
+        recent = u.get("focus_sessions", [])[-10:]
+    if not recent:
+        raise ValueError("Сначала проведите хотя бы одну фокус-сессию по таймеру")
+
+    lines = []
+    for s in recent:
+        f_min = round(int(s.get("focused_sec", 0)) / 60, 1)
+        p_cnt = len(s.get("pauses") or [])
+        p_sec = int(s.get("pause_total_sec", 0))
+        p_details = ", ".join(f"в {p['at']} на {p['sec']} сек" for p in (s.get("pauses") or [])) or "без пауз"
+        lines.append(
+            f"- [{s.get('d')}] Предмет: «{s.get('subject')}» | План: {s.get('planned_min')} мин | "
+            f"Чистый фокус: {f_min} мин | Пауз: {p_cnt} (всего {p_sec} сек: {p_details})"
+        )
+
+    sys_prompt = (
+        "Ты эксперт по нейробиологии внимания и академической продуктивности. "
+        "Проанализируй статистику фокус-таймеров студента за неделю (включая предметы, длительность сессий и каждую паузу).\n"
+        "Оформи ответ в Markdown по 3 блокам:\n"
+        "## 📊 Картина недели по предметам\n"
+        "## ⏸ Анализ пауз и удержания внимания\n"
+        "## 🚀 Как улучшить фокус на следующей неделе (конкретные рекомендации по длине слотов)\n"
+        "Пиши живо, конкретно по его цифрам и предметам, без воды."
+    )
+    rep = clean_math(await ai_direct(request, user, sys_prompt, "\n".join(lines), temp=0.5))
+    u["focus_report"] = rep
+    save()
+    return {"ok": True, "report": rep}
 
 
 async def a_story_image(request, user):
-    """Сохраняет PNG сторис-карточки на сервере и может сразу прислать её пользователю в чат бота."""
     import base64
     b, u = await request.json(), U(request, user)
     data_url = str(b.get("data_url") or "")
@@ -488,7 +605,7 @@ async def a_story_image(request, user):
         photo = core.BufferedInputFile(raw, filename=fname)
         caption = (
             f"🔥 <b>Моя серия: {u.get('streak', 0)} дн.</b> (Уровень {int(u.get('xp', 0)) // 100 + 1} · {u.get('xp', 0)} XP)\n"
-            "Сохрани картинку в галерею или выложи в Сторис в 1 клик!"
+            "Сохрани картинку в галерею или выложи в Сторис!"
         )
         await core.bot.send_photo(u["tg"], photo, caption=caption, parse_mode="HTML")
 
@@ -653,8 +770,12 @@ async def a_goal_add(request, user):
     b = await request.json()
     name = str(b.get("name") or "").strip()[:60]
     cat = str(b.get("cat") or "mind").strip()[:20]
+    target = b.get("target")
+    if not isinstance(target, list) or not target:
+        target = [0, 1, 2, 3, 4, 5, 6]
+    target = sorted({int(x) for x in target if str(x).isdigit() and 0 <= int(x) <= 6}) or [0, 1, 2, 3, 4, 5, 6]
     if name:
-        U(request, user)["goals"].append({"id": secrets.token_hex(3), "name": name, "cat": cat, "days": []})
+        U(request, user)["goals"].append({"id": secrets.token_hex(3), "name": name, "cat": cat, "target": target, "days": []})
         save()
     return {"ok": True}
 
@@ -667,21 +788,34 @@ async def a_goal_del(request, user):
 
 
 async def a_goal_check(request, user):
-    u, t = U(request, user), str(day())
+    """Отмечает или снимает выполнение привычки за сегодня (или за выбранный день недели) + обновляет огонёк."""
+    u = U(request, user)
+    b = {}
+    with suppress(Exception):
+        b = await request.json()
+    target_date = str(b.get("date") or day())[:10]
+    new_target = b.get("target")
+
     toggled_on = False
     for g in u["goals"]:
         if g["id"] == request.match_info["id"]:
-            if t in g["days"]:
-                g["days"].remove(t)
+            if isinstance(new_target, list) and new_target:
+                g["target"] = sorted({int(x) for x in new_target if str(x).isdigit() and 0 <= int(x) <= 6})
+                save()
+                return {"ok": True, "updated_target": g["target"], "fire": len(g.get("days", []))}
+            if target_date in g["days"]:
+                g["days"].remove(target_date)
                 u["xp"] = max(0, int(u.get("xp", 0)) - XP["goal"])
-                _log_xp(u, "goal", -XP["goal"], f"↩️ Отмена: {g['name']}")
+                _log_xp(u, "goal", -XP["goal"], f"↩️ Отмена: {g['name']} ({target_date})")
                 toggled_on = False
             else:
-                g["days"].append(t)
-                award(u, "goal", f"🎯 Привычка: {g['name']}")
+                g["days"].append(target_date)
+                g["days"].sort()
+                award(u, "goal", f"🔥 Привычка: {g['name']} ({target_date})")
                 toggled_on = True
-    save()
-    return {"ok": True, "checked": toggled_on, "xp": u["xp"]}
+            save()
+            return {"ok": True, "checked": toggled_on, "xp": u["xp"], "fire": len(g["days"])}
+    return {"ok": False}
 
 
 async def a_journal(request, user):
@@ -1291,6 +1425,8 @@ def setup(c) -> None:
         ("POST", "/api/g/quest/undo", a_quest_undo),
         ("POST", "/api/g/card/undo", a_card_undo),
         ("POST", "/api/g/pomodoro", a_pomodoro_done),
+        ("POST", "/api/g/focus/preset", a_focus_preset),
+        ("POST", "/api/g/focus/report", a_focus_report),
         ("POST", "/api/g/story_image", a_story_image),
         ("POST", "/api/g/checkin", a_checkin_lessons),
         ("POST", "/api/g/snap", a_snap),
