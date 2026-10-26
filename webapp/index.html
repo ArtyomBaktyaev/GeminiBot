@@ -859,6 +859,28 @@ nav button.on .ic svg{stroke:var(--accent);filter:drop-shadow(0 2px 8px var(--ac
 }
 .g-rank-row.me{border-color:#84cc16;background:rgba(132,204,22,0.09)}
 .g-rank-pos{width:26px;font-weight:900;font-family:ui-monospace,Menlo,monospace;color:var(--text-2);text-align:center}
+
+   .chip{flex-shrink:0}
+.info-box .row.between{gap:10px}
+.info-box .row.between > .row{flex:1;min-width:0}
+input[type=date],input[type=time]{min-width:0;padding:9px 10px;font-size:0.92rem}
+
+.g-week-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin-top:4px}
+.g-day-cell{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  padding:7px 2px;border-radius:11px;background:var(--surface-2);
+  border:1.5px solid var(--line);cursor:pointer;user-select:none;
+  transition:transform .12s var(--ease),background .18s var(--ease),border-color .18s var(--ease);
+}
+.g-day-cell:active{transform:scale(0.94)}
+.g-day-cell .w-lbl{font-size:0.66rem;font-weight:800;text-transform:uppercase;color:var(--text-3)}
+.g-day-cell .w-num{font-size:0.86rem;font-weight:900;margin-top:2px;color:var(--text)}
+.g-day-cell.target{border-color:rgba(132,204,22,0.45);background:rgba(132,204,22,0.06)}
+.g-day-cell.target .w-lbl{color:#84cc16}
+[data-theme="light"] .g-day-cell.target .w-lbl{color:#15803d}
+.g-day-cell.done{background:linear-gradient(135deg,#84cc16,#10b981);border-color:transparent;color:#052e16;box-shadow:0 4px 12px rgba(132,204,22,0.28)}
+.g-day-cell.done .w-lbl,.g-day-cell.done .w-num{color:#052e16}
+.g-day-cell.today{outline:2px solid var(--accent);outline-offset:1px}
 </style>
 </head>
 <body>
@@ -971,6 +993,68 @@ applyUiPrefs();
 /* =========================================================
    HELPERS, AVATAR RENDERER & API
    ========================================================= */
+function _enableManualInput(el, origType) {
+  let lastTap = 0;
+  const switchToManual = () => {
+    if (el.type === "text") return;
+    const cur = el.value || "";
+    el.type = "text";
+    el.setAttribute("inputmode", "numeric");
+    if (origType === "date") {
+      el.placeholder = "ДД.ММ.ГГГГ (напр. 10.11.2026)";
+      if (/^\d{4}-\d{2}-\d{2}$/.test(cur)) {
+        const [y, m, d] = cur.split("-");
+        el.value = `${d}.${m}.${y}`;
+      }
+    } else {
+      el.placeholder = "ЧЧ:ММ (напр. 19:00)";
+    }
+    setTimeout(() => { el.focus(); el.select && el.select(); }, 20);
+    toast("⌨️ Ручной ввод: пиши с клавиатуры");
+  };
+
+  el.addEventListener("dblclick", switchToManual);
+  el.addEventListener("touchend", () => {
+    const now = Date.now();
+    if (now - lastTap < 360) switchToManual();
+    lastTap = now;
+  });
+
+  el.addEventListener("blur", () => {
+    if (el.type !== "text") return;
+    const raw = el.value.trim();
+    if (origType === "date") {
+      const m1 = raw.match(/^(\d{1,2})[./\-\s](\d{1,2})(?:[./\-\s](\d{2,4}))?$/);
+      if (m1) {
+        const dd = m1[1].padStart(2, "0");
+        const mm = m1[2].padStart(2, "0");
+        let yyyy = m1[3] ? m1[3] : String(new Date().getFullYear());
+        if (yyyy.length === 2) yyyy = "20" + yyyy;
+        el.type = "date";
+        el.value = `${yyyy}-${mm}-${dd}`;
+        el.dispatchEvent(new Event("change"));
+        return;
+      }
+      if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+        el.type = "date";
+        el.value = raw;
+        return;
+      }
+    } else if (origType === "time") {
+      const m2 = raw.match(/^(\d{1,2})[:.\-\s](\d{2})$/);
+      if (m2) {
+        const hh = String(Math.min(23, parseInt(m2[1], 10))).padStart(2, "0");
+        const mn = String(Math.min(59, parseInt(m2[2], 10))).padStart(2, "0");
+        el.type = "time";
+        el.value = `${hh}:${mn}`;
+        el.dispatchEvent(new Event("change"));
+        return;
+      }
+    }
+    el.type = origType;
+  });
+}
+
 function h(tag, props, ...kids) {
   const el = document.createElement(tag);
   for (const [k, v] of Object.entries(props || {})) {
@@ -979,6 +1063,10 @@ function h(tag, props, ...kids) {
     else if (k === "style" && typeof v === "object") Object.assign(el.style, v);
     else if (k.startsWith("on") && typeof v === "function") el.addEventListener(k.slice(2), v);
     else el.setAttribute(k, v === true ? "" : v);
+  }
+  if (tag === "input" && props && (props.type === "date" || props.type === "time")) {
+    _enableManualInput(el, props.type);
+    el.title = "Двойной тап — ручной ввод с клавиатуры";
   }
   for (const kid of kids.flat(Infinity)) {
     if (kid == null || kid === false) continue;
@@ -2045,9 +2133,257 @@ function lessonRow(l, now) {
       )));
 }
 
+S.focusSubj = "Математический анализ";
+S.focusPlannedMin = 25;
 S.pomoSec = 25 * 60;
 S.pomoRun = false;
 S.pomoTimer = null;
+S.pomoPauseStart = null;
+S.pomoPauses = [];
+
+function openFocusModal(gStateInitial) {
+  sheet("🍅 Фокус-таймер по предметам", (close) => {
+    const wrap = h("div", { class:"stack" });
+
+    const drawFocus = async (st) => {
+      if (!st) {
+        try { st = await api("/api/g/state", { fresh: true }); } catch (e) { st = {}; }
+      }
+      const presets = st.focus_presets || [
+        { id: "fp_1", subject: "Математический анализ", minutes: 45 },
+        { id: "fp_2", subject: "Программирование C/C++", minutes: 50 },
+        { id: "fp_3", subject: "Английский язык", minutes: 25 }
+      ];
+      const sessions = st.focus_sessions || [];
+
+      const timerDigits = h("div", {
+        class:"mono center",
+        style:{fontSize:"3.1rem", fontWeight:900, letterSpacing:"-0.04em", margin:"6px 0"}
+      });
+      const pausesInfo = h("div", { class:"sub center" });
+
+      const syncDigits = () => {
+        const m = String(Math.floor(S.pomoSec / 60)).padStart(2, "0");
+        const s = String(S.pomoSec % 60).padStart(2, "0");
+        timerDigits.textContent = `${m}:${s}`;
+        const totalP = S.pomoPauses.reduce((acc, x) => acc + x.sec, 0);
+        pausesInfo.textContent = S.pomoPauses.length
+          ? `Пауз за сессию: ${S.pomoPauses.length} (всего ${Math.round(totalP / 60 * 10) / 10} мин)`
+          : (S.pomoPauseStart ? "⏸ Сейчас на паузе (время паузы засекается)…" : "Пауз пока не было — держишь чистый фокус!");
+      };
+      syncDigits();
+
+      const finishSession = async (completedFull) => {
+        clearInterval(S.pomoTimer);
+        if (S.pomoPauseStart) {
+          const pSec = Math.max(1, Math.round((Date.now() - S.pomoPauseStart) / 1000));
+          S.pomoPauses.push({ at: new Date().toTimeString().slice(0, 5), sec: pSec });
+          S.pomoPauseStart = null;
+        }
+        S.pomoRun = false;
+        const plannedSec = S.focusPlannedMin * 60;
+        const focusedSec = completedFull ? plannedSec : Math.max(60, plannedSec - S.pomoSec);
+        try {
+          await api("/api/g/pomodoro", {
+            method:"POST",
+            body:{
+              subject: S.focusSubj,
+              planned_min: S.focusPlannedMin,
+              focused_sec: focusedSec,
+              pauses: S.pomoPauses
+            }
+          });
+          pick("success");
+          toast(`🍅 Сессия «${S.focusSubj}» сохранена! +15 XP`, "ok");
+        } catch (e) { toast(e.message, "err"); }
+        S.pomoSec = S.focusPlannedMin * 60;
+        S.pomoPauses = [];
+        const fresh = await api("/api/g/state", { fresh: true });
+        drawFocus(fresh);
+        render();
+      };
+
+      const startPauseBtn = h("button", {
+        class:"btn",
+        onclick: () => {
+          hap("medium");
+          if (S.pomoRun) {
+            // Ставим на паузу и засекаем начало паузы
+            S.pomoRun = false;
+            clearInterval(S.pomoTimer);
+            S.pomoPauseStart = Date.now();
+            startPauseBtn.textContent = "▶️ Продолжить";
+            syncDigits();
+          } else {
+            // Снимаем с паузы и записываем длительность паузы
+            if (S.pomoPauseStart) {
+              const pSec = Math.max(1, Math.round((Date.now() - S.pomoPauseStart) / 1000));
+              S.pomoPauses.push({ at: new Date().toTimeString().slice(0, 5), sec: pSec });
+              S.pomoPauseStart = null;
+            }
+            S.pomoRun = true;
+            startPauseBtn.textContent = "⏸ Пауза";
+            syncDigits();
+            S.pomoTimer = setInterval(() => {
+              if (S.pomoSec > 0) {
+                S.pomoSec--;
+                syncDigits();
+              } else {
+                finishSession(true);
+              }
+            }, 1000);
+          }
+        }
+      }, S.pomoRun ? "⏸ Пауза" : (S.pomoPauseStart ? "▶️ Продолжить" : "▶️ Запустить фокус"));
+
+      const newSubjInp = h("input", { type:"text", placeholder:"Предмет (напр., Линейная алгебра)" });
+      const newMinInp = h("input", { type:"number", min:5, max:180, value:"45", placeholder:"Мин" });
+
+      const totalWeekMin = Math.round(sessions.reduce((a, s) => a + (s.focused_sec || 0), 0) / 60);
+      const totalWeekPauses = sessions.reduce((a, s) => a + ((s.pauses && s.pauses.length) || 0), 0);
+
+      wrap.replaceChildren(
+        // Главный циферблат
+        h("div", { class:"card center", style:{marginBottom:0} },
+          h("span", { class:"chip green" }, `🎯 ${S.focusSubj} (${S.focusPlannedMin} мин) · +15 XP`),
+          timerDigits,
+          pausesInfo,
+          h("div", { class:"btn-row", style:{marginTop:"12px"} },
+            startPauseBtn,
+            (S.pomoRun || S.pomoPauseStart || S.pomoSec < S.focusPlannedMin * 60) ? h("button", {
+              class:"btn subtle",
+              onclick: () => finishSession(false)
+            }, "⏹ Завершить и сохранить") : null,
+            h("button", {
+              class:"btn ghost",
+              onclick: () => {
+                clearInterval(S.pomoTimer);
+                S.pomoRun = false;
+                S.pomoPauseStart = null;
+                S.pomoPauses = [];
+                S.pomoSec = S.focusPlannedMin * 60;
+                syncDigits();
+                startPauseBtn.textContent = "▶️ Запустить фокус";
+              }
+            }, "↺ Сброс")
+          )
+        ),
+
+        // Сохранённые таймеры по предметам
+        h("h2", { style:{margin:"8px 0 2px"} }, "📚 Твои таймеры по предметам"),
+        h("div", { class:"chips", style:{marginTop:0} },
+          ...presets.map(p =>
+            h("div", {
+              class: "chip " + (S.focusSubj === p.subject && S.focusPlannedMin === p.minutes ? "" : "gray"),
+              style:{cursor:"pointer", padding:"6px 10px"},
+              onclick: () => {
+                if (S.pomoRun) return toast("Сначала останови текущий таймер", "err");
+                hap();
+                S.focusSubj = p.subject;
+                S.focusPlannedMin = p.minutes;
+                S.pomoSec = p.minutes * 60;
+                S.pomoPauses = [];
+                drawFocus(st);
+              }
+            },
+              `${p.subject} · ${p.minutes}м`,
+              h("span", {
+                style:{marginLeft:"6px", opacity:0.65},
+                onclick: async (ev) => {
+                  ev.stopPropagation();
+                  const r = await api("/api/g/focus/preset", { method:"POST", body:{ action:"del", id: p.id } });
+                  st.focus_presets = r.presets;
+                  drawFocus(st);
+                }
+              }, "✕")
+            )
+          )
+        ),
+
+        // Форма создания нового пресета таймера
+        h("div", { class:"card tight", style:{marginBottom:0} },
+          h("div", { style:{fontWeight:700, fontSize:"0.86rem", marginBottom:"6px"} }, "➕ Сохранить новый таймер предмета"),
+          h("div", { class:"row" },
+            h("div", { class:"grow" }, newSubjInp),
+            h("div", { style:{width:"86px"} }, newMinInp),
+            h("button", {
+              class:"btn small",
+              onclick: async () => {
+                const sName = newSubjInp.value.trim();
+                const mins = parseInt(newMinInp.value, 10) || 25;
+                if (!sName) return toast("Введите название предмета", "err");
+                const r = await api("/api/g/focus/preset", { method:"POST", body:{ action:"add", subject: sName, minutes: mins } });
+                st.focus_presets = r.presets;
+                S.focusSubj = sName;
+                S.focusPlannedMin = mins;
+                S.pomoSec = mins * 60;
+                drawFocus(st);
+                toast("Таймер предмета сохранён ✅", "ok");
+              }
+            }, "➕")
+          )
+        ),
+
+        // Статистика и ИИ-отчёт за неделю
+        h("h2", { style:{margin:"8px 0 2px"} }, "📊 Статистика фокуса и пауз за неделю"),
+        h("div", { class:"stats", style:{marginBottom:"4px"} },
+          h("div", { class:"stat ok" }, h("b", {}, totalWeekMin + " м"), h("span", {}, "Чистый фокус")),
+          h("div", { class:"stat" }, h("b", {}, sessions.length), h("span", {}, "Сессий")),
+          h("div", { class:"stat warn" }, h("b", {}, totalWeekPauses), h("span", {}, "Всего пауз"))
+        ),
+        h("button", {
+          class:"btn block",
+          onclick: async (ev) => {
+            ev.target.disabled = true;
+            ev.target.textContent = "⏳ ИИ анализирует твои сессии и паузы…";
+            try {
+              const r = await api("/api/g/focus/report", { method:"POST" });
+              st.focus_report = r.report;
+              pick("success");
+              drawFocus(st);
+            } catch (e) { toast(e.message, "err"); }
+            ev.target.disabled = false;
+            ev.target.textContent = "🧠 Сделать ИИ-отчёт за неделю и получить советы";
+          }
+        }, "🧠 Сделать ИИ-отчёт за неделю и получить советы"),
+
+        st.focus_report ? h("div", { class:"info-box", style:{borderColor:"#84cc16", marginBottom:0} },
+          h("div", { class:"info-title" }, "💡 Разбор твоей концентрации и пауз за неделю"),
+          renderMd(st.focus_report)
+        ) : null,
+
+        sessions.length ? h("details", { class:"group-acc", style:{marginBottom:0} },
+          h("summary", {},
+            h("div", { class:"group-icon" }, "📜"),
+            h("div", { class:"group-meta" },
+              h("div", { class:"g-title" }, "История сессий и пауз"),
+              h("div", { class:"g-sub" }, `Записано сессий: ${sessions.length}`)
+            ),
+            h("span", { class:"chev" })
+          ),
+          h("div", { class:"group-body" },
+            ...sessions.slice(0, 15).map(s => {
+              const fMin = Math.round((s.focused_sec || 0) / 60);
+              const pList = s.pauses || [];
+              return h("div", { class:"info-box", style:{marginBottom:0} },
+                h("div", { class:"row between" },
+                  h("span", { style:{fontWeight:800, fontSize:"0.9rem"} }, s.subject),
+                  h("span", { class:"chip green" }, `${fMin} мин фокуса`)
+                ),
+                h("div", { class:"sub", style:{marginTop:"4px"} },
+                  `📅 ${fmtShort(s.d)} · Пауз: ${pList.length}` +
+                  (pList.length ? " (" + pList.map(p => `в ${p.at} на ${p.sec}с`).join(", ") + ")" : " (без единой паузы 🔥)"))
+              );
+            })
+          )
+        ) : null
+      );
+    };
+
+    drawFocus(gStateInitial);
+    return wrap;
+  });
+}
 
 async function viewHome() {
   const [d, gState] = await Promise.all([
@@ -2060,108 +2396,43 @@ async function viewHome() {
   const acc = (me && me.account) || { name: "Артём", avatar: "🧑‍💻" };
   const accName = acc.name || "Артём";
 
-  const lessons = (d.today && Array.isArray(d.today.lessons)) ? d.today.lessons : [];
-  const curLesson = lessons.find(l => l.start <= now && now <= l.end);
-  const nextLesson = lessons.find(l => l.start > now);
-  let liveStatusText = "✨ Свободный фокус-режим — пар больше нет";
-  if (curLesson) {
-    liveStatusText = `🟢 Сейчас идёт: ${curLesson.subject} (до ${curLesson.end}${curLesson.room ? ", ауд. " + curLesson.room : ""})`;
-  } else if (nextLesson) {
-    liveStatusText = `⏳ Следующая пара в ${nextLesson.start}: ${nextLesson.subject}${nextLesson.room ? " (ауд. " + nextLesson.room + ")" : ""}`;
-  }
+  const root = h("div", {});
 
-  const pctCards = d.cards_total ? Math.round(100 * (d.cards_total - d.cards_due) / d.cards_total) : 0;
-
-  const pomoDisplay = h("div", {
-    class: "mono",
-    style: { fontSize: "1.45rem", fontWeight: 900, letterSpacing: "-0.03em", margin: "2px 0" }
-  });
-  const updatePomoText = () => {
-    const m = String(Math.floor(S.pomoSec / 60)).padStart(2, "0");
-    const s = String(S.pomoSec % 60).padStart(2, "0");
-    pomoDisplay.textContent = `${m}:${s}`;
-  };
-  updatePomoText();
-
-  const pomoBtn = h("button", {
-    class: "btn small",
-    onclick: () => {
-      hap();
-      if (S.pomoRun) {
-        S.pomoRun = false;
-        clearInterval(S.pomoTimer);
-        pomoBtn.textContent = "▶️ Старт";
-      } else {
-        S.pomoRun = true;
-        pomoBtn.textContent = "⏸ Пауза";
-        S.pomoTimer = setInterval(async () => {
-          if (S.pomoSec > 0) {
-            S.pomoSec--;
-            updatePomoText();
-          } else {
-            clearInterval(S.pomoTimer);
-            S.pomoRun = false;
-            S.pomoSec = 25 * 60;
-            updatePomoText();
-            pomoBtn.textContent = "▶️ Старт";
-            pick("success");
-            try {
-              await api("/api/g/pomodoro", { method: "POST" });
-              toast("🍅 Фокус-сессия завершена! +15 XP", "ok");
-            } catch (e) {}
-          }
-        }, 1000);
-      }
-    }
-  }, S.pomoRun ? "⏸ Пауза" : "▶️ Старт");
-
-  const root = h("div", { class: "g-shell" });
-
-  // 1. Шапка профиля + статус пары
-  root.append(h("div", { class: "hero", style: { marginBottom: "2px" } },
+  // 1. Классический чистый Hero-блок
+  root.append(h("div", { class: "hero" },
     h("div", { class: "row", style: { gap: "12px", marginBottom: "10px" } },
       renderAvatar(acc.avatar, "", openProfileEditor),
       h("div", { class: "grow" },
         h("h1", { style: { cursor: "pointer" }, onclick: openProfileEditor }, "Привет, " + accName + " 👋"),
         h("div", { class: "sub", style: { marginTop: "2px" } },
           dateStr.charAt(0).toUpperCase() + dateStr.slice(1) + (d.parity ? " · " + PARITY[d.parity] : ""))
-      ),
-      h("button", { class: "btn ghost small icon", onclick: openAppearanceSheet, title: "Оформление и масштаб" }, "🎨")
+      )
     ),
-    h("div", {
-      style: {
-        padding: "8px 12px", borderRadius: "12px", background: "var(--surface-2)",
-        border: "1px solid var(--line-2)", fontSize: "0.84rem", fontWeight: 700, marginBottom: "10px"
-      }
-    }, liveStatusText),
     h("div", { class: "row wrap", style: { gap: "6px" } },
-      h("button", { class: "acc-pill", onclick: openProfileEditor },
+      h("button", { class: "acc-pill", onclick: openProfileEditor, title: "Изменить имя, аватарку или API-ключ" },
         renderAvatar(acc.avatar, "sm"),
         h("span", { class: "truncate" }, accName),
         h("span", { style: { opacity: .6, fontSize: "0.7rem" } }, "✏️")),
-      h("button", { class: "model-pill", onclick: openModelPicker },
+      h("button", { class: "model-pill", onclick: openModelPicker, title: "Сменить модель" },
         h("span", { class: "dot" }),
         shortModelName(me && me.model),
         acc.has_custom_key ? " 🔑" : ""),
       gState ? h("button", {
         class: "chip green",
-        onclick: () => { S.tab = "growth"; drawNav(); render(); }
-      }, `🔥 ${gState.streak} дн. · ⚡ Ур. ${gState.level} (${gState.xp} XP)`) : null
+        onclick: () => switchTab("growth")
+      }, `🔥 ${gState.streak} дн. · ⚡ Ур. ${gState.level}`) : null,
+      h("button", { class: "btn ghost small icon", onclick: openAppearanceSheet, title: "Оформление и масштаб" }, "🎨")
     )
   ));
 
-  // 2. Пары на сегодня
+  // 2. Сегодня (пары)
   const t = d.today;
-  root.append(
-    h("div", { class: "g-sec-head" },
-      h("h2", {}, "Сегодня"),
-      h("button", { class: "chip gray", onclick: () => lessonForm(null, S.today) }, "➕ Пара")
-    )
-  );
+  const lessons = (t && Array.isArray(t.lessons)) ? t.lessons : [];
+  root.append(h("h2", {}, "Сегодня"));
   if (!t) {
     root.append(empty("📅", "Модуль расписания не подключён", null));
   } else if (!lessons.length) {
-    root.append(h("div", { class: "card", style: { textAlign: "center", padding: "18px 14px", marginBottom: 0 } },
+    root.append(h("div", { class: "card", style: { textAlign: "center", padding: "18px 14px" } },
       h("div", { style: { fontSize: "32px", marginBottom: "4px" } }, "🎉"),
       h("div", { style: { fontWeight: 700 } }, "Пар нет"),
       h("div", { class: "sub", style: { marginTop: "2px" } }, "Свободный день")));
@@ -2188,7 +2459,7 @@ async function viewHome() {
     root.append(
       h("details", {
         class: "group-acc",
-        style: { marginBottom: 0 },
+        style: { marginTop: "14px" },
         open: S.homeDeadlinesOpen,
         ontoggle: (e) => { S.homeDeadlinesOpen = e.target.open; }
       },
@@ -2229,88 +2500,46 @@ async function viewHome() {
     );
   }
 
-  // 4. Карточки (с кольцом прогресса) + Фокус-таймер Pomodoro
+  // 4. Карточки (ровное кольцо прогресса)
   if (S.me && S.me.features.study) {
-    root.append(h("div", { class: "g-sec-head" }, h("h2", {}, "Карточки и Фокус")));
-    root.append(h("div", { class: "card row", style: { gap: "14px", marginBottom: 0 } },
-      h("div", { class: "ring" + (pctCards >= 100 ? " ok" : ""), style: { "--p": pctCards } }, h("div", {}, pctCards + "%")),
+    root.append(h("h2", {}, "Карточки"));
+    const pct = d.cards_total ? Math.round(100 * (d.cards_total - d.cards_due) / d.cards_total) : 0;
+    root.append(h("div", { class: "card row", style: { gap: "14px", alignItems: "center" } },
+      h("div", { class: "ring" + (pct >= 100 ? " ok" : ""), style: { "--p": pct } }, h("div", {}, pct + "%")),
       h("div", { class: "grow" },
         h("b", {}, d.cards_due ? d.cards_due + " к повторению" : "На сегодня всё 🎉"),
         h("div", { class: "sub" }, "Всего карточек: " + d.cards_total),
         h("button", { class: "btn subtle small", style: { marginTop: "8px" }, onclick: () => {
-          S.tab = "study"; S.studySub = "cards"; drawNav(); render();
-        }}, d.cards_due ? "▶️ Учить" : "📚 Открыть колоды"))));
+          S.studySub = "cards"; switchTab("study");
+        }}, d.cards_due ? "Учить" : "Открыть колоды"))));
   }
 
+  // 5. Выдвигающееся меню Фокус-таймера по предметам
+  const curMin = String(Math.floor(S.pomoSec / 60)).padStart(2, "0");
+  const curSec = String(S.pomoSec % 60).padStart(2, "0");
+  root.append(h("h2", {}, "Фокус и Таймеры"));
   root.append(
-    h("div", { class: "card tight row between", style: { marginBottom: 0 } },
-      h("div", {},
-        h("div", { class: "row", style: { gap: "6px" } },
-          h("span", { style: { fontWeight: 800, fontSize: "0.92rem" } }, "🍅 Фокус-таймер (25 мин)"),
-          h("span", { class: "chip green" }, "+15 XP")
-        ),
-        pomoDisplay
+    h("div", {
+      class: "card tappable row between",
+      onclick: () => openFocusModal(gState)
+    },
+      h("div", { class: "row", style: { gap: "12px" } },
+        h("div", { class: "group-icon", style: { fontSize: "20px" } }, "🍅"),
+        h("div", { class: "grow" },
+          h("div", { style: { fontWeight: 800, fontSize: "0.96rem" } },
+            S.pomoRun ? `Идёт фокус: ${S.focusSubj} (${curMin}:${curSec})` : "Фокус-таймер по предметам"),
+          h("div", { class: "sub" }, "Таймеры предметов, учёт каждой паузы и ИИ-отчёт недели")
+        )
       ),
-      h("div", { class: "row", style: { gap: "6px" } },
-        pomoBtn,
-        h("button", {
-          class: "btn ghost small icon",
-          title: "Сбросить таймер",
-          onclick: () => {
-            clearInterval(S.pomoTimer);
-            S.pomoRun = false;
-            S.pomoSec = 25 * 60;
-            updatePomoText();
-            pomoBtn.textContent = "▶️ Старт";
-          }
-        }, "↺")
-      )
+      h("span", { class: "chip green" }, S.pomoRun ? `${curMin}:${curSec}` : "Открыть →")
     )
   );
 
-  // 5. Быстрый черновик (Инбокс)
-  const noteKey = "home_quick_scratchpad_" + (getActiveAccountId() || "def");
-  const noteInput = h("textarea", {
-    placeholder: "⚡ Быстрая заметка: запиши сюда формулу, аудиторию, идею…",
-    style: { minHeight: "64px", fontSize: "0.88rem" },
-    oninput: (e) => {
-      try { localStorage.setItem(noteKey, e.target.value); } catch (err) {}
-    }
-  }, localStorage.getItem(noteKey) || "");
-
-  root.append(
-    h("div", { class: "card tight", style: { marginBottom: 0 } },
-      h("div", { style: { fontWeight: 800, fontSize: "0.9rem", marginBottom: "6px" } }, "📌 Быстрый черновик (Инбокс)"),
-      noteInput,
-      h("div", { class: "btn-row", style: { marginTop: "8px" } },
-        h("button", {
-          class: "btn subtle small",
-          onclick: () => {
-            const txt = noteInput.value.trim();
-            if (!txt) return toast("Черновик пуст", "err");
-            taskCreateForm();
-          }
-        }, "📋 Создать задачу"),
-        h("button", {
-          class: "btn ghost small",
-          onclick: () => {
-            noteInput.value = "";
-            localStorage.removeItem(noteKey);
-            toast("Черновик очищен");
-          }
-        }, "🗑 Очистить")
-      )
-    )
-  );
-
-  // 6. Быстрые действия (возвращены!)
-  root.append(h("div", { class: "g-sec-head" }, h("h2", {}, "Быстрые действия")));
+  // 6. Быстрые действия
+  root.append(h("h2", {}, "Быстрые действия"));
   root.append(h("div", { class: "stack" },
     h("button", { class: "btn ghost", style: { justifyContent: "flex-start", padding: "12px 14px" },
-      onclick: () => { S.tab = "growth"; drawNav(); render(); } },
-      h("span", { style: { fontSize: "19px" } }, "🌱"), h("span", {}, "Открыть Рост (Древо, Квест, Экзамены)")),
-    h("button", { class: "btn ghost", style: { justifyContent: "flex-start", padding: "12px 14px" },
-      onclick: () => { S.tab = "chat"; S.chatSub = "chat"; drawNav(); render(); } },
+      onclick: () => { S.chatSub = "chat"; switchTab("chat"); } },
       h("span", { style: { fontSize: "19px" } }, "💬"), h("span", {}, "Задать вопрос ИИ")),
     h("button", { class: "btn ghost", style: { justifyContent: "flex-start", padding: "12px 14px" },
       onclick: () => taskCreateForm() },
@@ -2541,6 +2770,128 @@ function sessionExamActions(ex) {
   });
 }
 
+function readFilesAsDataURL(fileList) {
+  return Promise.all(Array.from(fileList).map(file => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve({
+      name: file.name,
+      size: file.size,
+      type: file.type || "application/octet-stream",
+      data: reader.result,
+      ts: Date.now()
+    });
+    reader.onerror = () => reject(new Error("Ошибка чтения файла " + file.name));
+    reader.readAsDataURL(file);
+  })));
+}
+
+function lessonActions(l, day) {
+  const meta = getLessonMeta(l);
+  const dDate = (day && day.date) || S.ttDate || S.today;
+
+  sheet(l.subject, (close) => {
+    const wrap = h("div", {});
+
+    const drawContent = () => {
+      wrap.replaceChildren(
+        h("div", { class:"chips", style:{marginTop:0, marginBottom:"14px"} },
+          h("span", { class:"chip" }, "🕒 " + l.start + "–" + l.end),
+          l.room ? h("span", { class:"chip" }, "ауд. " + l.room) : null,
+          l.teacher ? h("span", { class:"chip gray" }, l.teacher) : null,
+          l.kind ? h("span", { class:"chip gray" }, l.kind) : null
+        ),
+
+        h("div", { class:"info-box" },
+          h("div", { class:"info-title" }, "📌 Краткое описание"),
+          h("div", { class:"info-body", style:{color: meta.description ? "var(--text)" : "var(--text-3)"} },
+            meta.description || "Нет краткого описания. Нажмите «Изменить», чтобы добавить.")
+        ),
+
+        h("div", { class:"info-box" },
+          h("div", { class:"info-title" }, "📚 Домашнее задание (ДЗ)"),
+          h("div", { class:"info-body", style:{color: meta.homework ? "var(--text)" : "var(--text-3)"} },
+            meta.homework || "ДЗ пока не записано.")
+        ),
+
+        h("div", { class:"info-box" },
+          h("div", { class:"info-title" }, "📝 Информация с пары / Конспект"),
+          h("div", { class:"info-body", style:{color: meta.notes ? "var(--text)" : "var(--text-3)"} },
+            meta.notes || "Заметок с пары пока нет.")
+        ),
+
+        h("div", { class:"info-box" },
+          h("div", { class:"row between wrap" },
+            h("div", { class:"info-title", style:{marginBottom:0} }, "📎 Файлы (" + meta.files.length + ")"),
+            h("label", { class:"chip", style:{cursor:"pointer"} },
+              "➕ Добавить файл",
+              h("input", {
+                type:"file", multiple:true, class:"hidden",
+                onchange: async (e) => {
+                  if (!e.target.files || !e.target.files.length) return;
+                  try {
+                    const added = await readFilesAsDataURL(e.target.files);
+                    meta.files.push(...added);
+                    saveLessonMeta(l, meta);
+                    toast("Файл(ы) прикреплены 📎", "ok");
+                    drawContent();
+                    render();
+                  } catch (err) { toast(err.message, "err"); }
+                }
+              })
+            )
+          ),
+          meta.files.length ? h("div", { class:"file-list" },
+            meta.files.map((f, idx) => {
+              const isImg = (f.type || "").startsWith("image/");
+              return h("div", { class:"file-item", onclick: () => previewFileModal(f) },
+                isImg && f.data
+                  ? h("img", { class:"file-thumb", src: f.data, alt: f.name })
+                  : h("div", { class:"file-thumb" }, "📄"),
+                h("div", { class:"file-info" },
+                  h("div", { class:"file-name" }, f.name),
+                  h("div", { class:"file-size" }, fmtBytes(f.size) + " · нажми для просмотра")
+                ),
+                h("button", {
+                  class:"btn danger small icon",
+                  title:"Удалить файл",
+                  onclick: (ev) => {
+                    ev.stopPropagation();
+                    meta.files.splice(idx, 1);
+                    saveLessonMeta(l, meta);
+                    drawContent();
+                    render();
+                  }
+                }, "✕")
+              );
+            })
+          ) : h("div", { class:"sub", style:{marginTop:"6px"} }, "Прикрепите фото доски, методичку или PDF к паре.")
+        ),
+
+        h("div", { class:"stack", style:{marginTop:"14px"} },
+          h("button", { class:"btn block", onclick: () => { close(); lessonForm(l, dDate); } },
+            "✏️ Изменить пару, ДЗ, аудиторию и материалы"),
+          l.id ? h("button", { class:"btn ghost block", onclick: async () => {
+            await api("/api/timetable/exception", { method:"POST", body: { date: dDate, kind: "cancel", lesson_id: l.id } });
+            close(); toast("Отменено на этот день", "ok"); render();
+          }}, "🚫 Отменить на " + fmtShort(dDate)) : null,
+          h("button", { class:"btn danger block", onclick: async () => {
+            if (!confirm("Удалить пару из расписания совсем?")) return;
+            if (l.id) {
+              await api("/api/timetable/lesson/" + l.id, { method:"DELETE" });
+            } else if (l.exc_id) {
+              await api("/api/timetable/exception/" + l.exc_id, { method:"DELETE" });
+            }
+            close(); toast("Удалено"); render();
+          }}, "🗑 Удалить")
+        )
+      );
+    };
+
+    drawContent();
+    return wrap;
+  });
+}
+   
 function lessonForm(l, date) {
   const wd = l ? l.weekday : (parse(date || S.today).getDay() + 6) % 7;
   const existingMeta = l ? getLessonMeta(l) : { description:"", homework:"", notes:"", files:[] };
@@ -4129,93 +4480,134 @@ async function generateStoryCardModal(st) {
     });
     const ctx = canvas.getContext("2d");
     const stage = (st.companion && st.companion.stage) || 1;
+    const stageTitle = (st.companion && st.companion.title) || "Семя Импульса";
 
+    // 1. Глубокий атмосферный фон
     const grad = ctx.createLinearGradient(0, 0, 1080, 1920);
-    grad.addColorStop(0, "#070b12");
-    grad.addColorStop(0.5, "#0f1f1c");
-    grad.addColorStop(1, "#06080e");
+    grad.addColorStop(0, "#050811");
+    grad.addColorStop(0.48, "#0c1c1a");
+    grad.addColorStop(1, "#04060b");
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, 1080, 1920);
 
-    const rad = ctx.createRadialGradient(540, 620, 40, 540, 620, 520);
-    rad.addColorStop(0, "rgba(163, 230, 53, 0.30)");
+    // Свечение за островом
+    const rad = ctx.createRadialGradient(540, 650, 30, 540, 650, 480);
+    rad.addColorStop(0, "rgba(163, 230, 53, 0.34)");
+    rad.addColorStop(0.6, "rgba(16, 185, 129, 0.12)");
     rad.addColorStop(1, "transparent");
     ctx.fillStyle = rad;
     ctx.fillRect(0, 0, 1080, 1920);
 
-    ctx.strokeStyle = "rgba(255,255,255,0.15)";
+    // Внешняя тонкая рамка с безопасными отступами
+    ctx.strokeStyle = "rgba(255,255,255,0.14)";
     ctx.lineWidth = 3;
-    ctx.strokeRect(64, 64, 952, 1792);
+    ctx.strokeRect(70, 70, 940, 1780);
 
+    // Центрированная шапка
+    ctx.textAlign = "center";
     ctx.fillStyle = "#a3e635";
-    ctx.font = "800 34px -apple-system, BlinkMacSystemFont, sans-serif";
-    ctx.fillText(`DAILY GROWTH // STAGE ${stage}/6 // ${st.today}`, 120, 155);
+    ctx.font = "800 30px -apple-system, BlinkMacSystemFont, sans-serif";
+    ctx.fillText(`DAILY GROWTH PROTOCOL  ·  STAGE ${stage}/6`, 540, 165);
 
-    ctx.fillStyle = "#f8fafc";
-    ctx.font = "900 64px -apple-system, BlinkMacSystemFont, sans-serif";
-    ctx.fillText((st.name || "Игрок").toUpperCase(), 120, 245);
-
-    // Отрисовка многослойного дерева на Canvas
-    ctx.save();
-    ctx.translate(540, 680);
-    ctx.fillStyle = "#1e293b";
-    ctx.beginPath();
-    ctx.ellipse(0, 150, 230, 55, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = "#10b981";
-    ctx.beginPath();
-    ctx.ellipse(0, 130, 210, 32, 0, 0, Math.PI * 2);
-    ctx.fill();
-    if (stage >= 5) {
-      ctx.strokeStyle = "#fef08a";
-      ctx.lineWidth = 6;
-      ctx.beginPath();
-      ctx.ellipse(0, -30, 220, 60, -0.2, 0, Math.PI * 2);
-      ctx.stroke();
-    }
-    ctx.fillStyle = "#10b981";
-    ctx.beginPath();
-    ctx.arc(-85, 0, 95, 0, Math.PI * 2);
-    ctx.arc(85, 0, 95, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = "#a3e635";
-    ctx.beginPath();
-    ctx.arc(0, -55, 125, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = "#e2e8f0";
-    ctx.fillRect(-16, 10, 32, 125);
-    ctx.restore();
-
-    ctx.fillStyle = "#a3e635";
-    ctx.font = "900 240px -apple-system, BlinkMacSystemFont, sans-serif";
-    ctx.fillText(String(st.streak) + "🔥", 115, 1190);
-
-    ctx.fillStyle = "#94a3b8";
-    ctx.font = "700 42px -apple-system, BlinkMacSystemFont, sans-serif";
-    ctx.fillText("ДНЕЙ БЕЗ ПРОПУСКОВ · " + (st.companion ? st.companion.title.toUpperCase() : ""), 120, 1265);
-
-    ctx.fillStyle = "rgba(255,255,255,0.06)";
-    ctx.fillRect(120, 1340, 840, 210);
     ctx.fillStyle = "#ffffff";
     ctx.font = "900 68px -apple-system, BlinkMacSystemFont, sans-serif";
-    ctx.fillText(`УРОВЕНЬ ${st.level}  ·  ${st.xp} XP`, 165, 1445);
+    ctx.fillText((st.name || "АРТЁМ").toUpperCase().slice(0, 18), 540, 255);
+
+    // Детальная иллюстрация парящего острова и дерева
+    ctx.save();
+    ctx.translate(540, 690);
+    // Каменная порода парящего острова
+    ctx.fillStyle = "#1e293b";
+    ctx.beginPath();
+    ctx.moveTo(-240, 120);
+    ctx.quadraticCurveTo(0, 175, 240, 120);
+    ctx.lineTo(175, 245);
+    ctx.quadraticCurveTo(0, 295, -175, 245);
+    ctx.closePath();
+    ctx.fill();
+    // Био-плато острова
+    ctx.fillStyle = "#10b981";
+    ctx.beginPath();
+    ctx.ellipse(0, 120, 240, 42, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // Энергетические орбиты
+    ctx.strokeStyle = "rgba(163,230,53,0.55)";
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.ellipse(0, -10, 260, 75, -0.18, 0, Math.PI * 2);
+    ctx.stroke();
+    // Крона дерева (многослойная)
+    ctx.fillStyle = "#059669";
+    ctx.beginPath();
+    ctx.arc(-110, -10, 105, 0, Math.PI * 2);
+    ctx.arc(110, -10, 105, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#10b981";
+    ctx.beginPath();
+    ctx.arc(-65, -75, 110, 0, Math.PI * 2);
+    ctx.arc(65, -75, 110, 0, Math.PI * 2);
+    ctx.fill();
     ctx.fillStyle = "#a3e635";
-    ctx.font = "600 36px -apple-system, BlinkMacSystemFont, sans-serif";
-    ctx.fillText(`Привычек: ${(st.goals || []).length}  |  Заморозок: ❄️ ${st.freeze}`, 165, 1510);
+    ctx.beginPath();
+    ctx.arc(0, -105, 125, 0, Math.PI * 2);
+    ctx.fill();
+    // Ствол и ветви
+    ctx.strokeStyle = "#f1f5f9";
+    ctx.lineWidth = 26;
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(0, 125);
+    ctx.lineTo(0, -45);
+    ctx.stroke();
+    ctx.lineWidth = 14;
+    ctx.beginPath();
+    ctx.moveTo(0, 35);
+    ctx.lineTo(-65, -25);
+    ctx.moveTo(0, 15);
+    ctx.lineTo(65, -40);
+    ctx.stroke();
+    ctx.restore();
+
+    // Крупный счётчик серии по центру
+    ctx.fillStyle = "#a3e635";
+    ctx.font = "900 220px -apple-system, BlinkMacSystemFont, sans-serif";
+    ctx.fillText(`${st.streak} 🔥`, 540, 1210);
+
+    // Подпись стадии (авто-масштабирование, чтобы НИКОГДА не вылезала за края)
+    ctx.fillStyle = "#e2e8f0";
+    ctx.font = "800 38px -apple-system, BlinkMacSystemFont, sans-serif";
+    ctx.fillText("ДНЕЙ БЕЗ ПРОПУСКОВ", 540, 1285);
+    ctx.fillStyle = "#a3e635";
+    ctx.font = "700 34px -apple-system, BlinkMacSystemFont, sans-serif";
+    ctx.fillText(`СТАДИЯ: ${stageTitle.toUpperCase()}`, 540, 1340);
+
+    // Карточка статов по центру
+    ctx.fillStyle = "rgba(255,255,255,0.06)";
+    ctx.fillRect(140, 1410, 800, 220);
+    ctx.strokeStyle = "rgba(163,230,53,0.35)";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(140, 1410, 800, 220);
+
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "900 62px -apple-system, BlinkMacSystemFont, sans-serif";
+    ctx.fillText(`УРОВЕНЬ ${st.level}  ·  ${st.xp} XP`, 540, 1505);
+
+    const totalFire = (st.goals || []).reduce((acc, g) => acc + (g.fire || (g.days || []).length), 0);
+    ctx.fillStyle = "#94a3b8";
+    ctx.font = "700 34px -apple-system, BlinkMacSystemFont, sans-serif";
+    ctx.fillText(`Огоньков привычек: 🔥 ${totalFire}   |   Заморозок: ❄️ ${st.freeze}`, 540, 1575);
 
     ctx.fillStyle = "#64748b";
-    ctx.font = "700 34px -apple-system, BlinkMacSystemFont, sans-serif";
-    ctx.fillText(st.bot ? "@" + st.bot : "Telegram Mini App · Академический Ассистент", 120, 1785);
+    ctx.font = "700 32px -apple-system, BlinkMacSystemFont, sans-serif";
+    ctx.fillText(st.bot ? "@" + st.bot + "  ·  " + st.today : "Telegram Mini App  ·  " + st.today, 540, 1785);
 
     return h("div", { class:"stack", style:{marginTop:"10px"} },
       canvas,
-      h("div", { class:"sub center" },
-        "Внутри Telegram проще всего нажать «Прислать в чат бота» — бот мгновенно пришлёт готовую картинку в диалог, откуда её в 1 тап можно сохранить или выложить в Сторис:"),
       h("button", {
         class:"btn block",
         onclick: async (ev) => {
           ev.target.disabled = true;
-          ev.target.textContent = "⏳ Отправляю картинку в чат бота…";
+          ev.target.textContent = "⏳ Отправляю в чат бота…";
           try {
             await api("/api/g/story_image", {
               method:"POST",
@@ -4225,9 +4617,9 @@ async function generateStoryCardModal(st) {
             toast("Картинка отправлена в чат бота! 📨", "ok");
           } catch (e) { toast(e.message, "err"); }
           ev.target.disabled = false;
-          ev.target.textContent = "📨 Прислать картинку в чат бота (100% работает)";
+          ev.target.textContent = "📨 Прислать картинку в чат бота";
         }
-      }, "📨 Прислать картинку в чат бота (100% работает)"),
+      }, "📨 Прислать картинку в чат бота"),
       h("button", {
         class:"btn ghost block",
         onclick: async (ev) => {
@@ -4243,7 +4635,7 @@ async function generateStoryCardModal(st) {
           } catch (e) { toast(e.message, "err"); }
           ev.target.disabled = false;
         }
-      }, "⬇️ Скачать PNG через браузер")
+      }, "⬇️ Скачать PNG по прямой ссылке")
     );
   });
 }
@@ -4460,7 +4852,15 @@ function openExamStudioModal(st) {
             h("div", { class:"grow" }, field("Дата сдачи", dateInp)),
             h("div", { class:"grow" }, field("Слот в расписании", timeInp))
           ),
-          h("label", { class:"file-upload-zone" }, fileLbl, fileInp),
+          h("div", {},
+            fileInp,
+            h("button", {
+              type:"button",
+              class:"file-upload-zone",
+              style:{width:"100%"},
+              onclick: () => fileInp.click()
+            }, fileLbl)
+          ),
           field("Список тем или билетов (можно вставить текстом)", topicsArea),
           h("button", {
             class:"btn block",
@@ -4756,8 +5156,8 @@ function renderGrowthHubPane(st) {
 
   box.append(
     h("div", { class:"g-sec-head" },
-      h("h2", {}, "Ежедневный квест на 3 минуты"),
-      h("span", { class:"num" }, `${doneCount}/3 ВЫПОЛНЕНО · +35 XP БОНУС`)
+      h("h2", {}, "Ежедневный квест (обновление в 06:00)"),
+      h("span", { class:"num" }, `${doneCount}/3 ВЫПОЛНЕНО · +35 XP`)
     ),
     h("div", { class:"g-quest-list" },
       ...(st.quest || []).map(q =>
@@ -4771,15 +5171,13 @@ function renderGrowthHubPane(st) {
               render();
               return;
             }
-            S.tab = q.tab;
-            drawNav();
-            render();
+            switchTab(q.tab);
           }
         },
           h("div", { class:"g-quest-check" }, q.done ? "✓" : ""),
           h("div", { class:"grow" },
             h("div", { style:{fontWeight:700, fontSize:"0.94rem"} }, q.title),
-            h("div", { class:"sub" }, q.done ? "Засчитано сегодня (нажми, чтобы отменить)" : "Нажми, чтобы перейти и выполнить")
+            h("div", { class:"sub" }, q.done ? "Выполнено сегодня (нажми, чтобы отменить)" : "Нажми, чтобы перейти и выполнить")
           ),
           h("span", { class:"chip " + (q.done ? "green" : "gray") }, q.done ? "↩️ Отменить" : `+${q.xp} XP`)
         )
@@ -4789,12 +5187,8 @@ function renderGrowthHubPane(st) {
         onclick: async () => {
           hap("medium");
           const res = await api("/api/g/checkin", { method:"POST" });
-          if (res.undone) {
-            toast("Отметка посещения пар снята ↩️");
-          } else {
-            pick("success");
-            toast("Посещение пар отмечено! +15 XP 🎓", "ok");
-          }
+          if (res.undone) toast("Отметка посещения пар снята ↩️");
+          else { pick("success"); toast("Посещение пар отмечено! +15 XP 🎓", "ok"); }
           render();
         }
       },
@@ -4808,8 +5202,15 @@ function renderGrowthHubPane(st) {
     )
   );
 
-  // ЦЕЛИ И ПРИВЫЧКИ
-  const last14 = Array.from({ length: 14 }, (_, i) => addDays(st.today, -(13 - i)));
+  // ЦЕЛИ И ПРИВЫЧКИ: РОВНО 7 ДНЕЙ ТЕКУЩЕЙ НЕДЕЛИ (ПН–ВС) + НАКОПИТЕЛЬНЫЙ ОГОНЁК 🔥
+  const weekDays = (st.week_days && st.week_days.length === 7)
+    ? st.week_days
+    : Array.from({ length: 7 }, (_, i) => {
+        const cur = parse(st.today);
+        const monOffset = (cur.getDay() + 6) % 7;
+        return addDays(st.today, i - monOffset);
+      });
+
   const CAT_LABELS = {
     body: "💪 Спорт",
     mind: "🇬🇧 Языки & Учёба",
@@ -4819,21 +5220,43 @@ function renderGrowthHubPane(st) {
 
   box.append(
     h("div", { class:"g-sec-head" },
-      h("h2", {}, "Цели и привычки (14 дней)"),
+      h("h2", {}, "Цели и привычки (Пн – Вс)"),
       h("button", {
         class:"chip",
         onclick: () => {
-          sheet("➕ Новая привычка или цель", (close) => {
-            const nameInp = h("input", { type:"text", placeholder:"Напр., Зарядка, Читать 20 стр., LeetCode…" });
+          sheet("➕ Новая привычка и дни недели", (close) => {
+            const nameInp = h("input", { type:"text", placeholder:"Напр., Зал / Разминка, Английский, Код…" });
             const catSel = h("select", {}, Object.entries(CAT_LABELS).map(([k, v]) => h("option", { value: k }, v)));
+            const pickedDays = new Set([1, 3, 5]); // По умолчанию Вт, Чт, Сб
+            const daysPicker = h("div", { class:"g-week-grid" });
+
+            const drawPicker = () => {
+              daysPicker.replaceChildren(...DAYS.map((dName, idx) =>
+                h("div", {
+                  class: "g-day-cell" + (pickedDays.has(idx) ? " done" : ""),
+                  onclick: () => {
+                    hap();
+                    if (pickedDays.has(idx) && pickedDays.size > 1) pickedDays.delete(idx);
+                    else pickedDays.add(idx);
+                    drawPicker();
+                  }
+                }, h("span", { class:"w-lbl" }, dName), h("span", { class:"w-num" }, pickedDays.has(idx) ? "🔥" : "—"))
+              ));
+            };
+            drawPicker();
+
             return h("div", { class:"stack" },
               field("Название привычки", nameInp),
-              field("Сфера жизни", catSel),
+              field("Сфера", catSel),
+              field("В какие дни недели цель заниматься?", daysPicker),
               h("button", {
                 class:"btn block",
                 onclick: async () => {
                   if (!nameInp.value.trim()) return toast("Введите название", "err");
-                  await api("/api/g/goals", { method:"POST", body:{ name: nameInp.value.trim(), cat: catSel.value } });
+                  await api("/api/g/goals", {
+                    method:"POST",
+                    body:{ name: nameInp.value.trim(), cat: catSel.value, target: Array.from(pickedDays) }
+                  });
                   pick("success"); close(); render();
                 }
               }, "Создать привычку")
@@ -4845,24 +5268,33 @@ function renderGrowthHubPane(st) {
   );
 
   if (!(st.goals || []).length) {
-    box.append(empty("🎯", "Привычек пока нет", "Добавь спорт, английский или пет-проект для ежедневного трекинга."));
+    box.append(empty("🎯", "Привычек пока нет", "Добавь спорт, английский или проект и выбери дни недели для цели."));
   } else {
     st.goals.forEach(g => {
-      const doneToday = (g.days || []).includes(st.today);
+      const allDays = g.days || [];
+      const doneToday = allDays.includes(st.today);
+      const fireCount = typeof g.fire === "number" ? g.fire : allDays.length;
+      const targetWeekdays = Array.isArray(g.target) && g.target.length ? g.target : [0, 1, 2, 3, 4, 5, 6];
+      const targetNames = targetWeekdays.map(i => DAYS[i]).join(", ");
+      const thisWeekDoneDates = weekDays.filter(dStr => allDays.includes(dStr));
+
       box.append(
         h("div", { class:"g-habit-card" },
           h("div", { class:"g-habit-top" },
-            h("span", { class:"chip gray" }, CAT_LABELS[g.cat] || "🎯 Цель"),
+            h("div", { class:"row wrap", style:{gap:"6px"} },
+              h("span", { class:"chip gray" }, CAT_LABELS[g.cat] || "🎯 Цель"),
+              h("span", { class:"chip warn", title:"Накопительный огонёк привычки (не сгорает при смене недели)" }, `🔥 ${fireCount}`)
+            ),
             h("div", { class:"row", style:{gap:"6px"} },
               h("button", {
                 class: "btn small " + (doneToday ? "subtle" : ""),
                 onclick: async () => {
                   hap("medium");
-                  const r = await api("/api/g/goals/" + g.id + "/check", { method:"POST" });
-                  toast(r.checked ? "Привычка отмечена! +10 XP ✅" : "Отметка снята ↩️", r.checked ? "ok" : "");
+                  const r = await api("/api/g/goals/" + g.id + "/check", { method:"POST", body:{ date: st.today } });
+                  toast(r.checked ? `Отмечено! 🔥 ${r.fire} (+10 XP)` : "Отметка снята ↩️", r.checked ? "ok" : "");
                   render();
                 }
-              }, doneToday ? "✓ Сегодня (отменить)" : "Отметить (+10 XP)"),
+              }, doneToday ? "✓ Сегодня" : "+1 🔥 Сегодня"),
               h("button", {
                 class:"btn ghost small icon",
                 title:"Удалить привычку",
@@ -4874,16 +5306,68 @@ function renderGrowthHubPane(st) {
               }, "✕")
             )
           ),
+
           h("div", {},
             h("div", { class:"g-habit-title" }, g.name),
-            h("div", { class:"sub", style:{marginTop:"2px"} }, `Выполнено дней за 2 недели: ${(g.days || []).length} из 14`)
+            h("div", { class:"sub", style:{marginTop:"2px"} },
+              `План: ${targetNames} · На этой неделе: ${thisWeekDoneDates.length} из ${targetWeekdays.length}`)
           ),
-          h("div", { class:"g-heat-dots" },
-            ...last14.map(dStr =>
-              h("div", {
-                class: "g-heat-dot" + ((g.days || []).includes(dStr) ? " on" : "") + (dStr === st.today ? " today" : ""),
-                title: dStr
-              })
+
+          // Шкала ровно на 7 дней текущей недели (Пн, Вт, Ср, Чт, Пт, Сб, Вс)
+          h("div", { class:"g-week-grid" },
+            ...weekDays.map((dStr, idx) => {
+              const isDone = allDays.includes(dStr);
+              const isTarget = targetWeekdays.includes(idx);
+              const isToday = dStr === st.today;
+              return h("div", {
+                class: "g-day-cell" + (isDone ? " done" : (isTarget ? " target" : "")) + (isToday ? " today" : ""),
+                title: `${DAYS[idx]} (${dStr}) — нажми, чтобы отметить/снять`,
+                onclick: async () => {
+                  hap("light");
+                  await api("/api/g/goals/" + g.id + "/check", { method:"POST", body:{ date: dStr } });
+                  render();
+                }
+              },
+                h("span", { class:"w-lbl" }, DAYS[idx]),
+                h("span", { class:"w-num" }, isDone ? "🔥" : parse(dStr).getDate())
+              );
+            })
+          ),
+
+          // Открывающееся меню истории и настройки дней недели
+          h("details", { class:"topic-acc", style:{marginTop:"4px"} },
+            h("summary", { style:{padding:"8px 10px", fontSize:"0.82rem"} },
+              h("span", { class:"grow" },
+                thisWeekDoneDates.length
+                  ? "📅 На этой неделе: " + thisWeekDoneDates.map(d => `${DAYS[(parse(d).getDay()+6)%7]} (${fmtShort(d)})`).join(", ")
+                  : "📅 История на этой неделе и настройка целевых дней"),
+              h("span", { class:"chev" })
+            ),
+            h("div", { class:"topic-body stack", style:{gap:"8px"} },
+              h("div", { class:"sub" },
+                `Всего накоплено огоньков за всё время: 🔥 ${fireCount}. При переходе на новую неделю полоска Пн–Вс очищается, а твои огоньки 🔥 сохраняются!`),
+              h("div", { class:"sub", style:{fontWeight:700} }, "Выбери целевые дни недели для этой привычки:"),
+              h("div", { class:"chips", style:{marginTop:0} },
+                ...DAYS.map((dName, idx) => {
+                  const active = targetWeekdays.includes(idx);
+                  return h("button", {
+                    class: "chip " + (active ? "green" : "gray"),
+                    onclick: async () => {
+                      const nextSet = new Set(targetWeekdays);
+                      if (nextSet.has(idx) && nextSet.size > 1) nextSet.delete(idx);
+                      else nextSet.add(idx);
+                      await api("/api/g/goals/" + g.id + "/check", {
+                        method:"POST",
+                        body:{ target: Array.from(nextSet) }
+                      });
+                      render();
+                    }
+                  }, dName);
+                })
+              ),
+              allDays.length ? h("div", { class:"sub" },
+                "Последние выполненные даты: " + allDays.slice(-10).reverse().map(d => `${DAYS[(parse(d).getDay()+6)%7]} ${fmtShort(d)}`).join(" · ")
+              ) : null
             )
           )
         )
@@ -4925,24 +5409,23 @@ function renderGrowthHubPane(st) {
         }
       }, "✨ Сохранить и начать диалог рефлексии"),
 
-      // Вместо длинного списка дней — компактная плашка входа в Хаб разговоров рефлексии
       h("div", {
         class:"info-box tappable",
         style:{marginBottom:0, cursor:"pointer", borderColor:"var(--line-2)"},
         onclick: () => openReflectionHubModal(st)
       },
         h("div", { class:"row between" },
-          h("div", { class:"row", style:{gap:"10px"} },
+          h("div", { class:"row", style:{gap:"10px", flex:1, minWidth:0} },
             h("div", { class:"group-icon" }, "💬"),
-            h("div", {},
+            h("div", { class:"grow" },
               h("div", { style:{fontWeight:800, fontSize:"0.95rem"} }, `Разговоры рефлексии (${totalReflections})`),
               h("div", { class:"sub" },
                 lastEntry
-                  ? `Последний: ${fmtShort(lastEntry.d)} — продолжить диалог, выгрузить в PDF или сделать ИИ-анализ за 7 дней`
+                  ? `Последний: ${fmtShort(lastEntry.d)} — продолжить диалог, PDF или ИИ-анализ за 7 дней`
                   : "Открыть архив по датам и ИИ-аналитику недели")
             )
           ),
-          h("span", { class:"chip" }, "Открыть →")
+          h("span", { class:"chip", style:{flexShrink:0} }, "Открыть →")
         )
       )
     )
