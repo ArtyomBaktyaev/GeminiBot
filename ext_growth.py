@@ -976,6 +976,57 @@ async def a_plan_expand(request, user):
 # =====================================================================
 # 5. ГРУППОВЫЕ КОМНАТЫ И ЛИДЕРБОРД
 # =====================================================================
+async def a_duel_new(request, user):
+    topic = str((await request.json()).get("topic") or "").strip()[:100]
+    if not topic:
+        raise ValueError("Введите тему дуэли")
+    r = jl(
+        await ai(
+            request,
+            user,
+            f'Составьте 5 тестовых вопросов по-русски на тему «{topic}» (без сырого LaTeX, используй Unicode-символы). '
+            'Ответ СТРОГО JSON: {"qs":[{"q":"Текст вопроса","a":["Вариант 1","Вариант 2","Вариант 3","Вариант 4"],"c":0}]}',
+        )
+    )
+    i = secrets.token_urlsafe(4).replace("-", "").replace("_", "")[:6]
+    qs = [
+        {
+            "q": clean_math(str(q["q"])),
+            "a": [clean_math(str(opt)) for opt in (q.get("a") or [])[:4]],
+            "c": int(q.get("c", 0)),
+        }
+        for q in (r.get("qs") or [])[:5]
+    ]
+    DB["duels"][i] = {"id": i, "topic": topic, "qs": qs, "res": {}, "created": time.time()}
+    save()
+    return {"id": i, "topic": topic}
+
+
+async def a_duel_get(request, user):
+    did = request.match_info["id"].strip()
+    if did not in DB["duels"]:
+        raise ValueError("Дуэль не найдена или устарела")
+    d, u = DB["duels"][did], U(request, user)
+    return {
+        "id": did,
+        "topic": d["topic"],
+        "qs": [{"q": q["q"], "a": q["a"]} for q in d["qs"]],
+        "res": list(d["res"].values()),
+        "played": u["id"] in d["res"],
+    }
+
+
+async def a_duel_ans(request, user):
+    did = request.match_info["id"].strip()
+    d, u = DB["duels"][did], U(request, user)
+    if u["id"] not in d["res"]:
+        a = (await request.json()).get("a") or []
+        score = sum(1 for q, x in zip(d["qs"], a) if int(q.get("c", 0)) == int(x))
+        d["res"][u["id"]] = {"name": u["name"], "avatar": u.get("avatar", "🧑‍💻"), "score": score, "total": len(d["qs"])}
+        award(u, "duel")
+        save()
+    return {"score": d["res"][u["id"]]["score"], "res": list(d["res"].values())}
+
 def _active_group(request, u: dict) -> tuple:
     g = gid(request) or (u["gids"][-1] if u.get("gids") else "")
     gr = DB["groups"].get(g) if g else None
