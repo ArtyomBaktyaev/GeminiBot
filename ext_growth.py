@@ -39,6 +39,20 @@ XP = {
     "journal": 12,
     "duel": 25,
     "lesson": 15,
+    "pomodoro": 15,
+    "exam_day": 10,
+}
+XP_LABELS = {
+    "cards": "🃏 Повторение карточек",
+    "task": "✅ Выполнение задачи",
+    "ask": "🤖 Разбор темы с ИИ",
+    "goal": "🎯 Выполнение привычки",
+    "journal": "💬 Запись в рефлексии",
+    "duel": "⚔️ Дуэль знаний",
+    "lesson": "🎓 Посещение пар",
+    "pomodoro": "⏱ Фокус-сессия (25 мин)",
+    "exam_day": "📚 Изучен день подготовки к экзамену",
+    "streak_bonus": "🔥 Бонус за закрытие квеста дня",
 }
 QUEST_KEYS = ("cards", "task", "ask")
 DB = {"u": {}, "duels": {}, "groups": {}}
@@ -172,6 +186,9 @@ def gid(request) -> str:
 # =====================================================================
 def U(request, user) -> dict:
     acc = W().get_request_account(request, user)
+    dirty = False
+    if acc["id"] not in DB["u"]:
+        dirty = True
     u = DB["u"].setdefault(
         acc["id"],
         {
@@ -182,20 +199,26 @@ def U(request, user) -> dict:
             "last": "",
             "qd": "",
             "flags": [],
+            "xp_log": [],
             "goals": [
                 {"id": "g_sport", "name": "Спорт / Разминка", "cat": "body", "days": []},
                 {"id": "g_eng", "name": "Английский 15 мин", "cat": "mind", "days": []},
                 {"id": "g_code", "name": "Код / Пет-проект", "cat": "work", "days": []},
             ],
             "journal": [],
+            "journal_analysis": "",
             "plan": [],
             "plan_subject": "",
             "plan_date": "",
+            "plan_analysis": "",
             "notify": True,
             "gids": [],
             "lessons_checked": "",
         },
     )
+    u.setdefault("xp_log", [])
+    u.setdefault("journal_analysis", "")
+    u.setdefault("plan_analysis", "")
     u.update(
         id=acc["id"],
         tg=int(user["id"]),
@@ -207,15 +230,40 @@ def U(request, user) -> dict:
     for j in u.get("journal", []):
         if not j.get("id"):
             j["id"] = secrets.token_hex(4)
+        if "msgs" not in j:
+            j["msgs"] = [
+                {"role": "user", "t": j.get("t", "")},
+                {"role": "ai", "t": j.get("ai", "")},
+            ]
     t_str = str(day())
     if u.get("qd") != t_str:
         u["qd"], u["flags"] = t_str, []
+        dirty = True
+    if dirty:
+        save()
     return u
 
 
-def award(u: dict, kind: str) -> bool:
-    u["xp"] = max(0, int(u.get("xp", 0)) + XP.get(kind, 5))
-    quest_alias = "task" if kind in ("task", "goal", "lesson") else ("ask" if kind in ("ask", "journal", "duel") else kind)
+def _log_xp(u: dict, kind: str, delta: int, custom_label: str = "") -> None:
+    log_list = u.setdefault("xp_log", [])
+    log_list.append({
+        "id": secrets.token_hex(3),
+        "ts": time.time(),
+        "d": str(day()),
+        "kind": kind,
+        "xp": delta,
+        "lvl": max(1, int(u.get("xp", 0)) // 100 + 1),
+        "label": custom_label or XP_LABELS.get(kind, kind),
+    })
+    del log_list[:-80]
+
+
+def award(u: dict, kind: str, custom_label: str = "") -> bool:
+    pts = XP.get(kind, 5)
+    u["xp"] = max(0, int(u.get("xp", 0)) + pts)
+    _log_xp(u, kind, pts, custom_label)
+
+    quest_alias = "task" if kind in ("task", "goal", "lesson", "pomodoro") else ("ask" if kind in ("ask", "journal", "duel") else kind)
     if kind not in u["flags"]:
         u["flags"].append(kind)
     if quest_alias not in u["flags"]:
@@ -223,8 +271,9 @@ def award(u: dict, kind: str) -> bool:
 
     t = day()
     t_str = str(t)
-    quest_completed = sum(1 for k in QUEST_KEYS if k in u["flags"]) >= 3 or len(set(u["flags"])) >= 3
+    quest_completed = sum(1 for k in QUEST_KEYS if k in u["flags"]) >= 3
     if quest_completed and u.get("last") != t_str:
+        u["prev_last"] = u.get("last", "")
         if u.get("last") == str(t - timedelta(days=1)):
             u["streak"] = int(u.get("streak", 0)) + 1
         elif u.get("last") == str(t - timedelta(days=2)) and int(u.get("freeze", 0)) > 0:
@@ -235,6 +284,7 @@ def award(u: dict, kind: str) -> bool:
         u["best_streak"] = max(int(u.get("best_streak", 0)), u["streak"])
         u["last"] = t_str
         u["xp"] += 35
+        _log_xp(u, "streak_bonus", 35)
         if u["streak"] % 7 == 0:
             u["freeze"] = min(3, int(u.get("freeze", 0)) + 1)
         return True
@@ -261,7 +311,6 @@ async def ai(request, user, prompt: str, files=None) -> str:
 
 
 async def ai_direct(request, user, system_prompt: str, user_text: str, temp: float = 0.7) -> str:
-    """Прямой вызов Gemini без примешивания академического досье README (для живой рефлексии)."""
     w = W()
     acc = w.get_request_account(request, user)
     pool_to_use, _ = w.get_account_pool(acc)
@@ -292,21 +341,23 @@ def jl(text: str) -> dict:
     return json.loads(m.group(0))
 
 
+TREE_STAGES = [
+    {"stage": 1, "min_score": 0, "min_lvl": 1, "title": "Семя Импульса", "desc": "Пробуждение био-ядра в кратере острова. Первые два ростка и энергетическое кольцо."},
+    {"stage": 2, "min_score": 4, "min_lvl": 2, "title": "Неоновый Росток", "desc": "Молодое деревце с гибким стволом, первыми ветвями и парящими кристаллами фокуса."},
+    {"stage": 3, "min_score": 10, "min_lvl": 4, "title": "Древо Синтеза", "desc": "Развилистая крона, глубокие корни в породе острова и биолюминесцентные соцветия."},
+    {"stage": 4, "min_score": 20, "min_lvl": 7, "title": "Кристальная Роща", "desc": "Главное древо в окружении двух малых деревьев, водопад эфира и спутники-осколки."},
+    {"stage": 5, "min_score": 35, "min_lvl": 12, "title": "Парящий Эдем", "desc": "Древнее древо с золотисто-изумрудной короной и двойными орбитальными кольцами."},
+    {"stage": 6, "min_score": 60, "min_lvl": 20, "title": "Древо Сингулярности", "desc": "Мировое древо Иггдрасиль с галактическим порталом в кроне и квантовым лучом."},
+]
+
+
 def _companion_stage(streak: int, level: int) -> dict:
     score = streak * 2 + level
-    stages = [
-        (0, "Семя Импульса", "Новое начало. Выполни 3-минутный квест, чтобы пробудить росток."),
-        (4, "Неоновый Росток", "Первые корни пущены. Остров начинает накапливать энергию."),
-        (10, "Древо Синтеза", "Крона окрепла, вокруг появляются светлячки фокуса."),
-        (20, "Кристальная Роща", "Мощный ритм! Биолюминесценция освещает весь остров."),
-        (35, "Парящий Эдем", "Легендарная дисциплина. Дерево резонирует на пике формы."),
-        (60, "Древо Сингулярности", "Абсолютный мастер привычек и знаний."),
-    ]
-    cur = (1, stages[0][1], stages[0][2])
-    for idx, st in enumerate(stages):
-        if score >= st[0]:
-            cur = (idx + 1, st[1], st[2])
-    return {"stage": cur[0], "title": cur[1], "desc": cur[2]}
+    cur = TREE_STAGES[0]
+    for st in TREE_STAGES:
+        if score >= st["min_score"] or level >= st["min_lvl"]:
+            cur = st
+    return {**cur, "score": score, "roadmap": TREE_STAGES}
 
 
 # =====================================================================
@@ -314,7 +365,7 @@ def _companion_stage(streak: int, level: int) -> dict:
 # =====================================================================
 async def a_state(request, user):
     u, g = U(request, user), gid(request)
-    if g:
+    if g and (g not in DB["groups"] or g not in u["gids"]):
         DB["groups"].setdefault(g, {"id": g, "code": g[:8].upper(), "title": "Группа чата", "owner": u["id"], "dl": []})
         if g not in u["gids"]:
             u["gids"].append(g)
@@ -329,7 +380,7 @@ async def a_state(request, user):
 
     quest_steps = [
         {"id": "cards", "title": "Повторить карточки", "done": "cards" in u["flags"], "xp": XP["cards"], "tab": "study"},
-        {"id": "task", "title": "Закрыть задачу или привычку", "done": any(x in u["flags"] for x in ("task", "goal", "lesson")), "xp": XP["task"], "tab": "tasks"},
+        {"id": "task", "title": "Закрыть задачу или привычку", "done": any(x in u["flags"] for x in ("task", "goal", "lesson", "pomodoro")), "xp": XP["task"], "tab": "tasks"},
         {"id": "ask", "title": "Вопрос ИИ / Разбор / Дневник", "done": any(x in u["flags"] for x in ("ask", "journal", "duel")), "xp": XP["ask"], "tab": "chat"},
     ]
 
@@ -339,6 +390,7 @@ async def a_state(request, user):
         "xp": xp,
         "xp_in_level": xp % 100,
         "level": level,
+        "xp_log": list(reversed(u.get("xp_log", [])[-40:])),
         "streak": streak,
         "best_streak": int(u.get("best_streak", streak)),
         "freeze": int(u.get("freeze", 1)),
@@ -351,22 +403,106 @@ async def a_state(request, user):
         "lessons_checked": u.get("lessons_checked") == t,
         "goals": [{**x, "days": x["days"][-14:]} for x in u["goals"]],
         "journal": u["journal"][-30:],
+        "journal_analysis": u.get("journal_analysis", ""),
         "plan": u["plan"],
         "plan_subject": u.get("plan_subject", ""),
         "plan_date": u.get("plan_date", ""),
+        "plan_analysis": u.get("plan_analysis", ""),
         "notify": bool(u.get("notify", True)),
         "bot": getattr(core, "BOT_USERNAME", "") or os.environ.get("BOT_USERNAME", ""),
     }
 
 
+async def a_quest_undo(request, user):
+    """Отмена любого шага ежедневного квеста (карточки, задача, вопрос ИИ)."""
+    b, u = await request.json(), U(request, user)
+    qid = str(b.get("id") or "")
+    t_str = str(day())
+    group_map = {
+        "cards": ("cards",),
+        "task": ("task", "goal", "lesson", "pomodoro"),
+        "ask": ("ask", "journal", "duel"),
+    }
+    to_remove = group_map.get(qid, (qid,))
+    removed_any = False
+    for k in to_remove:
+        if k in u["flags"]:
+            u["flags"].remove(k)
+            removed_any = True
+    if removed_any:
+        pts = XP.get(qid, 5)
+        u["xp"] = max(0, int(u.get("xp", 0)) - pts)
+        _log_xp(u, qid, -pts, f"↩️ Отмена: {XP_LABELS.get(qid, qid)}")
+        # Если из-за отмены квест дня перестал быть закрытым — откатываем сегодняшний бонус
+        if sum(1 for k in QUEST_KEYS if k in u["flags"]) < 3 and u.get("last") == t_str:
+            u["last"] = u.get("prev_last", "")
+            u["streak"] = max(0, int(u.get("streak", 1)) - 1)
+            u["xp"] = max(0, int(u.get("xp", 0)) - 35)
+            _log_xp(u, "streak_bonus", -35, "↩️ Отмена бонуса квеста")
+        save()
+    return {"ok": True, "xp": u["xp"]}
+
+
+async def a_card_undo(request, user):
+    """Откат только что отвеченной карточки во время сессии повторения."""
+    b, u = await request.json(), U(request, user)
+    cid = int(b.get("id") or 0)
+    prev_box = int(b.get("box") or 1)
+    prev_due = str(b.get("due") or day())
+    st = sys.modules.get("ext_study")
+    if st:
+        async with W().plugin_ctx(user):
+            for c in st.ST.get("cards", []):
+                if int(c.get("id") or 0) == cid:
+                    c["box"] = prev_box
+                    c["due"] = prev_due
+                    st.save()
+                    break
+    u["xp"] = max(0, int(u.get("xp", 0)) - XP["cards"])
+    save()
+    return {"ok": True}
+
+
+async def a_pomodoro_done(request, user):
+    """Начисление опыта за завершённый 25-минутный фокус-таймер на Главной."""
+    u = U(request, user)
+    award(u, "pomodoro")
+    save()
+    return {"ok": True, "xp": u["xp"]}
+
+
+async def a_story_image(request, user):
+    """Сохраняет PNG сторис-карточки на сервере и может сразу прислать её пользователю в чат бота."""
+    import base64
+    b, u = await request.json(), U(request, user)
+    data_url = str(b.get("data_url") or "")
+    if "," in data_url:
+        data_url = data_url.split(",", 1)[1]
+    if not data_url:
+        raise ValueError("Пустое изображение")
+    raw = base64.b64decode(data_url)
+    fname = f"streak-{u.get('streak', 1)}-days.png"
+    fid = W()._store_generated_file(raw, fname, "image/png")
+
+    if b.get("send_tg") and u.get("tg"):
+        photo = core.BufferedInputFile(raw, filename=fname)
+        caption = (
+            f"🔥 <b>Моя серия: {u.get('streak', 0)} дн.</b> (Уровень {int(u.get('xp', 0)) // 100 + 1} · {u.get('xp', 0)} XP)\n"
+            "Сохрани картинку в галерею или выложи в Сторис в 1 клик!"
+        )
+        await core.bot.send_photo(u["tg"], photo, caption=caption, parse_mode="HTML")
+
+    return {"ok": True, "id": fid, "name": fname, "size": len(raw)}
+
+
 async def a_checkin_lessons(request, user):
-    """Переключатель (можно отметить и отменить отметку посещения пар за сегодня)."""
     u, t = U(request, user), str(day())
     if u.get("lessons_checked") == t:
         u["lessons_checked"] = ""
         if "lesson" in u["flags"]:
             u["flags"].remove("lesson")
         u["xp"] = max(0, int(u.get("xp", 0)) - XP["lesson"])
+        _log_xp(u, "lesson", -XP["lesson"], "↩️ Отмена чекина пар")
         save()
         return {"ok": True, "undone": True, "xp": u["xp"]}
     u["lessons_checked"] = t
@@ -376,7 +512,6 @@ async def a_checkin_lessons(request, user):
 
 
 async def a_snap(request, user):
-    """Разбор фото конспекта/задачи или голосового -> чистые формулы + карточки + тест."""
     b, u = await request.json(), U(request, user)
     kind = b.get("kind", "photo")
     hint = {
@@ -390,7 +525,7 @@ async def a_snap(request, user):
         "Все формулы, греческие буквы и индексы пиши сразу готовыми Unicode-символами (Π₁, A₁, x², ≠, ≤, ≥, Δ, α, √, →).\n"
         "Верни СТРОГО валидный JSON следующего формата:\n"
         '{\n'
-        '  "title": "Краткое название темы",\n'
+        '  "title": "Краткое название предмета/темы (например: Аналитическая геометрия)",\n'
         '  "answer": "Подробный разбор в Markdown (заголовки ##, списки, жирный текст, формулы в Unicode)",\n'
         '  "cards": [{"front": "Термин или вопрос", "back": "Краткое определение или формула"}],\n'
         '  "quiz": [{"q": "Вопрос на проверку понимания", "options": ["Вариант 1","Вариант 2","Вариант 3","Вариант 4"], "answer": 0, "explain": "Пояснение"}]\n'
@@ -423,7 +558,6 @@ async def a_snap(request, user):
                 "explain": clean_math(str(qz.get("explain") or "").strip()),
             })
 
-    # Безопасное сохранение карточек через штатный обработчик ext_study
     saved_cards = 0
     st = sys.modules.get("ext_study")
     if st and cards and b.get("save_cards", True):
@@ -463,12 +597,24 @@ async def a_snap(request, user):
 
 
 async def a_pdf_export(request, user):
-    """Генерирует красивый PDF для разбора конспекта или отчёта прогресса без съезжания текста."""
     b, u = await request.json(), U(request, user)
     kind = str(b.get("kind") or "report")
-    if kind == "snap":
-        title = clean_math(str(b.get("title") or "Конспект разбора").strip())
+    if kind in ("snap", "custom"):
+        title = clean_math(str(b.get("title") or "Документ").strip())
         content = clean_math(str(b.get("content") or "").strip())
+    elif kind == "journal":
+        title = f"Дневник рефлексии — {u['name']} ({day():%d.%m.%Y})"
+        lines = [f"# Дневник рефлексии и разбор: {u['name']}", ""]
+        if u.get("journal_analysis"):
+            lines.extend(["## ИИ-анализ за последние 7 дней", clean_math(u["journal_analysis"]), ""])
+        lines.append("## История диалогов рефлексии")
+        for j in reversed(u.get("journal", [])[-20:]):
+            lines.append(f"### 📅 {j.get('d', '')}")
+            for m in j.get("msgs") or [{"role": "user", "t": j.get("t", "")}, {"role": "ai", "t": j.get("ai", "")}]:
+                who = "👤 Вы" if m.get("role") == "user" else "💡 Ментор"
+                lines.append(f"**{who}:** {clean_math(m.get('t', ''))}")
+            lines.append("")
+        content = "\n".join(lines)
     else:
         title = f"Отчёт прогресса — {u['name']} ({day():%d.%m.%Y})"
         comp = _companion_stage(int(u.get("streak", 0)), int(u.get("xp", 0)) // 100 + 1)
@@ -487,22 +633,15 @@ async def a_pdf_export(request, user):
             for g in u["goals"]:
                 done_now = "Выполнено" if str(day()) in (g.get("days") or []) else "Ожидает"
                 lines.append(f"| {clean_math(g['name'])} | {len(g.get('days') or [])} дн. | {done_now} |")
-        else:
-            lines.append("Привычки ещё не добавлены.")
-
         if u.get("plan"):
             lines.extend(["", f"## План подготовки: {clean_math(u.get('plan_subject') or 'Экзамен')}"])
-            lines.append("| Дата | План на день |")
-            lines.append("| --- | --- |")
+            if u.get("plan_analysis"):
+                lines.append(clean_math(u["plan_analysis"]))
+            lines.append("| Дата | Тема дня | Статус |")
+            lines.append("| --- | --- | --- |")
             for p in u["plan"][:30]:
-                lines.append(f"| {p['d']} | {clean_math(p['t'])} |")
-
-        if u.get("journal"):
-            lines.extend(["", "## Последние записи дневника рефлексии"])
-            for j in reversed(u["journal"][-10:]):
-                lines.append(f"### {j['d']}")
-                lines.append(f"**Запись:** {clean_math(j['t'])}")
-                lines.append(f"> **Отклик ментора:** {clean_math(j['ai'])}")
+                st_done = "Изучено" if p.get("done") else "В плане"
+                lines.append(f"| {p['d']} | {clean_math(p['t'])} | {st_done} |")
         content = "\n".join(lines)
 
     data, filename, mime = await asyncio.to_thread(core.build_document, "pdf", title, content)
@@ -535,10 +674,11 @@ async def a_goal_check(request, user):
             if t in g["days"]:
                 g["days"].remove(t)
                 u["xp"] = max(0, int(u.get("xp", 0)) - XP["goal"])
+                _log_xp(u, "goal", -XP["goal"], f"↩️ Отмена: {g['name']}")
                 toggled_on = False
             else:
                 g["days"].append(t)
-                award(u, "goal")
+                award(u, "goal", f"🎯 Привычка: {g['name']}")
                 toggled_on = True
     save()
     return {"ok": True, "checked": toggled_on, "xp": u["xp"]}
@@ -549,7 +689,6 @@ async def a_journal(request, user):
     if not text:
         raise ValueError("Напишите хотя бы пару слов о сегодняшнем дне")
 
-    # Проверяем, не написал ли пользователь одно-два тестовых/случайных слова вроде «шала», «лала», «тест»
     words = re.findall(r"[A-Za-zА-Яа-яЁё0-9]+", text)
     is_short_or_random = len(text) < 8 or (len(words) <= 2 and len(text) < 18)
 
@@ -557,20 +696,25 @@ async def a_journal(request, user):
         "Ты живой, умный и искренний собеседник для вечернего дневника. Язык: русский.\n"
         "ЖЕСТКИЕ ПРАВИЛА:\n"
         "1. КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО использовать шаблонные фразы: «сегодня ты проделал огромную/отличную работу», "
-        "«главный инсайт дня», «системность и чёткая структура побеждают хаос», «бесценный опыт». Никакого инфоцыганского пафоса!\n"
-        "2. Отвечай СТРОГО по сути того, что написал человек, не придумывай за него про математику или задачи, если он об этом не писал.\n"
-        "3. Если человек написал короткую бессмыслицу, проверочное слово («шала», «лала», «тест», «абырвалг») или одно слово без контекста — "
-        "ответь с лёгкой доброй иронией в 1–2 предложениях (например: обыграй это слово и спроси, устал ли он так сильно, что сил хватило только на него, или как реально прошёл день)."
+        "«главный инсайт дня», «системность и чёткая структура побеждают хаос», «бесценный опыт».\n"
+        "2. Отвечай СТРОГО по сути того, что написал человек.\n"
+        "3. Если человек написал короткую тестовую фразу — ответь с лёгкой доброй иронией в 1–2 предложениях."
     )
     user_msg = (
-        f"Пользователь написал очень короткую или тестовую фразу: «{text}». Ответь живо и с юмором без шаблонов!"
+        f"Пользователь написал короткую фразу: «{text}». Ответь живо и с юмором без шаблонов!"
         if is_short_or_random
-        else f"Запись пользователя в вечернем дневнике ({u['name']}):\n{text}\n\nДай тёплый, конкретный отклик по сути его текста (2–3 предложения) и один живой вопрос."
+        else f"Запись пользователя ({u['name']}):\n{text}\n\nДай тёплый отклик по сути (2–3 предложения) и задай один вопрос."
     )
 
     reply = clean_math(await ai_direct(request, user, sys_prompt, user_msg, temp=0.75))
     first = not any(j.get("d") == str(day()) for j in u["journal"])
-    entry = {"id": secrets.token_hex(4), "d": str(day()), "t": text, "ai": reply}
+    entry = {
+        "id": secrets.token_hex(4),
+        "d": str(day()),
+        "t": text,
+        "ai": reply,
+        "msgs": [{"role": "user", "t": text}, {"role": "ai", "t": reply}],
+    }
     u["journal"].append(entry)
     del u["journal"][:-50]
     if first and not is_short_or_random:
@@ -579,8 +723,69 @@ async def a_journal(request, user):
     return {"ai": reply, "entry": entry}
 
 
+async def a_journal_reply(request, user):
+    """Продолжение диалога внутри существующей записи рефлексии (без создания новой)."""
+    b, u = await request.json(), U(request, user)
+    jid = request.match_info["id"]
+    reply_text = str(b.get("text") or "").strip()[:2000]
+    if not reply_text:
+        raise ValueError("Введите текст ответа")
+
+    target = next((j for j in u.get("journal", []) if j.get("id") == jid), None)
+    if not target:
+        raise ValueError("Запись рефлексии не найдена")
+
+    msgs = target.setdefault("msgs", [{"role": "user", "t": target.get("t", "")}, {"role": "ai", "t": target.get("ai", "")}])
+    msgs.append({"role": "user", "t": reply_text})
+
+     transcript = "\n".join(
+        f"{'Пользователь' if m['role'] == 'user' else 'Ментор'}: {m['t']}"
+        for m in msgs[-10:]
+    )
+    sys_prompt = (
+        "Ты ведёшь тёплый вечерний диалог рефлексии с пользователем. "
+        "Отвечай по сути его последнего сообщения в контексте вашей беседы (2–3 предложения, без пафоса и штампов). "
+        "Если уместно, задай уточняющий вопрос или поддержи его вывод."
+    )
+    ai_ans = clean_math(await ai_direct(request, user, sys_prompt, transcript, temp=0.7))
+    msgs.append({"role": "ai", "t": ai_ans})
+    target["ai"] = ai_ans
+    save()
+    return {"ok": True, "entry": target, "ai": ai_ans}
+
+
+async def a_journal_analyze7(request, user):
+    """Глубокий ИИ-анализ рефлексий за последние 7 дней (что сделал круто, что исправить, план)."""
+    u = U(request, user)
+    cutoff = str(day() - timedelta(days=7))
+    recent = [j for j in u.get("journal", []) if str(j.get("d", "")) >= cutoff]
+    if not recent:
+        recent = u.get("journal", [])[-7:]
+    if not recent:
+        raise ValueError("Пока нет записей в дневнике для анализа")
+
+    dump = []
+    for j in recent:
+        msgs = j.get("msgs") or [{"role": "user", "t": j.get("t", "")}, {"role": "ai", "t": j.get("ai", "")}]
+        dialog_str = " | ".join(f"{'Я' if m['role']=='user' else 'ИИ'}: {m['t']}" for m in msgs)
+        dump.append(f"[{j.get('d')}]: {dialog_str}")
+
+    sys_prompt = (
+        "Ты аналитик личной эффективности и внимательный ментор. Проанализируй записи дневника пользователя за последние 7 дней.\n"
+        "Структурируй ответ в Markdown строго по 4 блокам:\n"
+        "## ✅ Что сделано правильно и сильные стороны\n"
+        "## ⚠️ Где терялась энергия и что стоит скорректировать\n"
+        "## 🔧 Что нужно доделать или закрыть\n"
+        "## 🎯 Топ-3 конкретных фокуса на следующую неделю\n"
+        "Пиши конкретно по фактам из его записей, без воды и общих фраз."
+    )
+    analysis = clean_math(await ai_direct(request, user, sys_prompt, "\n".join(dump), temp=0.5))
+    u["journal_analysis"] = analysis
+    save()
+    return {"ok": True, "analysis": analysis}
+
+
 async def a_journal_del(request, user):
-    """Удаление конкретной записи рефлексии по ID."""
     u = U(request, user)
     jid = request.match_info["id"]
     u["journal"] = [j for j in u.get("journal", []) if j.get("id") != jid]
@@ -589,35 +794,60 @@ async def a_journal_del(request, user):
 
 
 async def a_plan(request, user):
+    """Режим «Сдать за N дней» с поддержкой файлов билетов/тем, списка тем и подробным разбором каждого дня."""
     b, u = await request.json(), U(request, user)
     subj = str(b.get("subject") or "").strip()[:100]
     target_date = str(b.get("date") or "").strip()
     slot_time = str(b.get("time") or "19:00").strip()
+    topics_raw = str(b.get("topics_text") or "").strip()[:6000]
+    files = b.get("files") or []
     push_tt = bool(b.get("push_to_tt", True))
 
     if not subj or not target_date:
-        raise ValueError("Укажите предмет и дату экзамена")
+        raise ValueError("Укажите предмет и дату экзамена/коллоквиума")
     n = (date.fromisoformat(target_date) - day()).days
     if not 1 <= n <= 60:
         raise ValueError("Дата экзамена должна быть от 1 до 60 дней вперёд")
 
-    r = jl(
-        await ai(
-            request,
-            user,
-            f'Составь чёткий план подготовки к экзамену по предмету «{subj}»: '
-            f'дней до сдачи: {n}, старт: {day()}, по одному конкретному блоку тем в день, '
-            'без LaTeX. Ответ СТРОГО JSON: {"days":[{"d":"YYYY-MM-DD","t":"что делать"}]}',
-        )
+    extra_context = f"\nСписок тем / билетов от пользователя:\n{topics_raw}" if topics_raw else ""
+    if files:
+        extra_context += "\n(Также изучи прикреплённый файл с программой/вопросами к экзамену и распредели ВСЕ темы из него по дням)."
+
+    prompt = (
+        f'Составь подробный план подготовки к экзамену/коллоквиуму по предмету «{subj}».\n'
+        f'Дней до сдачи: {n}, первый день подготовки: {day()}. '
+        'Последние 1–2 дня оставь на генеральное повторение и прогон сложных билетов. '
+        'Формулы пиши только Unicode-символами без LaTeX ($).\n'
+        f'{extra_context}\n\n'
+        'Верни СТРОГО JSON следующего формата:\n'
+        '{\n'
+        '  "analysis": "Краткая стратегия подготовки: как распределена нагрузка, на что сделать упор (2-4 предложения)",\n'
+        '  "days": [\n'
+        '    {\n'
+        '      "d": "YYYY-MM-DD",\n'
+        '      "t": "Название главного блока тем на этот день",\n'
+        '      "sub": ["Подтема или билет 1", "Подтема или билет 2"],\n'
+        '      "details": "Подробная инструкция на день: какие определения/теоремы выучить, какие типы задач прорешать и на какие ловушки обратить внимание"\n'
+        '    }\n'
+        '  ]\n'
+        '}'
     )
-    plan_days = [
-        {"d": str(x["d"]), "t": clean_math(str(x["t"]))}
-        for x in (r.get("days") or [])
-        if x.get("d") and x.get("t")
-    ][:60]
+    r = jl(await ai(request, user, prompt, files))
+    plan_days = []
+    for x in (r.get("days") or [])[:60]:
+        if isinstance(x, dict) and x.get("d") and x.get("t"):
+            plan_days.append({
+                "d": str(x["d"]),
+                "t": clean_math(str(x["t"])),
+                "sub": [clean_math(str(s)) for s in (x.get("sub") or [])[:8]],
+                "details": clean_math(str(x.get("details") or "")),
+                "done": False,
+                "deep_notes": "",
+            })
     u["plan"] = plan_days
     u["plan_subject"] = subj
     u["plan_date"] = target_date
+    u["plan_analysis"] = clean_math(str(r.get("analysis") or ""))
 
     added_to_tt = 0
     tt = sys.modules.get("ext_timetable")
@@ -651,60 +881,46 @@ async def a_plan(request, user):
             core.log.exception("push plan to timetable")
 
     save()
-    return {"plan": u["plan"], "added_to_tt": added_to_tt}
+    return {"plan": u["plan"], "analysis": u["plan_analysis"], "added_to_tt": added_to_tt}
 
 
-async def a_duel_new(request, user):
-    topic = str((await request.json()).get("topic") or "").strip()[:100]
-    if not topic:
-        raise ValueError("Введите тему дуэли")
-    r = jl(
-        await ai(
-            request,
-            user,
-            f'Составьте 5 тестовых вопросов по-русски на тему «{topic}» (без сырого LaTeX, используй Unicode-символы). '
-            'Ответ СТРОГО JSON: {"qs":[{"q":"Текст вопроса","a":["Вариант 1","Вариант 2","Вариант 3","Вариант 4"],"c":0}]}',
-        )
+async def a_plan_check(request, user):
+    """Отметка дня подготовки к экзамену изученным (+10 XP) или снятие отметки."""
+    b, u = await request.json(), U(request, user)
+    d_target = str(b.get("d") or "")
+    for p in u.get("plan", []):
+        if p.get("d") == d_target:
+            p["done"] = not bool(p.get("done"))
+            if p["done"]:
+                award(u, "exam_day", f"📚 Изучен день: {p['t'][:40]}")
+            else:
+                u["xp"] = max(0, int(u.get("xp", 0)) - XP["exam_day"])
+            save()
+            return {"ok": True, "done": p["done"], "xp": u["xp"]}
+    return {"ok": False}
+
+
+async def a_plan_expand(request, user):
+    """Генерация подробного конспекта-шпаргалки по темам конкретного дня подготовки."""
+    b, u = await request.json(), U(request, user)
+    d_target = str(b.get("d") or "")
+    target = next((p for p in u.get("plan", []) if p.get("d") == d_target), None)
+    if not target:
+        raise ValueError("День не найден в плане")
+
+    subj = u.get("plan_subject") or "Экзамен"
+    subs = ", ".join(target.get("sub") or [])
+    prompt = (
+        f"Предмет: «{subj}». Тема дня: «{target['t']}» ({subs}).\n"
+        "Напиши структурированный, глубокий конспект-шпаргалку для подготовки к экзамену/коллоквиуму:\n"
+        "1. Главные определения и формулировки теорем.\n"
+        "2. Ключевые формулы и свойства (используй чистые Unicode-символы без сырого LaTeX $).\n"
+        "3. Алгоритм решения типовых задач по этой теме и частые вопросы преподавателей на защите."
     )
-    i = secrets.token_urlsafe(4).replace("-", "").replace("_", "")[:6]
-    qs = [
-        {
-            "q": clean_math(str(q["q"])),
-            "a": [clean_math(str(opt)) for opt in (q.get("a") or [])[:4]],
-            "c": int(q.get("c", 0)),
-        }
-        for q in (r.get("qs") or [])[:5]
-    ]
-    DB["duels"][i] = {"id": i, "topic": topic, "qs": qs, "res": {}, "created": time.time()}
+    notes = clean_math(await ai(request, user, prompt))
+    target["deep_notes"] = notes
     save()
-    return {"id": i, "topic": topic}
-
-
-async def a_duel_get(request, user):
-    did = request.match_info["id"].strip()
-    if did not in DB["duels"]:
-        raise ValueError("Дуэль не найдена или устарела")
-    d, u = DB["duels"][did], U(request, user)
-    return {
-        "id": did,
-        "topic": d["topic"],
-        "qs": [{"q": q["q"], "a": q["a"]} for q in d["qs"]],
-        "res": list(d["res"].values()),
-        "played": u["id"] in d["res"],
-    }
-
-
-async def a_duel_ans(request, user):
-    did = request.match_info["id"].strip()
-    d, u = DB["duels"][did], U(request, user)
-    if u["id"] not in d["res"]:
-        a = (await request.json()).get("a") or []
-        score = sum(1 for q, x in zip(d["qs"], a) if int(q.get("c", 0)) == int(x))
-        d["res"][u["id"]] = {"name": u["name"], "avatar": u.get("avatar", "🧑‍💻"), "score": score, "total": len(d["qs"])}
-        award(u, "duel")
-        save()
-    return {"score": d["res"][u["id"]]["score"], "res": list(d["res"].values())}
-
+    return {"ok": True, "deep_notes": notes}
 
 # =====================================================================
 # 5. ГРУППОВЫЕ КОМНАТЫ И ЛИДЕРБОРД
@@ -967,9 +1183,13 @@ def setup(c) -> None:
         url = core.webapp_url()
         kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⚡ Ворваться в топ", web_app=WebAppInfo(url=url))]]) if url else None
         await message.reply("\n".join(lines), parse_mode="HTML", reply_markup=kb)
-
-    routes = [
+        
+     routes = [
         ("GET", "/api/g/state", a_state),
+        ("POST", "/api/g/quest/undo", a_quest_undo),
+        ("POST", "/api/g/card/undo", a_card_undo),
+        ("POST", "/api/g/pomodoro", a_pomodoro_done),
+        ("POST", "/api/g/story_image", a_story_image),
         ("POST", "/api/g/checkin", a_checkin_lessons),
         ("POST", "/api/g/snap", a_snap),
         ("POST", "/api/g/pdf", a_pdf_export),
@@ -977,8 +1197,12 @@ def setup(c) -> None:
         ("DELETE", "/api/g/goals/{id}", a_goal_del),
         ("POST", "/api/g/goals/{id}/check", a_goal_check),
         ("POST", "/api/g/journal", a_journal),
+        ("POST", "/api/g/journal/{id}/reply", a_journal_reply),
+        ("POST", "/api/g/journal/analyze7", a_journal_analyze7),
         ("DELETE", "/api/g/journal/{id}", a_journal_del),
         ("POST", "/api/g/plan", a_plan),
+        ("POST", "/api/g/plan/check", a_plan_check),
+        ("POST", "/api/g/plan/expand", a_plan_expand),
         ("POST", "/api/g/duel", a_duel_new),
         ("GET", "/api/g/duel/{id}", a_duel_get),
         ("POST", "/api/g/duel/{id}/answer", a_duel_ans),
