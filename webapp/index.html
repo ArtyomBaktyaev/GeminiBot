@@ -884,14 +884,16 @@ window.onerror = function(msg, src, line) {
 };
 </script>
 <script>
+   
 "use strict";
 
 const NL = String.fromCharCode(10);
 const tg = window.Telegram && window.Telegram.WebApp;
+const hap = (t) => { try { tg && tg.HapticFeedback && tg.HapticFeedback.impactOccurred(t || "light"); } catch (e) {} };
+const pick = (t) => { try { tg && tg.HapticFeedback && tg.HapticFeedback.notificationOccurred(t); } catch (e) {} };
 
 function syncBackProtection() {
   try {
-    // Стрелку «Назад» в шапке Telegram показываем ТОЛЬКО если открыто модальное окно/шторка
     const hasOverlay = Boolean(document.querySelector(".overlay"));
     if (tg && tg.BackButton) {
       if (hasOverlay) tg.BackButton.show();
@@ -903,7 +905,6 @@ function syncBackProtection() {
 if (tg) {
   tg.ready();
   tg.expand();
-  // Официальная защита Telegram: подтверждение при попытке случайно смахнуть и закрыть приложение
   try { tg.enableClosingConfirmation && tg.enableClosingConfirmation(); } catch (e) {}
   try { tg.disableVerticalSwipes && tg.disableVerticalSwipes(); } catch (e) {}
   try { tg.setHeaderColor("secondary_bg_color"); } catch (e) {}
@@ -911,7 +912,6 @@ if (tg) {
   try {
     if (tg.BackButton) {
       tg.BackButton.onClick(() => {
-        // При нажатии кнопки «Назад» закрываем только открытую шторку
         const overlays = document.querySelectorAll(".overlay");
         if (overlays.length > 0) {
           const topOv = overlays[overlays.length - 1];
@@ -929,6 +929,7 @@ if (tg) {
     } catch (e) {}
   }
 }
+   
 /* =========================================================
    APPEARANCE ENGINE (ТЕМА, ШРИФТ, МАСШТАБ ЭКРАНА)
    ========================================================= */
