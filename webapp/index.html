@@ -1011,23 +1011,46 @@ function setActiveAccountId(id) {
   else localStorage.removeItem("active_account_id");
 }
 
+const API_CACHE = new Map();
+
 async function api(path, opt) {
   opt = opt || {};
-  const r = await fetch(path, {
-    method: opt.method || "GET",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Init-Data": getInitData(),
-      "X-Account-Id": getActiveAccountId(),
-      "X-WebApp-Client": "tg"
-    },
-    body: opt.body ? JSON.stringify(opt.body) : undefined,
-    signal: opt.signal,
-  });
-  let d;
-  try { d = await r.json(); } catch (e) { d = { error: "Ошибка ответа сервера" }; }
-  if (!r.ok || d.error) throw new Error(d.error || "HTTP " + r.status);
-  return d;
+  const method = (opt.method || "GET").toUpperCase();
+  const accKey = getActiveAccountId() || "def";
+  const cacheKey = accKey + ":" + path;
+
+  if (method !== "GET") {
+    API_CACHE.clear();
+  } else if (!opt.fresh && API_CACHE.has(cacheKey)) {
+    const hit = API_CACHE.get(cacheKey);
+    if (Date.now() - hit.ts < 8000) return hit.data;
+  }
+
+  const ctrl = new AbortController();
+  const timeoutMs = method === "GET" ? 12000 : 45000;
+  const tid = setTimeout(() => ctrl.abort(), timeoutMs);
+  if (opt.signal) opt.signal.addEventListener("abort", () => ctrl.abort());
+
+  try {
+    const r = await fetch(path, {
+      method,
+      headers: {
+        "Content-Type": "application/json",
+        "X-Init-Data": getInitData(),
+        "X-Account-Id": getActiveAccountId(),
+        "X-WebApp-Client": "tg"
+      },
+      body: opt.body ? JSON.stringify(opt.body) : undefined,
+      signal: ctrl.signal,
+    });
+    let d;
+    try { d = await r.json(); } catch (e) { d = { error: "Ошибка ответа сервера" }; }
+    if (!r.ok || d.error) throw new Error(d.error || "HTTP " + r.status);
+    if (method === "GET") API_CACHE.set(cacheKey, { ts: Date.now(), data: d });
+    return d;
+  } finally {
+    clearTimeout(tid);
+  }
 }
 
 function toast(msg, kind) {
@@ -1976,46 +1999,207 @@ function lessonRow(l, now) {
       )));
 }
 
+S.pomoSec = 25 * 60;
+S.pomoRun = false;
+S.pomoTimer = null;
+
 async function viewHome() {
-  const d = await api("/api/home");
+  const [d, gState] = await Promise.all([
+    api("/api/home"),
+    api("/api/g/state").catch(() => null)
+  ]);
   const me = S.me;
   const now = new Date().toTimeString().slice(0, 5);
   const dateStr = new Date().toLocaleDateString("ru-RU", { weekday:"long", day:"numeric", month:"long" });
   const acc = (me && me.account) || { name: "Артём", avatar: "🧑‍💻" };
   const accName = acc.name || "Артём";
 
-  const root = h("div", {});
-  root.append(h("div", { class:"hero" },
+  const lessons = (d.today && d.today.lessons) || [];
+  const curLesson = lessons.find(l => l.start <= now && now <= l.end);
+  const nextLesson = lessons.find(l => l.start > now);
+  let liveStatusText = "✨ Свободный фокус-режим — пар больше нет";
+  if (curLesson) {
+    liveStatusText = `🟢 Сейчас идёт: ${curLesson.subject} (до ${curLesson.end}${curLesson.room ? ", ауд. " + curLesson.room : ""})`;
+  } else if (nextLesson) {
+    liveStatusText = `⏳ Следующая пара в ${nextLesson.start}: ${nextLesson.subject}${nextLesson.room ? " (ауд. " + nextLesson.room + ")" : ""}`;
+  }
+
+  const root = h("div", { class:"g-shell" });
+
+  // 1. АВТОРСКИЙ HERO-БЛОК С ЖИВЫМ СТАТУСОМ ДНЯ
+  root.append(h("div", { class:"hero", style:{marginBottom:"2px"} },
     h("div", { class:"row", style:{gap:"12px", marginBottom:"10px"} },
       renderAvatar(acc.avatar, "", openProfileEditor),
       h("div", { class:"grow" },
         h("h1", { style:{cursor:"pointer"}, onclick: openProfileEditor }, "Привет, " + accName + " 👋"),
         h("div", { class:"sub", style:{marginTop:"2px"} },
           dateStr.charAt(0).toUpperCase() + dateStr.slice(1) + (d.parity ? " · " + PARITY[d.parity] : ""))
-      )
+      ),
+      h("button", { class:"btn ghost small icon", onclick: openAppearanceSheet, title:"Оформление и масштаб" }, "🎨")
     ),
+    h("div", {
+      style:{
+        padding:"8px 12px", borderRadius:"12px", background:"var(--surface-2)",
+        border:"1px solid var(--line-2)", fontSize:"0.84rem", fontWeight:700, marginBottom:"10px"
+      }
+    }, liveStatusText),
     h("div", { class:"row wrap", style:{gap:"6px"} },
-      h("button", { class:"acc-pill", onclick: openProfileEditor, title:"Изменить имя, аватарку или API-ключ" },
+      h("button", { class:"acc-pill", onclick: openProfileEditor },
         renderAvatar(acc.avatar, "sm"),
         h("span", { class:"truncate" }, accName),
         h("span", { style:{opacity:.6, fontSize:"0.7rem"} }, "✏️")),
-      h("button", { class:"model-pill", onclick: openModelPicker, title:"Сменить модель" },
+      h("button", { class:"model-pill", onclick: openModelPicker },
         h("span", { class:"dot" }),
         shortModelName(me && me.model),
         acc.has_custom_key ? " 🔑" : ""),
-      h("button", { class:"btn ghost small icon", onclick: openAppearanceSheet, title:"Оформление и масштаб" }, "🎨")
+      gState ? h("button", {
+        class:"chip green",
+        onclick: () => { S.tab = "growth"; drawNav(); render(); }
+      }, `🔥 ${gState.streak} дн. · ⚡ Ур. ${gState.level}`) : null
     )
   ));
 
+  // 2. BENTO-СЕТКА (2x2): РОСТ, КАРТОЧКИ, ФОКУС-ТАЙМЕР POMODORO, БЫСТРЫЕ ДЕЙСТВИЯ
+  const pomoDisplay = h("div", {
+    class:"mono",
+    style:{fontSize:"1.45rem", fontWeight:900, letterSpacing:"-0.03em", margin:"4px 0"}
+  });
+  const updatePomoText = () => {
+    const m = String(Math.floor(S.pomoSec / 60)).padStart(2, "0");
+    const s = String(S.pomoSec % 60).padStart(2, "0");
+    pomoDisplay.textContent = `${m}:${s}`;
+  };
+  updatePomoText();
+
+  const pomoBtn = h("button", {
+    class:"btn small",
+    onclick: () => {
+      hap();
+      if (S.pomoRun) {
+        S.pomoRun = false;
+        clearInterval(S.pomoTimer);
+        pomoBtn.textContent = "▶️ Старт";
+      } else {
+        S.pomoRun = true;
+        pomoBtn.textContent = "⏸ Пауза";
+        S.pomoTimer = setInterval(async () => {
+          if (S.pomoSec > 0) {
+            S.pomoSec--;
+            updatePomoText();
+          } else {
+            clearInterval(S.pomoTimer);
+            S.pomoRun = false;
+            S.pomoSec = 25 * 60;
+            updatePomoText();
+            pomoBtn.textContent = "▶️ Старт";
+            pick("success");
+            try {
+              await api("/api/g/pomodoro", { method:"POST" });
+              toast("🍅 Фокус-сессия завершена! +15 XP", "ok");
+            } catch (e) {}
+          }
+        }, 1000);
+      }
+    }
+  }, S.pomoRun ? "⏸ Пауза" : "▶️ Старт");
+
+  const pctCards = d.cards_total ? Math.round(100 * (d.cards_total - d.cards_due) / d.cards_total) : 100;
+
+  root.append(
+    h("div", { style:{display:"grid", gridTemplateColumns:"1fr 1fr", gap:"10px"} },
+      // Плитка 1: Фокус-таймер Pomodoro
+      h("div", { class:"card tight", style:{marginBottom:0, display:"flex", flexDirection:"column", justifyContent:"space-between"} },
+        h("div", { class:"row between" },
+          h("span", { class:"sub", style:{fontWeight:800, textTransform:"uppercase", fontSize:"0.7rem"} }, "🍅 Фокус 25м"),
+          h("span", { class:"chip green", style:{fontSize:"0.68rem", padding:"2px 6px"} }, "+15 XP")
+        ),
+        pomoDisplay,
+        h("div", { class:"row", style:{gap:"6px"} },
+          pomoBtn,
+          h("button", {
+            class:"btn ghost small icon",
+            title:"Сбросить таймер",
+            onclick: () => {
+              clearInterval(S.pomoTimer);
+              S.pomoRun = false;
+              S.pomoSec = 25 * 60;
+              updatePomoText();
+              pomoBtn.textContent = "▶️ Старт";
+            }
+          }, "↺")
+        )
+      ),
+      // Плитка 2: Карточки и квест дня
+      h("div", {
+        class:"card tight tappable",
+        style:{marginBottom:0, display:"flex", flexDirection:"column", justifyContent:"space-between"},
+        onclick: () => { S.tab = "study"; S.studySub = "cards"; drawNav(); render(); }
+      },
+        h("div", { class:"row between" },
+          h("span", { class:"sub", style:{fontWeight:800, textTransform:"uppercase", fontSize:"0.7rem"} }, "🃏 Карточки"),
+          h("span", { class:"chip " + (d.cards_due ? "warn" : "green"), style:{fontSize:"0.68rem", padding:"2px 6px"} },
+            d.cards_due ? `К повтору: ${d.cards_due}` : "Всё выучено")
+        ),
+        h("div", { style:{fontSize:"1.45rem", fontWeight:900, margin:"4px 0"} }, `${pctCards}%`),
+        h("div", { class:"sub" }, `Всего в базе: ${d.cards_total} шт. →`)
+      )
+    )
+  );
+
+  // 3. БЫСТРАЯ ЗАМЕТКА / ИНБОКС НА ГЛАВНОЙ (СОХРАНЯЕТСЯ МГНОВЕННО)
+  const noteKey = "home_quick_scratchpad_" + (getActiveAccountId() || "def");
+  const noteInput = h("textarea", {
+    placeholder:"⚡ Быстрая заметка: запиши сюда формулу, номер аудитории, идею или тему, чтобы не забыть…",
+    style:{minHeight:"66px", fontSize:"0.88rem"},
+    oninput: (e) => {
+      try { localStorage.setItem(noteKey, e.target.value); } catch (err) {}
+    }
+  }, localStorage.getItem(noteKey) || "");
+
+  root.append(
+    h("div", { class:"card tight", style:{marginBottom:0} },
+      h("div", { class:"row between", style:{marginBottom:"6px"} },
+        h("span", { style:{fontWeight:800, fontSize:"0.86rem"} }, "📌 Быстрый черновик (Инбокс)"),
+        h("div", { class:"row", style:{gap:"6px"} },
+          h("button", {
+            class:"chip",
+            onclick: () => {
+              const txt = noteInput.value.trim();
+              if (!txt) return toast("Черновик пуст", "err");
+              taskCreateForm();
+            }
+          }, "📋 В задачу"),
+          h("button", {
+            class:"chip gray",
+            onclick: () => {
+              noteInput.value = "";
+              localStorage.removeItem(noteKey);
+              toast("Черновик очищен");
+            }
+          }, "Очистить")
+        )
+      ),
+      noteInput
+    )
+  );
+
+  // 4. РАСПИСАНИЕ НА СЕГОДНЯ
   const t = d.today;
-  root.append(h("h2", {}, "Сегодня"));
+  root.append(
+    h("div", { class:"g-sec-head" },
+      h("h2", {}, "Пары на сегодня"),
+      h("button", { class:"chip gray", onclick: () => lessonForm(null, S.today) }, "➕ Пара")
+    )
+  );
   if (!t) {
     root.append(empty("📅", "Модуль расписания не подключён", null));
   } else if (!t.lessons.length) {
-    root.append(h("div", { class:"card", style:{ textAlign:"center", padding:"18px 14px" } },
-      h("div", { style:{fontSize:"32px", marginBottom:"4px"} }, "🎉"),
-      h("div", { style:{fontWeight:700} }, "Пар нет"),
-      h("div", { class:"sub", style:{marginTop:"2px"} }, "Свободный день")));
+    root.append(h("div", { class:"card tight row between", style:{marginBottom:0} },
+      h("div", {},
+        h("div", { style:{fontWeight:700} }, "🎉 Сегодня пар по расписанию нет"),
+        h("div", { class:"sub" }, "Отличный день для своих проектов или отдыха")),
+      h("button", { class:"btn ghost small", onclick: () => { S.tab = "tt"; drawNav(); render(); } }, "Неделя →")
+    ));
   } else {
     t.lessons.forEach(l => {
       const el = lessonRow(l, now);
@@ -2024,89 +2208,59 @@ async function viewHome() {
     });
   }
 
+  // 5. ДЕДЛАЙНЫ
   if (d.tasks.length) {
     const sortedHomeTasks = [...d.tasks].sort((a, b) => getTaskTimestamp(a) - getTaskTimestamp(b));
     const urgentCount = sortedHomeTasks.filter(k => k.overdue || k.soon || isBurning30Min(k)).length;
     const nearest = sortedHomeTasks[0];
 
-    const dlDetails = h("details", {
-      class:"group-acc",
-      style:{marginTop:"14px"},
-      open: S.homeDeadlinesOpen,
-      ontoggle: (e) => { S.homeDeadlinesOpen = e.target.open; }
-    },
-      h("summary", {},
-        h("div", { class:"group-icon" }, "⏳"),
-        h("div", { class:"group-meta" },
-          h("div", { class:"g-title" }, "Ближайшие дедлайны"),
-          h("div", { class:"g-sub truncate" },
-            nearest ? "Ближайший: " + fmtDeadline(nearest) + " — " + nearest.text : "Нажмите, чтобы развернуть")
+    root.append(
+      h("details", {
+        class:"group-acc",
+        style:{marginBottom:0},
+        open: S.homeDeadlinesOpen,
+        ontoggle: (e) => { S.homeDeadlinesOpen = e.target.open; }
+      },
+        h("summary", {},
+          h("div", { class:"group-icon" }, "⏳"),
+          h("div", { class:"group-meta" },
+            h("div", { class:"g-title" }, "Ближайшие дедлайны"),
+            h("div", { class:"g-sub truncate" },
+              nearest ? "Ближайший: " + fmtDeadline(nearest) + " — " + nearest.text : "Нажмите, чтобы развернуть")
+          ),
+          urgentCount ? h("span", { class:"chip red" }, "🔥 " + urgentCount) : null,
+          h("span", { class:"chip" }, sortedHomeTasks.length),
+          h("span", { class:"chev" })
         ),
-        urgentCount ? h("span", { class:"chip red" }, "🔥 " + urgentCount) : null,
-        h("span", { class:"chip" }, sortedHomeTasks.length),
-        h("span", { class:"chev" })
-      ),
-      h("div", { class:"group-body" },
-        ...sortedHomeTasks.map(k => {
-          const burning = isBurning30Min(k);
-          const urgent = burning || k.overdue ? "red" : k.soon ? "warn" : "gray";
-          const kindInfo = getTaskKindInfo(k);
-          return h("div", { class:"card tight", style:{marginBottom:0} },
-            burning ? h("div", { class:"burning-banner", style:{marginBottom:"8px"} },
-              h("span", { class:"burn-title" }, "🔥 Горит дедлайн"),
-              h("span", { class:"burn-time" }, fmtRemainingTime(k))) : null,
-            h("div", { class:"row" },
-              h("div", { class:"grow" },
-                h("div", { class:"line-clamp-2", style:{fontWeight:600, fontSize:"0.92rem"} }, k.text),
-                h("div", { class:"chips" },
-                  h("span", { class:"chip " + (kindInfo.chipCls || "gray") }, kindInfo.icon + " " + kindInfo.label),
-                  h("span", { class:"chip " + urgent },
-                    (k.overdue ? "⏰ просрочено · " : "📅 ") + fmtDeadline(k)),
-                  h("span", { class:"chip gray" }, k.topic)
-                )),
-              h("button", { class:"btn small", title:"Отметить выполненным", onclick: async () => {
-                await api("/api/tasks/" + k.id + "/done", { method:"POST" });
-                hap("medium"); pick("success"); toast("Готово ✅", "ok"); render();
-              }}, "✅"))
-          );
-        })
+        h("div", { class:"group-body" },
+          ...sortedHomeTasks.map(k => {
+            const burning = isBurning30Min(k);
+            const urgent = burning || k.overdue ? "red" : k.soon ? "warn" : "gray";
+            const kindInfo = getTaskKindInfo(k);
+            return h("div", { class:"card tight", style:{marginBottom:0} },
+              h("div", { class:"row" },
+                h("div", { class:"grow" },
+                  h("div", { class:"line-clamp-2", style:{fontWeight:600, fontSize:"0.92rem"} }, k.text),
+                  h("div", { class:"chips" },
+                    h("span", { class:"chip " + (kindInfo.chipCls || "gray") }, kindInfo.icon + " " + kindInfo.label),
+                    h("span", { class:"chip " + urgent },
+                      (k.overdue ? "⏰ просрочено · " : "📅 ") + fmtDeadline(k)),
+                    h("span", { class:"chip gray" }, k.topic)
+                  )),
+                h("button", { class:"btn small", title:"Отметить выполненным", onclick: async () => {
+                  await api("/api/tasks/" + k.id + "/done", { method:"POST" });
+                  hap("medium"); pick("success"); toast("Готово ✅", "ok"); render();
+                }}, "✅"))
+            );
+          })
+        )
       )
     );
-    root.append(dlDetails);
   }
-
-  if (S.me && S.me.features.study) {
-    root.append(h("h2", {}, "Карточки"));
-    const pct = d.cards_total ? Math.round(100 * (d.cards_total - d.cards_due) / d.cards_total) : 0;
-    root.append(h("div", { class:"card row", style:{gap:"14px"} },
-      h("div", { class:"ring" + (pct >= 100 ? " ok" : ""), style:{ "--p": pct } }, h("div", {}, pct + "%")),
-      h("div", { class:"grow" },
-        h("b", {}, d.cards_due ? d.cards_due + " к повторению" : "На сегодня всё 🎉"),
-        h("div", { class:"sub" }, "Всего карточек: " + d.cards_total),
-        d.cards_due ? h("button", { class:"btn subtle small", style:{marginTop:"8px"}, onclick: () => {
-          S.tab = "study"; S.studySub = "cards"; drawNav(); render();
-        }}, "Учить") : null)));
-  }
-
-  root.append(h("h2", {}, "Быстрые действия"));
-  root.append(h("div", { class:"stack" },
-    h("button", { class:"btn ghost", style:{justifyContent:"flex-start", padding:"12px 14px"},
-      onclick: () => { S.tab = "chat"; S.chatSub = "chat"; drawNav(); render(); } },
-      h("span", { style:{fontSize:"19px"} }, "💬"), h("span", {}, "Задать вопрос ИИ")),
-    h("button", { class:"btn ghost", style:{justifyContent:"flex-start", padding:"12px 14px"},
-      onclick: () => taskCreateForm() },
-      h("span", { style:{fontSize:"19px"} }, "📋"), h("span", {}, "Добавить задачу или таймер")),
-    h("button", { class:"btn ghost", style:{justifyContent:"flex-start", padding:"12px 14px"},
-      onclick: () => lessonForm(null, S.today) },
-      h("span", { style:{fontSize:"19px"} }, "➕"), h("span", {}, "Добавить пару")),
-    h("button", { class:"btn ghost", style:{justifyContent:"flex-start", padding:"12px 14px"},
-      onclick: openProfileEditor },
-      h("span", { style:{fontSize:"19px"} }, "🔑"), h("span", {}, "Профиль, аватарка и свой API-ключ"))
-  ));
 
   return root;
 }
-
+   
 /* =========================================================
    TIMETABLE
    ========================================================= */
@@ -2846,8 +3000,12 @@ async function viewStudy() {
 }
 
 async function cardsPane() {
-  const d = await api("/api/study");
+  const [d, list] = await Promise.all([
+    api("/api/study"),
+    api("/api/cards")
+  ]);
   const c = d.cards;
+  const allCards = list.cards || [];
   const pct = c.total ? Math.round(100 * c.learned / c.total) : 0;
   const box = h("div", {});
 
@@ -2860,49 +3018,102 @@ async function cardsPane() {
   box.append(h("div", { class:"card row", style:{gap:"12px"} },
     h("div", { class:"ring" + (pct >= 100 ? " ok" : ""), style:{ "--p": pct } }, h("div", {}, pct + "%")),
     h("div", { class:"grow" },
-      h("div", { style:{fontWeight:700, fontSize:"0.98rem"} },
-        c.due ? "Пора повторить!" : "Всё выучено 🎉"),
-      h("div", { class:"sub" },
-        c.due ? Math.min(c.due, 10) + " карточек ждут тебя" : "Загляни завтра"),
+      h("div", { style:{fontWeight:700, fontSize:"0.98rem"} }, "Карточки по предметам и темам"),
+      h("div", { class:"sub" }, "Выбери нужную тему ниже — проверка знаний идёт строго внутри выбранной колоды без перемешивания."),
       h("div", { class:"btn-row", style:{marginTop:"10px"} },
-        h("button", { class:"btn small", disabled: !c.total, onclick: () => session(true) },
-          c.due ? "▶️ Учить" : "🔁 Ещё раз"),
-        h("button", { class:"btn ghost small", onclick: cardForm }, "➕ Добавить")))));
+        h("button", { class:"btn ghost small", onclick: cardForm }, "➕ Добавить / ИИ-генерация"),
+        h("button", { class:"btn subtle small", disabled: !c.total, onclick: () => session(null) }, "🔀 Микс всех тем")
+      ))));
 
-  const list = await api("/api/cards");
-  if (!list.cards.length) {
-    box.append(empty("🃏", "Пока нет карточек", "Добавь слова или попроси бота составить их из текста",
-      h("button", { class:"btn", onclick: cardForm }, "➕ Создать карточку")));
-  } else {
-    list.cards.slice(0, 60).forEach(k => {
-      box.append(h("div", { class:"card tight" },
-        h("div", { class:"row between" },
-          h("div", { class:"grow" },
-            h("div", { style:{fontWeight:700} }, k.front),
-            k.ph ? h("div", { class:"sub", style:{marginTop:"2px"} }, k.ph) : null,
-            h("div", { style:{marginTop:"4px", color:"var(--text-2)"} }, k.back),
-            h("div", { class:"chips" },
-              h("span", { class:"chip gray" }, "коробка " + k.box),
-              h("span", { class:"chip gray" }, k.deck))),
-          h("button", { class:"btn danger small icon", title:"Удалить", onclick: async () => {
-            if (!confirm("Удалить карточку?")) return;
-            await api("/api/cards/" + k.id, { method:"DELETE" }); render();
-          }}, "🗑"))
-      ));
-    });
+  if (!allCards.length) {
+    box.append(empty("🃏", "Пока нет карточек", "Добавь слова или сгенерируй карточки по любой теме с помощью ИИ",
+      h("button", { class:"btn", onclick: cardForm }, "➕ Создать карточки")));
+    return box;
   }
+
+  // Группируем карточки строго по темам (deck)
+  const decksMap = new Map();
+  allCards.forEach(card => {
+    const dName = (card.deck || "общее").trim();
+    if (!decksMap.has(dName)) decksMap.set(dName, []);
+    decksMap.get(dName).push(card);
+  });
+
+  box.append(h("h2", {}, `Темы и колоды (${decksMap.size})`));
+
+  for (const [deckName, deckCards] of decksMap.entries()) {
+    const dueCount = deckCards.filter(x => !x.due || x.due <= S.today).length;
+    const learnedCount = deckCards.filter(x => (x.box || 1) >= 4).length;
+
+    box.append(
+      h("details", { class:"group-acc" },
+        h("summary", {},
+          h("div", { class:"group-icon" }, "📚"),
+          h("div", { class:"group-meta" },
+            h("div", { class:"g-title" }, deckName),
+            h("div", { class:"g-sub" }, `Карточек: ${deckCards.length} · К повтору: ${dueCount} · Выучено: ${learnedCount}`)
+          ),
+          h("button", {
+            class:"btn small",
+            onclick: (ev) => {
+              ev.preventDefault();
+              ev.stopPropagation();
+              session(deckName);
+            }
+          }, dueCount ? `▶️ Учить (${dueCount})` : "🔁 Повторить"),
+          h("span", { class:"chev" })
+        ),
+        h("div", { class:"group-body" },
+          ...deckCards.map(k =>
+            h("div", { class:"card tight", style:{marginBottom:0} },
+              h("div", { class:"row between" },
+                h("div", { class:"grow" },
+                  h("div", { style:{fontWeight:700} }, cleanMathUi(k.front)),
+                  k.ph ? h("div", { class:"sub", style:{marginTop:"2px"} }, k.ph) : null,
+                  h("div", { style:{marginTop:"4px", color:"var(--text-2)"} }, cleanMathUi(k.back)),
+                  h("div", { class:"chips" },
+                    h("span", { class:"chip gray" }, "коробка " + k.box),
+                    k.due ? h("span", { class:"chip " + (k.due <= S.today ? "warn" : "green") }, "повтор: " + fmtShort(k.due)) : null
+                  )
+                ),
+                h("button", {
+                  class:"btn danger small icon",
+                  title:"Удалить карточку",
+                  onclick: async () => {
+                    if (!confirm("Удалить карточку?")) return;
+                    await api("/api/cards/" + k.id, { method:"DELETE" });
+                    render();
+                  }
+                }, "🗑")
+              )
+            )
+          )
+        )
+      )
+    );
+  }
+
   return box;
 }
 
-async function session() {
-  let q = (await api("/api/cards?due=1")).cards.slice(0, 10);
-  if (!q.length) q = (await api("/api/cards")).cards.sort(() => Math.random() - .5).slice(0, 10);
-  if (!q.length) return toast("Карточек нет");
+async function session(deckFilter) {
+  const allRes = await api("/api/cards", { fresh: true });
+  let poolCards = allRes.cards || [];
+  if (deckFilter) {
+    poolCards = poolCards.filter(c => (c.deck || "общее").trim() === deckFilter);
+  }
+  if (!poolCards.length) return toast("В этой теме пока нет карточек");
+
+  let dueCards = poolCards.filter(c => !c.due || c.due <= S.today);
+  let q = (dueCards.length ? dueCards : [...poolCards].sort(() => Math.random() - 0.5)).slice(0, 12);
 
   let seen = 0, ok = 0;
   const again = new Set();
+  const historyStack = [];
   const totalStart = q.length;
-  sheet("Повторение", (close) => {
+  const titleStr = deckFilter ? `Тема: ${deckFilter}` : "Повторение (все темы)";
+
+  sheet(titleStr, (close) => {
     const body = h("div");
     const step = () => {
       if (!q.length) {
@@ -2910,47 +3121,95 @@ async function session() {
           h("div", { class:"empty" },
             h("div", { class:"big" }, "🏁"),
             h("h3", {}, "Сессия завершена!"),
-            h("p", {}, "Знал " + ok + " из " + seen),
-            h("button", { class:"btn", onclick: () => { close(); render(); } }, "Готово")));
+            h("p", {}, `Тема: ${deckFilter || "Общая"} · Знал ${ok} из ${seen}`),
+            h("div", { class:"btn-row" },
+              historyStack.length ? h("button", { class:"btn ghost", onclick: undoLast }, "↩️ Отменить последний ответ") : null,
+              h("button", { class:"btn", onclick: () => { close(); render(); } }, "Готово")
+            )
+          )
+        );
         return;
       }
       const k = q[0];
-      const done = totalStart - q.length;
-      const pct = Math.round(100 * done / totalStart);
+      const done = Math.max(0, totalStart - q.length);
+      const pct = Math.min(100, Math.round(100 * done / totalStart));
       const btns = h("div", { class:"btn-row", style:{ display:"none" } },
         h("button", { class:"btn danger", onclick: () => answer(false) }, "❌ Не знал"),
         h("button", { class:"btn", onclick: () => answer(true) }, "✅ Знал"));
+
       const card = h("div", { class:"flip", onclick: () => {
         card.classList.add("on"); hap();
         btns.style.display = "flex";
       }},
         h("div", { class:"in" },
           h("div", { class:"face" },
-            h("div", { class:"w" }, k.front),
+            h("span", { class:"chip gray", style:{marginBottom:"10px"} }, k.deck || "общее"),
+            h("div", { class:"w" }, cleanMathUi(k.front)),
             k.ph && h("div", { class:"ph" }, k.ph),
             h("div", { class:"sub", style:{marginTop:"14px"} }, "нажми, чтобы перевернуть")),
           h("div", { class:"face back" },
-            h("div", { class:"w" }, k.back),
-            k.ex && h("div", { class:"ex" }, k.ex))));
+            h("div", { class:"w" }, cleanMathUi(k.back)),
+            k.ex && h("div", { class:"ex" }, cleanMathUi(k.ex)))));
 
       const answer = async (known) => {
-        q.shift(); seen++; ok += known ? 1 : 0;
-        if (!known && !again.has(k.id)) { again.add(k.id); q.push(k); }
+        const snapshot = {
+          card: k,
+          prevBox: k.box || 1,
+          prevDue: k.due || S.today,
+          known,
+          wasRequeued: !known && !again.has(k.id)
+        };
+        historyStack.push(snapshot);
+        q.shift();
+        seen++;
+        ok += known ? 1 : 0;
+        if (snapshot.wasRequeued) {
+          again.add(k.id);
+          q.push(k);
+        }
         try { await api("/api/cards/" + k.id + "/review", { method:"POST", body: { known } }); }
         catch (e) { toast(e.message, "err"); }
-        hap(known ? "light" : "heavy"); step();
+        hap(known ? "light" : "heavy");
+        step();
       };
 
       body.replaceChildren(
         h("div", { class:"session-progress" },
           h("span", {}, (done + 1) + " / " + totalStart),
           h("div", { class:"bar" }, h("i", { style:{ width: pct + "%" } })),
-          h("span", {}, "✓ " + ok)
+          h("span", {}, "✓ " + ok),
+          historyStack.length ? h("button", {
+            class:"chip gray",
+            onclick: undoLast
+          }, "↩️ Шаг назад") : null
         ),
         card,
         btns
       );
     };
+
+    const undoLast = async () => {
+      const last = historyStack.pop();
+      if (!last) return;
+      hap("medium");
+      if (last.wasRequeued) {
+        const idx = q.lastIndexOf(last.card);
+        if (idx !== -1) q.splice(idx, 1);
+        again.delete(last.card.id);
+      }
+      q.unshift(last.card);
+      seen = Math.max(0, seen - 1);
+      if (last.known) ok = Math.max(0, ok - 1);
+      try {
+        await api("/api/g/card/undo", {
+          method:"POST",
+          body:{ id: last.card.id, box: last.prevBox, due: last.prevDue }
+        });
+      } catch (e) {}
+      toast("Ход отменён ↩️");
+      step();
+    };
+
     step();
     return body;
   });
@@ -3539,77 +3798,232 @@ async function chatSettingsPane() {
    ========================================================= */
 
 /* =========================================================
-   GROWTH (РОСТ): ЖИВОЙ ОСТРОВ, КВЕСТ, ИИ-КОНСПЕКТ, ПРИВЫЧКИ,
-   ПЛАН «СДАТЬ ЗА N ДНЕЙ», ДУЭЛИ, СТОРИС-КАРТОЧКИ И ЛИДЕРБОРД
+   GROWTH (РОСТ) v2.2: 6 УНИКАЛЬНЫХ ДЕРЕВЬЕВ, ПАСПОРТ УРОВНЯ,
+   РАБОЧАЯ СТОРИС-КАРТОЧКА, ХАБ ДИАЛОГОВ РЕФЛЕКСИИ И ШТАБ ЭКЗАМЕНА
    ========================================================= */
 S.growthSub = "hub"; // hub | ai | social
 
-function buildCompanionSvg(stage, atRisk, streak) {
-  const wrap = h("div", { class:"g-companion-stage", title:"Нажми на остров!" });
+function getTreeStageArt(stage, leafColor, leafDark, atRisk) {
+  const st = Math.max(1, Math.min(6, stage || 1));
+  if (st === 1) {
+    // Стадия 1: Семя Импульса (светящееся ядро в кратере и первые 2 листочка)
+    return `
+      <ellipse cx="100" cy="136" rx="22" ry="6" fill="#064e3b"/>
+      <circle cx="100" cy="128" r="10" fill="${leafColor}" class="g-sparkle"/>
+      <path d="M100 124 Q100 104 100 96" stroke="#e2e8f0" stroke-width="3.5" stroke-linecap="round"/>
+      <path d="M100 104 Q82 92 84 108 Q92 112 100 104 Z" fill="${leafColor}"/>
+      <path d="M100 100 Q118 88 116 104 Q108 108 100 100 Z" fill="${leafDark}"/>
+      <ellipse cx="100" cy="128" rx="32" ry="9" fill="none" stroke="${leafColor}" stroke-width="1.2" stroke-dasharray="4 4" opacity="0.7"/>
+    `;
+  }
+  if (st === 2) {
+    // Стадия 2: Неоновый Росток (молодое деревце с кристаллами)
+    return `
+      <path d="M92 136 Q100 126 108 136" stroke="#cbd5e1" stroke-width="3" fill="none"/>
+      <path d="M100 136 Q94 105 102 78" stroke="#e2e8f0" stroke-width="5" stroke-linecap="round" fill="none"/>
+      <path d="M98 110 Q78 96 72 86" stroke="#e2e8f0" stroke-width="3.5" stroke-linecap="round" fill="none"/>
+      <path d="M100 98 Q120 86 126 76" stroke="#e2e8f0" stroke-width="3.5" stroke-linecap="round" fill="none"/>
+      <circle cx="72" cy="84" r="14" fill="${leafDark}"/>
+      <circle cx="126" cy="74" r="15" fill="${leafDark}"/>
+      <circle cx="102" cy="70" r="22" fill="${leafColor}"/>
+      <polygon points="56,110 60,100 64,110 60,118" fill="#38bdf8" class="g-sparkle"/>
+      <polygon points="140,106 144,96 148,106 144,114" fill="${leafColor}" class="g-sparkle"/>
+    `;
+  }
+  if (st === 3) {
+    // Стадия 3: Древо Синтеза (корни в острове, густая крона и цветы)
+    return `
+      <path d="M84 142 Q96 132 100 136 Q106 132 118 144" stroke="#94a3b8" stroke-width="3" fill="none"/>
+      <path d="M100 136 Q95 98 100 64" stroke="#e2e8f0" stroke-width="7" stroke-linecap="round" fill="none"/>
+      <path d="M98 108 Q72 92 64 76" stroke="#cbd5e1" stroke-width="4.5" stroke-linecap="round" fill="none"/>
+      <path d="M101 100 Q128 84 136 68" stroke="#cbd5e1" stroke-width="4.5" stroke-linecap="round" fill="none"/>
+      <circle cx="64" cy="74" r="20" fill="${leafDark}"/>
+      <circle cx="136" cy="68" r="20" fill="${leafDark}"/>
+      <circle cx="84" cy="58" r="24" fill="${leafColor}" opacity="0.9"/>
+      <circle cx="118" cy="58" r="24" fill="${leafColor}" opacity="0.9"/>
+      <circle cx="100" cy="46" r="26" fill="${leafColor}"/>
+      <circle cx="82" cy="54" r="4" fill="#ffffff" class="g-sparkle"/>
+      <circle cx="120" cy="52" r="4" fill="#ffffff" class="g-sparkle"/>
+      <circle cx="100" cy="36" r="4.5" fill="#fef08a" class="g-sparkle"/>
+    `;
+  }
+  if (st === 4) {
+    // Стадия 4: Кристальная Роща (3 дерева + эфирный водопад)
+    return `
+      <path d="M92 136 Q96 158 90 176" stroke="#38bdf8" stroke-width="4" opacity="0.65" stroke-linecap="round"/>
+      <path d="M100 136 Q102 162 98 180" stroke="#a3e635" stroke-width="3" opacity="0.75" stroke-linecap="round"/>
+      <!-- Боковые малые деревья -->
+      <path d="M62 134 L60 106" stroke="#cbd5e1" stroke-width="3.5" stroke-linecap="round"/>
+      <circle cx="60" cy="100" r="14" fill="${leafDark}"/>
+      <circle cx="60" cy="96" r="10" fill="${leafColor}"/>
+      <path d="M140 134 L142 104" stroke="#cbd5e1" stroke-width="3.5" stroke-linecap="round"/>
+      <circle cx="142" cy="98" r="14" fill="${leafDark}"/>
+      <circle cx="142" cy="94" r="10" fill="${leafColor}"/>
+      <!-- Центральное древо -->
+      <path d="M100 136 Q96 94 100 54" stroke="#f8fafc" stroke-width="8" stroke-linecap="round" fill="none"/>
+      <circle cx="74" cy="68" r="22" fill="${leafDark}"/>
+      <circle cx="126" cy="68" r="22" fill="${leafDark}"/>
+      <circle cx="100" cy="48" r="32" fill="${leafColor}"/>
+      <polygon points="46,66 52,52 58,66 52,76" fill="#38bdf8" class="g-sparkle"/>
+      <polygon points="144,62 150,48 156,62 150,72" fill="#38bdf8" class="g-sparkle"/>
+    `;
+  }
+  if (st === 5) {
+    // Стадия 5: Парящий Эдем (золотисто-изумрудная корона и орбитальные кольца)
+    return `
+      <ellipse cx="100" cy="66" rx="58" ry="16" fill="none" stroke="#fef08a" stroke-width="1.8" stroke-dasharray="6 4" transform="rotate(-12 100 66)"/>
+      <ellipse cx="100" cy="66" rx="58" ry="16" fill="none" stroke="#38bdf8" stroke-width="1.5" opacity="0.7" transform="rotate(14 100 66)"/>
+      <path d="M100 136 Q94 90 100 46" stroke="#fef08a" stroke-width="9" stroke-linecap="round" fill="none"/>
+      <path d="M98 98 Q66 78 58 58" stroke="#fef08a" stroke-width="5" stroke-linecap="round" fill="none"/>
+      <path d="M102 98 Q134 78 142 58" stroke="#fef08a" stroke-width="5" stroke-linecap="round" fill="none"/>
+      <circle cx="62" cy="60" r="24" fill="${leafDark}"/>
+      <circle cx="138" cy="60" r="24" fill="${leafDark}"/>
+      <circle cx="82" cy="44" r="28" fill="${leafColor}"/>
+      <circle cx="118" cy="44" r="28" fill="${leafColor}"/>
+      <circle cx="100" cy="34" r="26" fill="#fef08a" opacity="0.9"/>
+      <circle cx="100" cy="34" r="12" fill="#ffffff" class="g-sparkle"/>
+    `;
+  }
+  // Стадия 6: Древо Сингулярности (Иггдрасиль с галактическим порталом и квантовым лучом)
+  return `
+    <line x1="100" y1="6" x2="100" y2="178" stroke="#ffffff" stroke-width="3" opacity="0.35"/>
+    <circle cx="100" cy="54" r="46" fill="none" stroke="#a855f7" stroke-width="2" stroke-dasharray="5 5"/>
+    <circle cx="100" cy="54" r="36" fill="#3b0764" opacity="0.65"/>
+    <path d="M100 138 Q94 92 100 44" stroke="#ffffff" stroke-width="9" stroke-linecap="round" fill="none"/>
+    <path d="M98 96 Q62 76 52 52" stroke="#e9d5ff" stroke-width="5" stroke-linecap="round" fill="none"/>
+    <path d="M102 96 Q138 76 148 52" stroke="#e9d5ff" stroke-width="5" stroke-linecap="round" fill="none"/>
+    <circle cx="56" cy="54" r="24" fill="#10b981" opacity="0.9"/>
+    <circle cx="144" cy="54" r="24" fill="#10b981" opacity="0.9"/>
+    <circle cx="100" cy="38" r="32" fill="${leafColor}" opacity="0.92"/>
+    <circle cx="100" cy="42" r="16" fill="#a855f7"/>
+    <circle cx="100" cy="42" r="7" fill="#ffffff" class="g-sparkle"/>
+    <polygon points="36,92 42,78 48,92 42,102" fill="#c084fc" class="g-sparkle"/>
+    <polygon points="152,92 158,78 164,92 158,102" fill="#38bdf8" class="g-sparkle"/>
+  `;
+}
+
+function buildCompanionSvg(stage, atRisk, streak, onClickCustom) {
+  const wrap = h("div", { class:"g-companion-stage", title:"Нажми, чтобы открыть эволюцию острова" });
   const leafColor = atRisk ? "#f59e0b" : "#a3e635";
   const leafDark = atRisk ? "#d97706" : "#10b981";
   const glowColor = atRisk ? "rgba(245,158,11,0.28)" : "rgba(163,230,53,0.28)";
-  const canopyScale = Math.min(1.25, 0.55 + stage * 0.13);
 
   wrap.innerHTML = `
   <svg viewBox="0 0 200 200" class="g-float-island">
     <defs>
-      <radialGradient id="gOrb" cx="50%" cy="45%" r="50%">
+      <radialGradient id="gOrb_${stage}" cx="50%" cy="45%" r="50%">
         <stop offset="0%" stop-color="${glowColor}"/>
         <stop offset="100%" stop-color="transparent"/>
       </radialGradient>
-      <linearGradient id="gIsland" x1="0" y1="0" x2="0" y2="1">
+      <linearGradient id="gIsland_${stage}" x1="0" y1="0" x2="0" y2="1">
         <stop offset="0%" stop-color="#334155"/>
         <stop offset="100%" stop-color="#0f172a"/>
       </linearGradient>
     </defs>
-    <circle cx="100" cy="95" r="78" fill="url(#gOrb)"/>
-    <!-- Парящий био-остров -->
-    <path d="M40 135 Q100 152 160 135 L138 168 Q100 182 62 168 Z" fill="url(#gIsland)" stroke="rgba(255,255,255,0.15)" stroke-width="1.5"/>
-    <ellipse cx="100" cy="135" rx="60" ry="12" fill="${leafDark}" opacity="0.85"/>
-    <!-- Ствол и ветви -->
-    <path d="M100 136 Q96 105 100 ${112 - stage * 7}" stroke="#cbd5e1" stroke-width="${3 + stage}" stroke-linecap="round" fill="none"/>
-    ${stage >= 2 ? `<path d="M100 112 Q82 98 74 88" stroke="#cbd5e1" stroke-width="3" stroke-linecap="round" fill="none"/>` : ""}
-    ${stage >= 3 ? `<path d="M100 106 Q118 92 128 82" stroke="#cbd5e1" stroke-width="3" stroke-linecap="round" fill="none"/>` : ""}
-    <!-- Крона дерева -->
-    <g transform="translate(100, ${96 - stage * 5}) scale(${canopyScale})">
-      <circle cx="0" cy="0" r="24" fill="${leafDark}" opacity="0.9"/>
-      <circle cx="-16" cy="6" r="18" fill="${leafColor}" opacity="0.85"/>
-      <circle cx="16" cy="6" r="18" fill="${leafColor}" opacity="0.85"/>
-      ${stage >= 3 ? `<circle cx="0" cy="-16" r="19" fill="${leafColor}"/>` : ""}
-      ${stage >= 5 ? `<circle cx="0" cy="-24" r="8" fill="#ffffff" class="g-sparkle"/>` : ""}
-    </g>
-    <!-- Светлячки или грозовая туча при риске сгорания -->
+    <circle cx="100" cy="95" r="82" fill="url(#gOrb_${stage})"/>
+    <path d="M38 135 Q100 152 162 135 L138 168 Q100 184 62 168 Z" fill="url(#gIsland_${stage})" stroke="rgba(255,255,255,0.18)" stroke-width="1.5"/>
+    <ellipse cx="100" cy="135" rx="62" ry="12" fill="${leafDark}" opacity="0.88"/>
+    ${getTreeStageArt(stage, leafColor, leafDark, atRisk)}
     ${atRisk ? `
       <g opacity="0.92">
-        <path d="M70 42 Q85 28 105 34 Q125 28 135 44 Q145 52 130 58 L72 58 Q58 50 70 42 Z" fill="#475569"/>
-        <path d="M98 58 L90 72 L100 72 L94 86" stroke="#f59e0b" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+        <path d="M70 32 Q85 18 105 24 Q125 18 135 34 Q145 42 130 48 L72 48 Q58 40 70 32 Z" fill="#475569"/>
+        <path d="M98 48 L90 62 L100 62 L94 76" stroke="#f59e0b" stroke-width="2.5" fill="none" stroke-linecap="round"/>
       </g>
     ` : `
-      <circle cx="62" cy="72" r="3" fill="#a3e635" class="g-sparkle"/>
-      <circle cx="140" cy="66" r="2.5" fill="#38bdf8" class="g-sparkle"/>
-      <circle cx="128" cy="108" r="2" fill="#a3e635" class="g-sparkle"/>
+      <circle cx="48" cy="68" r="3" fill="#a3e635" class="g-sparkle"/>
+      <circle cx="152" cy="64" r="2.5" fill="#38bdf8" class="g-sparkle"/>
+      <circle cx="136" cy="112" r="2.2" fill="#fef08a" class="g-sparkle"/>
     `}
   </svg>`;
 
   wrap.addEventListener("click", () => {
     hap("medium");
-    toast(atRisk
-      ? "🌧 Остров ждёт! Закрой 3-минутный квест, чтобы туча ушла."
-      : `🌱 Стадия ${stage}/6 · Серия ${streak} дн. Продолжай в том же духе!`, "ok");
+    if (onClickCustom) onClickCustom();
   });
   return wrap;
+}
+
+function openLevelModal(st) {
+  const comp = st.companion || { stage: 1, roadmap: [] };
+  const roadmap = comp.roadmap || [
+    { stage: 1, min_lvl: 1, title: "Семя Импульса", desc: "Пробуждение био-ядра в кратере острова." },
+    { stage: 2, min_lvl: 2, title: "Неоновый Росток", desc: "Молодое деревце с парящими кристаллами." },
+    { stage: 3, min_lvl: 4, title: "Древо Синтеза", desc: "Развилистая крона и глубокие корни." },
+    { stage: 4, min_lvl: 7, title: "Кристальная Роща", desc: "Роща из трёх деревьев и эфирный водопад." },
+    { stage: 5, min_lvl: 12, title: "Парящий Эдем", desc: "Золотая корона и двойные орбитальные кольца." },
+    { stage: 6, min_lvl: 20, title: "Древо Сингулярности", desc: "Космическое древо с галактическим порталом." }
+  ];
+
+  sheet(`⚡ Уровень ${st.level} · История XP и Эволюция`, (close) => {
+    const xpLog = st.xp_log || [];
+    return h("div", { class:"stack" },
+      h("div", { class:"card tight row between", style:{marginBottom:0} },
+        h("div", {},
+          h("div", { style:{fontWeight:900, fontSize:"1.15rem"} }, `Уровень ${st.level} (${st.xp} XP)`),
+          h("div", { class:"sub" }, `До уровня ${st.level + 1} осталось ${100 - (st.xp_in_level || 0)} XP`)
+        ),
+        h("span", { class:"chip green" }, `🔥 Серия ${st.streak} дн.`)
+      ),
+
+      h("h2", { style:{margin:"8px 0 2px"} }, "🌳 Эволюция Древа (Стадии 1–6)"),
+      h("div", { class:"sub", style:{marginBottom:"4px"} }, "Каждая новая стадия открывается с ростом твоего уровня или серии дней:"),
+      h("div", { class:"stack" },
+        ...roadmap.map(rm => {
+          const unlocked = rm.stage <= comp.stage;
+          const isCurrent = rm.stage === comp.stage;
+          return h("div", {
+            class:"card tight row",
+            style:{
+              marginBottom:0,
+              gap:"12px",
+              border: isCurrent ? "1.5px solid #84cc16" : "1px solid var(--line)",
+              opacity: unlocked ? 1 : 0.65
+            }
+          },
+            h("div", { style:{width:"74px", height:"74px", flex:"none", display:"flex", alignItems:"center", justifyContent:"center"} },
+              buildCompanionSvg(rm.stage, false, st.streak)
+            ),
+            h("div", { class:"grow" },
+              h("div", { class:"row between wrap" },
+                h("span", { style:{fontWeight:800, fontSize:"0.95rem"} }, `${rm.stage}. ${rm.title}`),
+                isCurrent
+                  ? h("span", { class:"chip green" }, "Текущее")
+                  : (unlocked ? h("span", { class:"chip gray" }, "Открыто ✓") : h("span", { class:"chip warn" }, `🔒 с Ур. ${rm.min_lvl}`))
+              ),
+              h("div", { class:"sub", style:{marginTop:"4px"} }, rm.desc)
+            )
+          );
+        })
+      ),
+
+      h("h2", { style:{margin:"10px 0 2px"} }, "📜 За что получен опыт (Лог XP)"),
+      xpLog.length ? h("div", { class:"stack" },
+        ...xpLog.slice(0, 25).map(item =>
+          h("div", { class:"row between", style:{padding:"8px 11px", background:"var(--surface-2)", borderRadius:"10px", border:"1px solid var(--line)"} },
+            h("div", { class:"grow" },
+              h("div", { style:{fontWeight:700, fontSize:"0.88rem"} }, item.label || item.kind),
+              h("div", { class:"sub", style:{fontSize:"0.75rem"} }, `Уровень ${item.lvl || 1} · ${item.d || ""}`)
+            ),
+            h("span", { class:"chip " + (item.xp >= 0 ? "green" : "red") + " mono" },
+              (item.xp >= 0 ? "+" : "") + item.xp + " XP")
+          )
+        )
+      ) : h("div", { class:"sub" }, "Выполни любое действие (карточки, привычку, задачу или рефлексию), и здесь появится подробная история начислений XP."),
+
+      h("button", { class:"btn block", onclick: close }, "Закрыть")
+    );
+  });
 }
 
 async function generateStoryCardModal(st) {
   sheet("📸 Шэр-карточка для Сторис", (close) => {
     const canvas = h("canvas", {
       width: 1080, height: 1920,
-      style: { width:"100%", maxWidth:"310px", borderRadius:"18px", border:"1px solid var(--line-2)", display:"block", margin:"0 auto" }
+      style: { width:"100%", maxWidth:"290px", borderRadius:"18px", border:"1px solid var(--line-2)", display:"block", margin:"0 auto" }
     });
     const ctx = canvas.getContext("2d");
+    const stage = (st.companion && st.companion.stage) || 1;
 
-    // 1. Фон Editorial Cyber-Botanical
     const grad = ctx.createLinearGradient(0, 0, 1080, 1920);
     grad.addColorStop(0, "#070b12");
     grad.addColorStop(0.5, "#0f1f1c");
@@ -3617,58 +4031,63 @@ async function generateStoryCardModal(st) {
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, 1080, 1920);
 
-    // Световое пятно
     const rad = ctx.createRadialGradient(540, 620, 40, 540, 620, 520);
-    rad.addColorStop(0, "rgba(163, 230, 53, 0.28)");
+    rad.addColorStop(0, "rgba(163, 230, 53, 0.30)");
     rad.addColorStop(1, "transparent");
     ctx.fillStyle = rad;
     ctx.fillRect(0, 0, 1080, 1920);
 
-    // Рамка тонкая редакционная
-    ctx.strokeStyle = "rgba(255,255,255,0.14)";
+    ctx.strokeStyle = "rgba(255,255,255,0.15)";
     ctx.lineWidth = 3;
     ctx.strokeRect(64, 64, 952, 1792);
 
-    // Верхний колонтитул
     ctx.fillStyle = "#a3e635";
     ctx.font = "800 34px -apple-system, BlinkMacSystemFont, sans-serif";
-    ctx.fillText("DAILY GROWTH PROTOCOL // " + st.today, 120, 155);
+    ctx.fillText(`DAILY GROWTH // STAGE ${stage}/6 // ${st.today}`, 120, 155);
 
-    // Имя пользователя
     ctx.fillStyle = "#f8fafc";
     ctx.font = "900 64px -apple-system, BlinkMacSystemFont, sans-serif";
     ctx.fillText((st.name || "Игрок").toUpperCase(), 120, 245);
 
-    // Живое дерево в центре
+    // Отрисовка многослойного дерева на Canvas
     ctx.save();
-    ctx.translate(540, 660);
+    ctx.translate(540, 680);
     ctx.fillStyle = "#1e293b";
     ctx.beginPath();
-    ctx.ellipse(0, 140, 220, 55, 0, 0, Math.PI * 2);
+    ctx.ellipse(0, 150, 230, 55, 0, 0, Math.PI * 2);
     ctx.fill();
     ctx.fillStyle = "#10b981";
     ctx.beginPath();
-    ctx.arc(0, -20, 130, 0, Math.PI * 2);
+    ctx.ellipse(0, 130, 210, 32, 0, 0, Math.PI * 2);
+    ctx.fill();
+    if (stage >= 5) {
+      ctx.strokeStyle = "#fef08a";
+      ctx.lineWidth = 6;
+      ctx.beginPath();
+      ctx.ellipse(0, -30, 220, 60, -0.2, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.fillStyle = "#10b981";
+    ctx.beginPath();
+    ctx.arc(-85, 0, 95, 0, Math.PI * 2);
+    ctx.arc(85, 0, 95, 0, Math.PI * 2);
     ctx.fill();
     ctx.fillStyle = "#a3e635";
     ctx.beginPath();
-    ctx.arc(-70, 10, 95, 0, Math.PI * 2);
-    ctx.arc(70, 10, 95, 0, Math.PI * 2);
+    ctx.arc(0, -55, 125, 0, Math.PI * 2);
     ctx.fill();
     ctx.fillStyle = "#e2e8f0";
-    ctx.fillRect(-14, 10, 28, 135);
+    ctx.fillRect(-16, 10, 32, 125);
     ctx.restore();
 
-    // Огромная цифра серии
     ctx.fillStyle = "#a3e635";
-    ctx.font = "900 250px -apple-system, BlinkMacSystemFont, sans-serif";
+    ctx.font = "900 240px -apple-system, BlinkMacSystemFont, sans-serif";
     ctx.fillText(String(st.streak) + "🔥", 115, 1190);
 
     ctx.fillStyle = "#94a3b8";
-    ctx.font = "700 44px -apple-system, BlinkMacSystemFont, sans-serif";
+    ctx.font = "700 42px -apple-system, BlinkMacSystemFont, sans-serif";
     ctx.fillText("ДНЕЙ БЕЗ ПРОПУСКОВ · " + (st.companion ? st.companion.title.toUpperCase() : ""), 120, 1265);
 
-    // Плашки Уровня и XP
     ctx.fillStyle = "rgba(255,255,255,0.06)";
     ctx.fillRect(120, 1340, 840, 210);
     ctx.fillStyle = "#ffffff";
@@ -3676,58 +4095,390 @@ async function generateStoryCardModal(st) {
     ctx.fillText(`УРОВЕНЬ ${st.level}  ·  ${st.xp} XP`, 165, 1445);
     ctx.fillStyle = "#a3e635";
     ctx.font = "600 36px -apple-system, BlinkMacSystemFont, sans-serif";
-    ctx.fillText(`Активных привычек: ${(st.goals || []).length}  |  Заморозок: ❄️ ${st.freeze}`, 165, 1510);
+    ctx.fillText(`Привычек: ${(st.goals || []).length}  |  Заморозок: ❄️ ${st.freeze}`, 165, 1510);
 
-    // Подвал с ботом
     ctx.fillStyle = "#64748b";
     ctx.font = "700 34px -apple-system, BlinkMacSystemFont, sans-serif";
     ctx.fillText(st.bot ? "@" + st.bot : "Telegram Mini App · Академический Ассистент", 120, 1785);
 
-    return h("div", {},
+    return h("div", { class:"stack", style:{marginTop:"10px"} },
       canvas,
-      h("div", { class:"btn-row", style:{marginTop:"14px"} },
-        h("button", {
-          class:"btn ghost",
-          onclick: () => {
-            const link = document.createElement("a");
-            link.download = `streak-${st.streak}-days.png`;
-            link.href = canvas.toDataURL("image/png");
-            link.click();
-            toast("Картинка сохранена 📥", "ok");
-          }
-        }, "⬇️ Скачать PNG"),
-        h("button", {
-          class:"btn",
-          onclick: async () => {
-            canvas.toBlob(async (blob) => {
-              if (!blob) return;
-              const file = new File([blob], "streak.png", { type: "image/png" });
-              if (navigator.canShare && navigator.canShare({ files: [file] })) {
-                try {
-                  await navigator.share({
-                    files: [file],
-                    title: `Моя серия: ${st.streak} дн.`,
-                    text: `🔥 Моя серия — ${st.streak} дн. (Уровень ${st.level}, ${st.xp} XP)!`
-                  });
-                  return;
-                } catch (e) {}
-              }
-              const link = document.createElement("a");
-              link.download = `streak-${st.streak}-days.png`;
-              link.href = canvas.toDataURL("image/png");
-              link.click();
-              toast("Скачано! Выложи в сторис 📸", "ok");
-            }, "image/png");
-          }
-        }, "📲 Поделиться в Сторис")
-      )
+      h("div", { class:"sub center" },
+        "Внутри Telegram проще всего нажать «Прислать в чат бота» — бот мгновенно пришлёт готовую картинку в диалог, откуда её в 1 тап можно сохранить или выложить в Сторис:"),
+      h("button", {
+        class:"btn block",
+        onclick: async (ev) => {
+          ev.target.disabled = true;
+          ev.target.textContent = "⏳ Отправляю картинку в чат бота…";
+          try {
+            await api("/api/g/story_image", {
+              method:"POST",
+              body:{ data_url: canvas.toDataURL("image/png"), send_tg: true }
+            });
+            pick("success");
+            toast("Картинка отправлена в чат бота! 📨", "ok");
+          } catch (e) { toast(e.message, "err"); }
+          ev.target.disabled = false;
+          ev.target.textContent = "📨 Прислать картинку в чат бота (100% работает)";
+        }
+      }, "📨 Прислать картинку в чат бота (100% работает)"),
+      h("button", {
+        class:"btn ghost block",
+        onclick: async (ev) => {
+          ev.target.disabled = true;
+          try {
+            const r = await api("/api/g/story_image", {
+              method:"POST",
+              body:{ data_url: canvas.toDataURL("image/png"), send_tg: false }
+            });
+            const dlUrl = location.origin + "/api/files/" + r.id + "?initData=" + encodeURIComponent(getInitData()) + "&acc=" + encodeURIComponent(getActiveAccountId()) + "&client=tg";
+            if (tg && tg.openLink) tg.openLink(dlUrl);
+            else window.open(dlUrl, "_blank");
+          } catch (e) { toast(e.message, "err"); }
+          ev.target.disabled = false;
+        }
+      }, "⬇️ Скачать PNG через браузер")
     );
+  });
+}
+
+function openReflectionHubModal(st) {
+  sheet("💬 Разговоры рефлексии и ИИ-анализ", (close) => {
+    const wrap = h("div", { class:"stack" });
+
+    const drawHub = (curState) => {
+      const entriesAll = (curState.journal || []).slice().reverse();
+      const grouped = new Map();
+      entriesAll.forEach(j => {
+        const dKey = j.d || curState.today;
+        if (!grouped.has(dKey)) grouped.set(dKey, []);
+        grouped.get(dKey).push(j);
+      });
+
+      const analysisBox = h("div", {});
+      if (curState.journal_analysis) {
+        analysisBox.append(
+          h("div", { class:"info-box", style:{borderColor:"#84cc16"} },
+            h("div", { class:"row between wrap", style:{marginBottom:"6px"} },
+              h("span", { class:"info-title", style:{marginBottom:0} }, "🧠 ИИ-разбор рефлексий за 7 дней"),
+              h("button", {
+                class:"chip purple",
+                onclick: () => {
+                  const chatList = currentChatList();
+                  chatList.push({
+                    id: "b_" + Date.now(),
+                    role: "bot",
+                    text: "📊 **Мой анализ твоих рефлексий за 7 дней:**\n\n" + curState.journal_analysis + "\n\nДавай обсудим любой пункт — что бы ты хотел скорректировать первым?"
+                  });
+                  close();
+                  S.tab = "chat";
+                  S.chatSub = "chat";
+                  drawNav();
+                  render();
+                }
+              }, "💬 Обсудить в чате с ИИ")
+            ),
+            renderMd(curState.journal_analysis)
+          )
+        );
+      }
+
+      const dayNodes = [];
+      let dIdx = 0;
+      for (const [dKey, list] of grouped.entries()) {
+        dayNodes.push(
+          h("details", { class:"group-acc", open: dIdx === 0, style:{marginBottom:0} },
+            h("summary", {},
+              h("div", { class:"group-icon" }, "💬"),
+              h("div", { class:"group-meta" },
+                h("div", { class:"g-title" }, dKey === curState.today ? `Сегодня (${fmtShort(dKey)})` : fmtShort(dKey)),
+                h("div", { class:"g-sub truncate" }, list[0].t || "Диалог рефлексии")
+              ),
+              h("span", { class:"chip gray" }, list.length),
+              h("span", { class:"chev" })
+            ),
+            h("div", { class:"group-body" },
+              ...list.map(j => {
+                const msgs = j.msgs || [
+                  { role: "user", t: j.t || "" },
+                  { role: "ai", t: j.ai || "" }
+                ];
+                const replyInp = h("input", {
+                  type:"text",
+                  placeholder:"Ответить на вопрос ментора и продолжить разговор…"
+                });
+
+                return h("div", { class:"info-box", style:{marginBottom:0} },
+                  h("div", { class:"row between", style:{marginBottom:"8px"} },
+                    h("span", { class:"info-title", style:{marginBottom:0} }, `Диалог (${msgs.length} сообщ.)`),
+                    j.id ? h("button", {
+                      class:"btn danger small icon",
+                      title:"Удалить ветку рефлексии",
+                      onclick: async () => {
+                        if (!confirm("Удалить этот диалог рефлексии?")) return;
+                        await api("/api/g/journal/" + j.id, { method:"DELETE" });
+                        const fresh = await api("/api/g/state", { fresh: true });
+                        drawHub(fresh);
+                        render();
+                      }
+                    }, "🗑") : null
+                  ),
+                  h("div", { class:"stack", style:{gap:"8px", marginBottom:"10px"} },
+                    ...msgs.map(m =>
+                      h("div", {
+                        style:{
+                          padding:"8px 11px",
+                          borderRadius:"12px",
+                          background: m.role === "user" ? "var(--surface)" : "rgba(132,204,22,0.10)",
+                          border: "1px solid var(--line)"
+                        }
+                      },
+                        h("div", { style:{fontSize:"0.72rem", fontWeight:800, color:"var(--text-2)", marginBottom:"2px"} },
+                          m.role === "user" ? "👤 Вы" : "💡 Ментор"),
+                        h("div", { class: m.role === "ai" ? "g-ai-reply" : "", style:{whiteSpace:"pre-wrap", fontSize:"0.9rem"} }, m.t)
+                      )
+                    )
+                  ),
+                  h("div", { class:"row", style:{gap:"6px"} },
+                    h("div", { class:"grow" }, replyInp),
+                    h("button", {
+                      class:"btn small",
+                      onclick: async (ev) => {
+                        const txt = replyInp.value.trim();
+                        if (!txt) return toast("Напишите ответ", "err");
+                        ev.target.disabled = true;
+                        ev.target.textContent = "⏳…";
+                        try {
+                          await api("/api/g/journal/" + j.id + "/reply", {
+                            method:"POST",
+                            body:{ text: txt }
+                          });
+                          pick("success");
+                          const fresh = await api("/api/g/state", { fresh: true });
+                          drawHub(fresh);
+                        } catch (e) {
+                          toast(e.message, "err");
+                          ev.target.disabled = false;
+                          ev.target.textContent = "Ответить";
+                        }
+                      }
+                    }, "Ответить")
+                  )
+                );
+              })
+            )
+          )
+        );
+        dIdx++;
+      }
+
+      wrap.replaceChildren(
+        h("div", { class:"btn-row" },
+          h("button", {
+            class:"btn",
+            onclick: async (ev) => {
+              ev.target.disabled = true;
+              ev.target.textContent = "⏳ Анализирую 7 дней…";
+              try {
+                const r = await api("/api/g/journal/analyze7", { method:"POST" });
+                curState.journal_analysis = r.analysis;
+                pick("success");
+                drawHub(curState);
+              } catch (e) { toast(e.message, "err"); }
+              ev.target.disabled = false;
+              ev.target.textContent = "🧠 ИИ-анализ за 7 дней";
+            }
+          }, "🧠 ИИ-анализ за 7 дней"),
+          h("button", {
+            class:"btn ghost",
+            onclick: async (ev) => {
+              ev.target.disabled = true;
+              try {
+                const f = await api("/api/g/pdf", { method:"POST", body:{ kind:"journal" } });
+                previewFileModal(f);
+              } catch (e) { toast(e.message, "err"); }
+              ev.target.disabled = false;
+            }
+          }, "📄 Выгрузить в PDF")
+        ),
+        analysisBox,
+        dayNodes.length ? h("div", { class:"stack" }, ...dayNodes) : empty("💬", "Записей пока нет", "Напиши первую мысль о сегодняшнем дне.")
+      );
+    };
+
+    drawHub(st);
+    return wrap;
+  });
+}
+
+function openExamStudioModal(st) {
+  sheet("🎓 Штаб подготовки к экзамену", (close) => {
+    const wrap = h("div", { class:"stack" });
+
+    const drawStudio = (curState) => {
+      const plan = curState.plan || [];
+      const doneDays = plan.filter(p => p.done).length;
+      const pct = plan.length ? Math.round(100 * doneDays / plan.length) : 0;
+
+      let examFiles = [];
+      const fileLbl = h("span", {}, "📎 Прикрепить файл с билетами / программой (PDF, DOCX, фото)");
+      const fileInp = h("input", {
+        type:"file", accept:".pdf,.docx,.txt,.md,image/*", class:"hidden",
+        onchange: async (e) => {
+          if (!e.target.files || !e.target.files.length) return;
+          examFiles = await readFilesAsDataURL([e.target.files[0]]);
+          fileLbl.textContent = "📎 Файл билетов: " + e.target.files[0].name;
+          toast("Файл программы прикреплён ✅", "ok");
+        }
+      });
+
+      const subjInp = h("input", { type:"text", value: curState.plan_subject || "", placeholder:"Напр., Математический анализ, Коллоквиум по алгебре…" });
+      const dateInp = h("input", { type:"date", value: curState.plan_date || addDays(curState.today, 14) });
+      const timeInp = h("input", { type:"time", value: "19:00" });
+      const topicsArea = h("textarea", {
+        placeholder:"Вставь сюда список тем/вопросов к экзамену или коллоквиуму (или прикрепи файл выше) — ИИ разобьёт их по дням и распишет подробный план на каждый день…"
+      });
+
+      const builderForm = h("details", { class:"group-acc", open: !plan.length },
+        h("summary", {},
+          h("div", { class:"group-icon" }, "⚙️"),
+          h("div", { class:"group-meta" },
+            h("div", { class:"g-title" }, plan.length ? "Пересобрать план / Загрузить новые билеты" : "Создать план подготовки по темам"),
+            h("div", { class:"g-sub" }, "По файлу программы или списку вопросов")
+          ),
+          h("span", { class:"chev" })
+        ),
+        h("div", { class:"group-body" },
+          field("Предмет или коллоквиум", subjInp),
+          h("div", { class:"row" },
+            h("div", { class:"grow" }, field("Дата сдачи", dateInp)),
+            h("div", { class:"grow" }, field("Слот в расписании", timeInp))
+          ),
+          h("label", { class:"file-upload-zone" }, fileLbl, fileInp),
+          field("Список тем или билетов (можно вставить текстом)", topicsArea),
+          h("button", {
+            class:"btn block",
+            onclick: async (ev) => {
+              if (!subjInp.value.trim() || !dateInp.value) return toast("Укажите предмет и дату", "err");
+              ev.target.disabled = true;
+              ev.target.textContent = "⏳ ИИ анализирует билеты и строит план по дням…";
+              try {
+                await api("/api/g/plan", {
+                  method:"POST",
+                  body:{
+                    subject: subjInp.value.trim(),
+                    date: dateInp.value,
+                    time: timeInp.value,
+                    topics_text: topicsArea.value.trim(),
+                    files: examFiles,
+                    push_to_tt: true
+                  }
+                });
+                pick("success");
+                const fresh = await api("/api/g/state", { fresh: true });
+                drawStudio(fresh);
+                render();
+                toast("План готов и добавлен в «Пары»! 🎯", "ok");
+              } catch (e) {
+                toast(e.message, "err");
+                ev.target.disabled = false;
+                ev.target.textContent = "🚀 Построить подробный план по дням";
+              }
+            }
+          }, "🚀 Построить подробный план по дням")
+        )
+      );
+
+      const daysNodes = plan.map((p, idx) => {
+        const isToday = p.d === curState.today;
+        const deepBox = h("div", {}, p.deep_notes ? renderMd(p.deep_notes) : null);
+
+        return h("details", {
+          class:"group-acc",
+          open: isToday || (idx === 0 && !plan.some(x => x.d === curState.today)),
+          style:{marginBottom:0, borderColor: isToday ? "#84cc16" : (p.done ? "var(--ok)" : "var(--line)")}
+        },
+          h("summary", {},
+            h("div", { class:"group-icon" }, p.done ? "✅" : (isToday ? "🔥" : "📅")),
+            h("div", { class:"group-meta" },
+              h("div", { class:"g-title" }, `${fmtShort(p.d)} — ${p.t}`),
+              h("div", { class:"g-sub" },
+                (p.sub && p.sub.length) ? `Подтем: ${p.sub.length}` : "Нажми, чтобы открыть подробный план дня")
+            ),
+            h("span", { class:"chev" })
+          ),
+          h("div", { class:"group-body" },
+            (p.sub && p.sub.length) ? h("div", { class:"info-box", style:{marginBottom:"6px"} },
+              h("div", { class:"info-title" }, "📌 Темы и вопросы на этот день"),
+              h("ul", { style:{margin:"4px 0", paddingLeft:"18px"} },
+                ...p.sub.map(s => h("li", { style:{fontSize:"0.9rem", marginBottom:"3px"} }, s))
+              )
+            ) : null,
+            p.details ? h("div", { class:"info-box", style:{marginBottom:"6px"} },
+              h("div", { class:"info-title" }, "🧭 Что именно изучить и прорешать"),
+              h("div", { class:"info-body" }, p.details)
+            ) : null,
+            deepBox,
+            h("div", { class:"btn-row" },
+              h("button", {
+                class: "btn small " + (p.done ? "subtle" : ""),
+                onclick: async () => {
+                  hap("medium");
+                  await api("/api/g/plan/check", { method:"POST", body:{ d: p.d } });
+                  const fresh = await api("/api/g/state", { fresh: true });
+                  drawStudio(fresh);
+                  render();
+                }
+              }, p.done ? "✓ День изучен (отменить)" : "✅ Отметить день изученным (+10 XP)"),
+              h("button", {
+                class:"btn ghost small",
+                onclick: async (ev) => {
+                  ev.target.disabled = true;
+                  ev.target.textContent = "⏳ Пишу конспект дня…";
+                  try {
+                    const r = await api("/api/g/plan/expand", { method:"POST", body:{ d: p.d } });
+                    p.deep_notes = r.deep_notes;
+                    deepBox.replaceChildren(
+                      h("div", { class:"info-box", style:{borderColor:"#84cc16", marginTop:"6px"} },
+                        h("div", { class:"info-title" }, "📖 Подробный конспект и разбор от ИИ"),
+                        renderMd(r.deep_notes)
+                      )
+                    );
+                  } catch (e) { toast(e.message, "err"); }
+                  ev.target.disabled = false;
+                  ev.target.textContent = "✨ Подробный разбор от ИИ";
+                }
+              }, "✨ Подробный разбор от ИИ")
+            )
+          )
+        );
+      });
+
+      wrap.replaceChildren(
+        plan.length ? h("div", { class:"card tight", style:{marginBottom:0} },
+          h("div", { class:"row between" },
+            h("div", {},
+              h("div", { style:{fontWeight:900, fontSize:"1.08rem"} }, curState.plan_subject || "Экзамен"),
+              h("div", { class:"sub" }, `Изучено дней: ${doneDays} из ${plan.length} (${pct}%)`)
+            ),
+            h("span", { class:"chip green" }, `до ${fmtShort(curState.plan_date || curState.today)}`)
+          ),
+          h("div", { class:"g-xp-bar", style:{marginTop:"8px"} }, h("i", { style:{width: pct + "%"} })),
+          curState.plan_analysis ? h("div", { class:"sub", style:{marginTop:"8px"} }, "💡 " + curState.plan_analysis) : null
+        ) : null,
+        builderForm,
+        ...daysNodes
+      );
+    };
+
+    drawStudio(st);
+    return wrap;
   });
 }
 
 async function openDuelModal(duelId) {
   let d;
-  try { d = await api("/api/g/duel/" + encodeURIComponent(duelId)); }
+  try { d = await api("/api/g/duel/" + encodeURIComponent(duelId), { fresh: true }); }
   catch (e) { return toast(e.message, "err"); }
 
   sheet("⚔️ Дуэль: " + d.topic, (close) => {
@@ -3840,7 +4591,11 @@ async function viewGrowth() {
               ? "Выполни 3 быстрых шага ниже до полуночи, чтобы спасти дерево и серию."
               : comp.desc),
           h("div", { class:"chips", style:{marginTop:"10px"} },
-            h("span", { class:"chip green" }, `⚡ Ур. ${st.level} (${st.xp} XP)`),
+            h("button", {
+              class:"chip green",
+              style:{cursor:"pointer"},
+              onclick: () => openLevelModal(st)
+            }, `⚡ Ур. ${st.level} (${st.xp} XP) ℹ️`),
             h("span", { class:"chip cyan" }, `❄️ Заморозок: ${st.freeze}`),
             h("button", {
               class:"chip purple",
@@ -3860,11 +4615,11 @@ async function viewGrowth() {
             }, "📄 PDF-отчёт")
           )
         ),
-        buildCompanionSvg(comp.stage, st.risk, st.streak)
+        buildCompanionSvg(comp.stage, st.risk, st.streak, () => openLevelModal(st))
       ),
-      h("div", { class:"g-xp-strip" },
+      h("div", { class:"g-xp-strip", style:{cursor:"pointer"}, onclick: () => openLevelModal(st) },
         h("div", { class:"row between", style:{fontSize:"0.76rem", fontWeight:700} },
-          h("span", {}, `Прогресс до уровня ${st.level + 1}`),
+          h("span", {}, `Прогресс до уровня ${st.level + 1} (нажми — история XP и деревья)`),
           h("span", { class:"mono" }, `${st.xp_in_level} / 100 XP`)
         ),
         h("div", { class:"g-xp-bar" }, h("i", { style:{width: st.xp_in_level + "%"} }))
@@ -3902,8 +4657,14 @@ function renderGrowthHubPane(st) {
       ...(st.quest || []).map(q =>
         h("div", {
           class: "g-quest-item" + (q.done ? " done" : ""),
-          onclick: () => {
+          onclick: async () => {
             hap();
+            if (q.done) {
+              await api("/api/g/quest/undo", { method:"POST", body:{ id: q.id } });
+              toast("Шаг квеста отменён ↩️");
+              render();
+              return;
+            }
             S.tab = q.tab;
             drawNav();
             render();
@@ -3912,9 +4673,9 @@ function renderGrowthHubPane(st) {
           h("div", { class:"g-quest-check" }, q.done ? "✓" : ""),
           h("div", { class:"grow" },
             h("div", { style:{fontWeight:700, fontSize:"0.94rem"} }, q.title),
-            h("div", { class:"sub" }, q.done ? "Засчитано сегодня" : "Нажми, чтобы перейти и выполнить")
+            h("div", { class:"sub" }, q.done ? "Засчитано сегодня (нажми, чтобы отменить)" : "Нажми, чтобы перейти и выполнить")
           ),
-          h("span", { class:"chip " + (q.done ? "green" : "gray") }, `+${q.xp} XP`)
+          h("span", { class:"chip " + (q.done ? "green" : "gray") }, q.done ? "↩️ Отменить" : `+${q.xp} XP`)
         )
       ),
       h("div", {
@@ -3941,7 +4702,7 @@ function renderGrowthHubPane(st) {
     )
   );
 
-  // ЦЕЛИ И ПРИВЫЧКИ (БЕЗ СЪЕЗЖАНИЯ ТЕКСТА)
+  // ЦЕЛИ И ПРИВЫЧКИ
   const last14 = Array.from({ length: 14 }, (_, i) => addDays(st.today, -(13 - i)));
   const CAT_LABELS = {
     body: "💪 Спорт",
@@ -4024,55 +4785,10 @@ function renderGrowthHubPane(st) {
     });
   }
 
-  // ВЕЧЕРНИЙ ДНЕВНИК С РАЗБИВКОЙ ПО ДНЯМ И УДАЛЕНИЕМ
+  // ВЕЧЕРНИЙ ДНЕВНИК И КНОПКА ХАБА «РАЗГОВОРЫ РЕФЛЕКСИИ»
   const jInp = h("textarea", { placeholder:"Как реально прошёл день? Что получилось, а что устал делать?…" });
-  const groupedJournal = new Map();
-  (st.journal || []).slice().reverse().forEach(j => {
-    const dKey = j.d || st.today;
-    if (!groupedJournal.has(dKey)) groupedJournal.set(dKey, []);
-    groupedJournal.get(dKey).push(j);
-  });
-
-  const journalDaysNodes = [];
-  let dayIdx = 0;
-  for (const [dKey, entries] of groupedJournal.entries()) {
-    const isToday = dKey === st.today;
-    journalDaysNodes.push(
-      h("details", { class:"group-acc", open: dayIdx === 0, style:{marginBottom:"8px"} },
-        h("summary", {},
-          h("div", { class:"group-icon" }, "📅"),
-          h("div", { class:"group-meta" },
-            h("div", { class:"g-title" }, isToday ? `Сегодня (${fmtShort(dKey)})` : fmtShort(dKey)),
-            h("div", { class:"g-sub" }, `Записей за день: ${entries.length}`)
-          ),
-          h("span", { class:"chip gray" }, entries.length),
-          h("span", { class:"chev" })
-        ),
-        h("div", { class:"group-body" },
-          ...entries.map(j =>
-            h("div", { class:"info-box", style:{marginBottom:0} },
-              h("div", { class:"row between", style:{marginBottom:"6px"} },
-                h("span", { class:"info-title", style:{marginBottom:0} }, "✍️ Запись"),
-                j.id ? h("button", {
-                  class:"btn danger small icon",
-                  title:"Удалить запись",
-                  onclick: async () => {
-                    if (!confirm("Удалить эту запись рефлексии?")) return;
-                    await api("/api/g/journal/" + j.id, { method:"DELETE" });
-                    toast("Запись удалена 🗑");
-                    render();
-                  }
-                }, "🗑") : null
-              ),
-              h("div", { style:{marginBottom:"8px", whiteSpace:"pre-wrap", fontWeight:500} }, j.t),
-              h("div", { class:"info-body g-ai-reply" }, "💡 " + j.ai)
-            )
-          )
-        )
-      )
-    );
-    dayIdx++;
-  }
+  const totalReflections = (st.journal || []).length;
+  const lastEntry = totalReflections ? st.journal[totalReflections - 1] : null;
 
   box.append(
     h("div", { class:"g-sec-head" },
@@ -4092,17 +4808,38 @@ function renderGrowthHubPane(st) {
             await api("/api/g/journal", { method:"POST", body:{ text: txt } });
             pick("success");
             jInp.value = "";
-            toast("Рефлексия сохранена!", "ok");
+            const fresh = await api("/api/g/state", { fresh: true });
             render();
+            openReflectionHubModal(fresh);
           } catch (e) {
             toast(e.message, "err");
             ev.target.disabled = false;
-            ev.target.textContent = "✨ Сохранить и получить рефлексию";
+            ev.target.textContent = "✨ Сохранить и начать диалог рефлексии";
           }
         }
-      }, "✨ Сохранить и получить рефлексию")
-    ),
-    ...journalDaysNodes
+      }, "✨ Сохранить и начать диалог рефлексии"),
+
+      // Вместо длинного списка дней — компактная плашка входа в Хаб разговоров рефлексии
+      h("div", {
+        class:"info-box tappable",
+        style:{marginBottom:0, cursor:"pointer", borderColor:"var(--line-2)"},
+        onclick: () => openReflectionHubModal(st)
+      },
+        h("div", { class:"row between" },
+          h("div", { class:"row", style:{gap:"10px"} },
+            h("div", { class:"group-icon" }, "💬"),
+            h("div", {},
+              h("div", { style:{fontWeight:800, fontSize:"0.95rem"} }, `Разговоры рефлексии (${totalReflections})`),
+              h("div", { class:"sub" },
+                lastEntry
+                  ? `Последний: ${fmtShort(lastEntry.d)} — продолжить диалог, выгрузить в PDF или сделать ИИ-анализ за 7 дней`
+                  : "Открыть архив по датам и ИИ-аналитику недели")
+            )
+          ),
+          h("span", { class:"chip" }, "Открыть →")
+        )
+      )
+    )
   );
 
   box.append(
@@ -4142,7 +4879,7 @@ function renderGrowthAiPane(st) {
   let snapFiles = [];
   let snapKind = "photo";
   const fileLabel = h("span", {}, "📷 Выбрать фото задачи/конспекта или 🎤 аудио лекции");
-  const snapText = h("input", { type:"text", placeholder:"Доп. комментарий или тема (необязательно)…" });
+  const snapText = h("input", { type:"text", placeholder:"Укажи предмет (напр., Геометрия) или вопрос…" });
   const snapResult = h("div", {});
 
   const snapInput = h("input", {
@@ -4160,11 +4897,11 @@ function renderGrowthAiPane(st) {
   box.append(
     h("div", { class:"g-sec-head" },
       h("h2", {}, "Сфоткал конспект / Голосовое с лекции"),
-      h("span", { class:"num" }, "РАЗБОР + КАРТОЧКИ + ТЕСТ + PDF")
+      h("span", { class:"num" }, "РАЗБОР + КАРТОЧКИ ПО ТЕМЕ + ТЕСТ + PDF")
     ),
     h("div", { class:"card stack" },
       h("div", { class:"sub" },
-        "Загрузи фото доски/тетради или голосовое с пары — ИИ сделает разбор с чистыми формулами, сохранит карточки в «Учёбу», соберёт тест и позволит скачать конспект в PDF."),
+        "Загрузи фото доски/тетради или голосовое с пары — ИИ сделает разбор с чистыми формулами, сложит карточки в отдельную папку темы в «Учёбе», соберёт тест и позволит скачать PDF."),
       h("label", { class:"file-upload-zone" }, fileLabel, snapInput),
       snapText,
       h("button", {
@@ -4184,7 +4921,7 @@ function renderGrowthAiPane(st) {
             snapResult.replaceChildren(
               h("div", { class:"info-box", style:{marginTop:"10px"} },
                 h("div", { class:"row between wrap", style:{marginBottom:"10px", gap:"6px"} },
-                  h("span", { class:"chip green" }, `🃏 Сохранено карточек: ${r.saved_cards || (r.cards || []).length}`),
+                  h("span", { class:"chip green" }, `📚 Колода «${r.title}»: +${r.saved_cards || (r.cards || []).length} карт.`),
                   h("div", { class:"row wrap", style:{gap:"6px"} },
                     (r.quiz && r.quiz.length) ? h("button", {
                       class:"btn small",
@@ -4209,7 +4946,7 @@ function renderGrowthAiPane(st) {
                 renderMd(r.answer || "")
               )
             );
-            toast("Готово! Карточки добавлены в «Учёбу» 🎉", "ok");
+            toast(`Карточки сохранены в тему «${r.title}» 🎉`, "ok");
           } catch (e) { toast(e.message, "err"); }
           ev.target.disabled = false;
           ev.target.textContent = "🚀 Разобрать + создать карточки и тест";
@@ -4219,165 +4956,33 @@ function renderGrowthAiPane(st) {
     )
   );
 
-  const subjInp = h("input", { type:"text", value: st.plan_subject || "", placeholder:"Напр., Математический анализ, Электродинамика…" });
-  const dateInp = h("input", { type:"date", value: st.plan_date || addDays(st.today, 14) });
-  const timeInp = h("input", { type:"time", value: "19:00" });
+  // КОМПАКТНАЯ КАРТОЧКА ВХОДА В ШТАБ ПОДГОТОВКИ К ЭКЗАМЕНУ (БЕЗ ЗАСОРЕНИЯ СТРАНИЦЫ)
+  const plan = st.plan || [];
+  const doneDays = plan.filter(p => p.done).length;
+  const todayPlan = plan.find(p => p.d === st.today) || plan[0];
 
   box.append(
     h("div", { class:"g-sec-head" },
       h("h2", {}, "Режим «Сдать экзамен за N дней»"),
-      h("span", { class:"num" }, "АВТО-СЛОТЫ В РАСПИСАНИИ")
+      h("span", { class:"num" }, "ПО БИЛЕТАМ И ФАЙЛАМ")
     ),
     h("div", { class:"card stack" },
-      field("Предмет или экзамен", subjInp),
-      h("div", { class:"row" },
-        h("div", { class:"grow" }, field("Дата сдачи", dateInp)),
-        h("div", { class:"grow" }, field("Время слота в расписании", timeInp))
-      ),
+      plan.length ? h("div", {},
+        h("div", { class:"row between" },
+          h("div", { style:{fontWeight:800, fontSize:"1.02rem"} }, `🎓 ${st.plan_subject || "Экзамен"}`),
+          h("span", { class:"chip green" }, `Изучено: ${doneDays}/${plan.length} дн.`)
+        ),
+        todayPlan ? h("div", { class:"info-box", style:{marginTop:"8px", marginBottom:0} },
+          h("div", { class:"info-title" }, `📌 План на ${fmtShort(todayPlan.d)}`),
+          h("div", { style:{fontWeight:700, fontSize:"0.92rem"} }, todayPlan.t),
+          todayPlan.details ? h("div", { class:"sub", style:{marginTop:"4px"} }, todayPlan.details) : null
+        ) : null
+      ) : h("div", { class:"sub" },
+        "Загрузи файл с билетами/программой экзамена или вставь список тем — ИИ составит пошаговый план на каждый день с разбором подтем и добавит слоты в расписание."),
       h("button", {
         class:"btn block",
-        onclick: async (ev) => {
-          if (!subjInp.value.trim() || !dateInp.value) return toast("Укажите предмет и дату", "err");
-          ev.target.disabled = true;
-          ev.target.textContent = "⏳ Строю план и ставлю в расписание…";
-          try {
-            const res = await api("/api/g/plan", {
-              method:"POST",
-              body:{ subject: subjInp.value.trim(), date: dateInp.value, time: timeInp.value, push_to_tt: true }
-            });
-            pick("success");
-            toast(`План готов! Добавлено слотов в расписание: ${res.added_to_tt}`, "ok");
-            render();
-          } catch (e) { toast(e.message, "err"); }
-          ev.target.disabled = false;
-          ev.target.textContent = "🗓 Построить план и добавить в «Пары»";
-        }
-      }, "🗓 Построить план и добавить в «Пары»"),
-      (st.plan && st.plan.length) ? h("div", { class:"stack", style:{marginTop:"8px"} },
-        ...st.plan.slice(0, 14).map(p =>
-          h("div", { class:"row", style:{padding:"8px 10px", background:"var(--surface-2)", borderRadius:"10px", border: p.d === st.today ? "1px solid #84cc16" : "1px solid var(--line)"} },
-            h("span", { class:"chip " + (p.d === st.today ? "green" : "gray") }, fmtShort(p.d)),
-            h("span", { class:"grow", style:{fontSize:"0.88rem"} }, p.t)
-          )
-        )
-      ) : null
-    )
-  );
-
-  return box;
-}
-
-function renderGrowthAiPane(st) {
-  const box = h("div", { class:"g-shell" });
-
-  // 1. СФОТКАЛ КОНСПЕКТ / ЗАДАЧУ ИЛИ ЗАГРУЗИЛ ГОЛОСОВОЕ С ЛЕКЦИИ
-  let snapFiles = [];
-  let snapKind = "photo";
-  const fileLabel = h("span", {}, "📷 Выбрать фото задачи/конспекта или 🎤 аудио лекции");
-  const snapText = h("input", { type:"text", placeholder:"Доп. комментарий или тема (необязательно)…" });
-  const snapResult = h("div", {});
-
-  const snapInput = h("input", {
-    type:"file", accept:"image/*,audio/*,.ogg,.mp3,.m4a,.wav,.pdf", class:"hidden",
-    onchange: async (e) => {
-      if (!e.target.files || !e.target.files.length) return;
-      const f = e.target.files[0];
-      snapKind = (f.type || "").startsWith("audio/") || /\.(ogg|mp3|m4a|wav)$/i.test(f.name) ? "voice" : "photo";
-      snapFiles = await readFilesAsDataURL([f]);
-      fileLabel.textContent = (snapKind === "voice" ? "🎤 Аудио: " : "📷 Файл: ") + f.name;
-      toast("Файл готов к разбору", "ok");
-    }
-  });
-
-  box.append(
-    h("div", { class:"g-sec-head" },
-      h("h2", {}, "Сфоткал конспект / Голосовое с лекции"),
-      h("span", { class:"num" }, "РАЗБОР + КАРТОЧКИ + ТЕСТ")
-    ),
-    h("div", { class:"card stack" },
-      h("div", { class:"sub" },
-        "Загрузи фото доски/тетради или голосовое с пары — ИИ выдаст пошаговый разбор, сам добавит карточки в колоду «Учёба» и соберёт мини-тест."),
-      h("label", { class:"file-upload-zone" }, fileLabel, snapInput),
-      snapText,
-      h("button", {
-        class:"btn block",
-        onclick: async (ev) => {
-          if (!snapFiles.length && !snapText.value.trim()) {
-            return toast("Прикрепи фото/аудио или введи текст задачи", "err");
-          }
-          ev.target.disabled = true;
-          ev.target.textContent = "⏳ ИИ разбирает материал и создаёт карточки…";
-          try {
-            const r = await api("/api/g/snap", {
-              method:"POST",
-              body:{ kind: snapKind, text: snapText.value.trim(), files: snapFiles, save_cards: true }
-            });
-            pick("success");
-            snapResult.replaceChildren(
-              h("div", { class:"info-box", style:{marginTop:"10px"} },
-                h("div", { class:"row between wrap", style:{marginBottom:"8px"} },
-                  h("span", { class:"chip green" }, `🃏 Сохранено карточек: ${r.saved_cards || (r.cards || []).length}`),
-                  (r.quiz && r.quiz.length) ? h("button", {
-                    class:"btn small",
-                    onclick: () => runQuizModal({ title: r.title, questions: r.quiz })
-                  }, "🎯 Пройти тест по конспекту") : null
-                ),
-                renderMd(r.answer || "")
-              )
-            );
-            toast("Готово! Карточки добавлены в «Учёбу» 🎉", "ok");
-          } catch (e) { toast(e.message, "err"); }
-          ev.target.disabled = false;
-          ev.target.textContent = "🚀 Разобрать + создать карточки и тест";
-        }
-      }, "🚀 Разобрать + создать карточки и тест"),
-      snapResult
-    )
-  );
-
-  // 2. РЕЖИМ «СДАТЬ ЗА N ДНЕЙ» С АВТО-ЗАПИСЬЮ В РАСПИСАНИЕ ПАР
-  const subjInp = h("input", { type:"text", value: st.plan_subject || "", placeholder:"Напр., Математический анализ, Электродинамика…" });
-  const dateInp = h("input", { type:"date", value: st.plan_date || addDays(st.today, 14) });
-  const timeInp = h("input", { type:"time", value: "19:00" });
-
-  box.append(
-    h("div", { class:"g-sec-head" },
-      h("h2", {}, "Режим «Сдать экзамен за N дней»"),
-      h("span", { class:"num" }, "АВТО-СЛОТЫ В РАСПИСАНИИ")
-    ),
-    h("div", { class:"card stack" },
-      field("Предмет или экзамен", subjInp),
-      h("div", { class:"row" },
-        h("div", { class:"grow" }, field("Дата сдачи", dateInp)),
-        h("div", { class:"grow" }, field("Время слота в расписании", timeInp))
-      ),
-      h("button", {
-        class:"btn block",
-        onclick: async (ev) => {
-          if (!subjInp.value.trim() || !dateInp.value) return toast("Укажите предмет и дату", "err");
-          ev.target.disabled = true;
-          ev.target.textContent = "⏳ Строю план и ставлю в расписание…";
-          try {
-            const res = await api("/api/g/plan", {
-              method:"POST",
-              body:{ subject: subjInp.value.trim(), date: dateInp.value, time: timeInp.value, push_to_tt: true }
-            });
-            pick("success");
-            toast(`План готов! Добавлено слотов в расписание: ${res.added_to_tt}`, "ok");
-            render();
-          } catch (e) { toast(e.message, "err"); }
-          ev.target.disabled = false;
-          ev.target.textContent = "🗓 Построить план и добавить в «Пары»";
-        }
-      }, "🗓 Построить план и добавить в «Пары»"),
-      (st.plan && st.plan.length) ? h("div", { class:"stack", style:{marginTop:"8px"} },
-        ...st.plan.slice(0, 14).map(p =>
-          h("div", { class:"row", style:{padding:"8px 10px", background:"var(--surface-2)", borderRadius:"10px", border: p.d === st.today ? "1px solid #a3e635" : "1px solid var(--line)"} },
-            h("span", { class:"chip " + (p.d === st.today ? "green" : "gray") }, fmtShort(p.d)),
-            h("span", { class:"grow", style:{fontSize:"0.88rem"} }, p.t)
-          )
-        )
-      ) : null
+        onclick: () => openExamStudioModal(st)
+      }, plan.length ? "🎓 Открыть штаб подготовки (все дни и темы) →" : "➕ Загрузить темы и создать план подготовки")
     )
   );
 
