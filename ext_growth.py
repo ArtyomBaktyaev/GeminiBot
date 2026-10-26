@@ -738,7 +738,7 @@ async def a_journal_reply(request, user):
     msgs = target.setdefault("msgs", [{"role": "user", "t": target.get("t", "")}, {"role": "ai", "t": target.get("ai", "")}])
     msgs.append({"role": "user", "t": reply_text})
 
-     transcript = "\n".join(
+    transcript = "\n".join(
         f"{'Пользователь' if m['role'] == 'user' else 'Ментор'}: {m['t']}"
         for m in msgs[-10:]
     )
@@ -752,6 +752,57 @@ async def a_journal_reply(request, user):
     target["ai"] = ai_ans
     save()
     return {"ok": True, "entry": target, "ai": ai_ans}
+
+
+async def a_session_toggle(request, user):
+    """Включает или выключает режим «Сессионная неделя» для выбранного понедельника (скрывает обычные пары)."""
+    b, u = await request.json(), U(request, user)
+    mon = str(b.get("monday") or "").strip()[:10]
+    if not mon:
+        raise ValueError("Не указана дата недели")
+    s_weeks = u.setdefault("session_weeks", [])
+    if mon in s_weeks:
+        s_weeks.remove(mon)
+        active = False
+    else:
+        s_weeks.append(mon)
+        active = True
+    save()
+    return {"ok": True, "is_session_week": active, "session_weeks": s_weeks}
+
+
+async def a_session_exam_add(request, user):
+    """Добавляет экзамен / коллоквиум / тест / лабу в выбранный день."""
+    b, u = await request.json(), U(request, user)
+    d_str = str(b.get("date") or "").strip()[:10]
+    subj = str(b.get("subject") or "").strip()[:120]
+    if not d_str or not subj:
+        raise ValueError("Укажите предмет и дату")
+    exam = {
+        "id": str(b.get("id") or ("ex_" + secrets.token_hex(3))),
+        "date": d_str,
+        "start": str(b.get("start") or "10:00").strip()[:5],
+        "end": str(b.get("end") or "12:00").strip()[:5],
+        "subject": subj,
+        "kind": str(b.get("kind") or "Экзамен").strip()[:40],
+        "room": str(b.get("room") or "").strip()[:40],
+        "teacher": str(b.get("teacher") or "").strip()[:60],
+        "notes": str(b.get("notes") or "").strip()[:1000],
+    }
+    exams = u.setdefault("session_exams", [])
+    exams[:] = [x for x in exams if x.get("id") != exam["id"]]
+    exams.append(exam)
+    save()
+    return {"ok": True, "exam": exam}
+
+
+async def a_session_exam_del(request, user):
+    """Удаляет экзамен / коллоквиум / тест / лабу."""
+    u = U(request, user)
+    ex_id = request.match_info["id"]
+    u["session_exams"] = [x for x in u.get("session_exams", []) if str(x.get("id")) != str(ex_id)]
+    save()
+    return {"ok": True}
 
 
 async def a_journal_analyze7(request, user):
@@ -1184,7 +1235,7 @@ def setup(c) -> None:
         kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⚡ Ворваться в топ", web_app=WebAppInfo(url=url))]]) if url else None
         await message.reply("\n".join(lines), parse_mode="HTML", reply_markup=kb)
         
-     routes = [
+    routes = [
         ("GET", "/api/g/state", a_state),
         ("POST", "/api/g/quest/undo", a_quest_undo),
         ("POST", "/api/g/card/undo", a_card_undo),
@@ -1211,6 +1262,9 @@ def setup(c) -> None:
         ("POST", "/api/g/group/dl", a_dl_add),
         ("POST", "/api/g/notify", a_notify),
         ("POST", "/api/g/briefing", a_briefing_now),
+        ("POST", "/api/g/session/toggle", a_session_toggle),
+        ("POST", "/api/g/session/exam", a_session_exam_add),
+        ("DELETE", "/api/g/session/exam/{id}", a_session_exam_del),
     ]
 
     hooks = {"/api/tasks/{id}/done": "task", "/api/cards/{id}/review": "cards", "/api/ask": "ask"}
@@ -1226,5 +1280,61 @@ def setup(c) -> None:
                     return r
                 return hooked
             core.API_ROUTES[i] = (m, p, make(old, hooks[p]))
+        elif m == "GET" and p in ("/api/timetable/week", "/api/home"):
+            def make_tt_hook(old_fn, path_name):
+                @functools.wraps(old_fn)
+                async def hooked_tt(request, user):
+                    r = await old_fn(request, user)
+                    if not isinstance(r, dict) or r.get("error"):
+                        return r
+                    u = U(request, user)
+                    s_weeks = set(u.get("session_weeks") or [])
+                    s_exams = u.get("session_exams") or []
+
+                    def _fmt_ex(ex):
+                        return {
+                            "id": ex["id"],
+                            "session_exam": True,
+                            "date": ex["date"],
+                            "start": ex.get("start") or "10:00",
+                            "end": ex.get("end") or "12:00",
+                            "subject": ex.get("subject") or "Экзамен",
+                            "kind": ex.get("kind") or "Экзамен",
+                            "room": ex.get("room") or "",
+                            "teacher": ex.get("teacher") or "",
+                            "description": ex.get("notes") or "",
+                            "homework": "",
+                            "notes": ex.get("notes") or "",
+                            "parity": "all",
+                            "extra": True,
+                        }
+
+                    if path_name == "/api/timetable/week":
+                        mon = str(r.get("monday") or "")
+                        is_sess = mon in s_weeks
+                        r["is_session_week"] = is_sess
+                        r["session_weeks"] = list(s_weeks)
+                        for d_obj in r.get("days") or []:
+                            d_date = str(d_obj.get("date") or "")
+                            day_exams = [_fmt_ex(ex) for ex in s_exams if ex.get("date") == d_date]
+                            if is_sess:
+                                d_obj["lessons"] = sorted(day_exams, key=lambda x: x["start"])
+                                d_obj["cancelled"] = []
+                            elif day_exams:
+                                d_obj["lessons"] = sorted((d_obj.get("lessons") or []) + day_exams, key=lambda x: x["start"])
+                    elif path_name == "/api/home" and isinstance(r.get("today"), dict):
+                        t_date = str(r["today"].get("date") or day())[:10]
+                        dt_obj = date.fromisoformat(t_date)
+                        mon = str(dt_obj - timedelta(days=dt_obj.weekday()))
+                        is_sess = mon in s_weeks
+                        r["is_session_week"] = is_sess
+                        day_exams = [_fmt_ex(ex) for ex in s_exams if ex.get("date") == t_date]
+                        if is_sess:
+                            r["today"]["lessons"] = sorted(day_exams, key=lambda x: x["start"])
+                        elif day_exams:
+                            r["today"]["lessons"] = sorted((r["today"].get("lessons") or []) + day_exams, key=lambda x: x["start"])
+                    return r
+                return hooked_tt
+            core.API_ROUTES[i] = (m, p, make_tt_hook(old, p))
 
     core.API_ROUTES.extend(routes)
