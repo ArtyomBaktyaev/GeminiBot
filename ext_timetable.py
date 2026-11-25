@@ -10,7 +10,9 @@
 
 Модуль не импортирует bot.py: всё нужное приходит через setup(core).
 """
+import base64
 import re
+import secrets
 import time as _time
 from contextlib import suppress
 from datetime import date, datetime, time, timedelta
@@ -31,37 +33,162 @@ MONTHS = ["января", "февраля", "марта", "апреля", "ма�
           "ноября", "декабря"]
 PARITY_NAME = {"odd": "нечётная неделя", "even": "чётная неделя"}
 
-ST: dict = {}
-PENDING: dict = {}  # черновик расписания, ожидающий подтверждения
-
-
 def default_state() -> dict:
-    return {"lessons": [], "exceptions": [], "next_id": 1, "next_exc": 1, "anchor": "", "digest_on": True,
-            "digest_hour": 8, "remind_min": 30, "owner": 0, "sent": {}}
+    return {"lessons": [], "exceptions": [], "next_id": 1, "next_exc": 1, "anchor": "", "digest_on": False,
+            "digest_hour": 8, "remind_min": 0, "owner": 0, "sent": {}}
+
+
+ST: dict = default_state()
+PENDING: dict = {}  # черновики расписания по аккаунтам
 
 
 def load() -> None:
     # Загружаем настройки из файла через core
     data = core.load_json(FILE, {})
     ST.clear()
-    ST.update(data)
+    state = default_state()
+    if isinstance(data, dict):
+        state.update(data)
+    ST.update(state)
 
 def save() -> None:
-    core.save_json(FILE, ST)
+    core.save_plugin_state(FILE, ST)
+
 
 def get_current_st() -> dict:
-    """Возвращает расписание, привязанное к текущему активному аккаунту."""
-    # Получаем ID активного аккаунта из модуля ext_webapp, если он есть, иначе дефолт
-    acc_id = "default"
-    try:
-        import ext_webapp
-        acc_id = getattr(ext_webapp, "ACTIVE_ACCOUNT_ID", "default")
-    except Exception:
-        pass
+    return core.profile_plugin_state("timetable", ST, default_state)
 
-    if acc_id not in ST:
-        ST[acc_id] = default_state()
-    return ST[acc_id]
+
+def get_pending() -> dict:
+    account = core.CURRENT_ACCOUNT.get()
+    return PENDING.setdefault(account["id"] if account else None, {})
+
+
+def subscription():
+    ref = get_current_st().get("following") or {}
+    owner = core.USER_SETTINGS.get("accounts", {}).get(ref.get("id"))
+    if owner and ref.get("code") and owner.get("timetable_invite") == ref["code"]:
+        return owner
+    return None
+
+
+def grid():
+    owner = subscription()
+    if owner is None:
+        return get_current_st()
+    # Read the publisher's own grid, never subscriptions, notes or settings.
+    with core.timetable_account_context({"id": owner["tg_id"]}, owner):
+        return get_current_st()
+
+
+def grid_id():
+    account = subscription() or core.CURRENT_ACCOUNT.get() or {}
+    return account.get("id", "")
+
+
+def public_lesson(lesson):
+    fields = ("id", "weekday", "start", "end", "subject", "room", "teacher", "kind", "parity")
+    return {k: lesson[k] for k in fields if k in lesson}
+
+
+def share_info():
+    owner = subscription()
+    return {"following": bool(owner), "source": grid_id(),
+            "publisher": owner.get("name", "") if owner else "",
+            "notify_changes": bool((get_current_st().get("following") or {}).get("notify")),
+            "published": bool((core.CURRENT_ACCOUNT.get() or {}).get("timetable_invite"))}
+
+
+async def api_share(request, user):
+    body = await request.json()
+    action = body.get("action")
+    account = core.CURRENT_ACCOUNT.get()
+    state = get_current_st()
+    if action == "publish":
+        if subscription():
+            raise ValueError("Можно поделиться только собственным расписанием")
+        if not core.BOT_USERNAME or not core.webapp_url():
+            raise ValueError("Ссылка появится после подключения бота и адреса мини-приложения")
+        if not state["lessons"] and not state["exceptions"]:
+            raise ValueError("Сначала добавьте пару в расписание")
+        if not account.get("timetable_invite"):
+            account["timetable_invite"] = secrets.token_urlsafe(18)
+            core.save_json(core.SETTINGS_FILE, core.USER_SETTINGS)
+        return {"url": f"https://t.me/{core.BOT_USERNAME}?start=tt_{account['timetable_invite']}"}
+    if action == "revoke":
+        account.pop("timetable_invite", None)
+        core.save_json(core.SETTINGS_FILE, core.USER_SETTINGS)
+    elif action == "leave":
+        state.pop("following", None)
+        save()
+    elif action in ("preview", "follow"):
+        token = body.get("code")
+        if not isinstance(token, str) or not re.fullmatch(r"[A-Za-z0-9_-]{24}", token):
+            raise ValueError("Ссылка недействительна")
+        owner = next((a for a in core.USER_SETTINGS["accounts"].values()
+                      if a.get("timetable_invite") == token), None)
+        if not owner:
+            raise ValueError("Ссылка отозвана или устарела")
+        if owner["id"] == account["id"]:
+            raise ValueError("Это ваше расписание")
+        if action == "preview":
+            return {"publisher": owner.get("name") or "Одногруппник"}
+        with core.timetable_account_context({"id": owner["tg_id"]}, owner):
+            seq = get_current_st().get("change_seq", 0)
+        state["following"] = {"id": owner["id"], "code": token, "seen": seq, "notify": body.get("notify") is True}
+        save()
+    else:
+        raise ValueError("Неизвестное действие")
+    return share_info()
+
+
+def material_key(source, day, lesson):
+    occurrence = f"x{lesson['exc_id']}" if lesson.get("exc_id") else str(lesson["id"])
+    return f"{source}/{day.isoformat()}/{occurrence}"
+
+
+async def api_materials(request, user):
+    body = request.query if request.method == "GET" else await request.json()
+    day = parse_date(body.get("date"))
+    source = grid_id()
+    if not day or body.get("source") != source:
+        raise ValueError("Расписание изменилось. Откройте пару заново")
+    pair = next((l for l in lessons_on(day) if l.get("id") == int(body.get("id") or 0)
+                 and int(l.get("exc_id") or 0) == int(body.get("exc_id") or 0)), None)
+    if pair is None:
+        raise ValueError("В этот день такой пары уже нет")
+    records = get_current_st().setdefault("materials", {})
+    key = material_key(source, day, pair)
+    current = records.get(key, {})
+    if request.method == "GET":
+        return current
+    if body.get("revision", 0) != current.get("revision", 0):
+        raise ValueError("Материалы уже изменены. Откройте пару заново")
+    value = {k: str(body.get(k) or "").strip() for k in ("description", "homework", "notes")}
+    if any(len(t) > 16000 for t in value.values()):
+        raise ValueError("До 16 000 символов в одном поле")
+    files = body.get("files", [])
+    if not isinstance(files, list) or len(files) > 8:
+        raise ValueError("До восьми файлов на занятие")
+    value["files"] = []
+    total = 0
+    for f in files:
+        data = f.get("data", "") if isinstance(f, dict) else ""
+        if not isinstance(data, str):
+            raise ValueError("Некорректный файл")
+        header, _, encoded = data.partition(",")
+        if not re.fullmatch(r"data:[\w.+/-]*;base64", header):
+            raise ValueError("Некорректный файл")
+        total += len(encoded)
+        if total > 4 * 1024 * 1024:
+            raise ValueError("Общий размер файлов на занятие — до 3 МБ")
+        size = len(base64.b64decode(encoded, validate=True))
+        value["files"].append({"name": str(f.get("name") or "Файл")[:180], "type": header[5:-7],
+                               "size": size, "data": data})
+    value["revision"] = current.get("revision", 0) + 1
+    records[key] = value
+    save()
+    return value
 
 
 # ======================================================================
@@ -147,7 +274,7 @@ def monday(d: date) -> date:
 
 
 def parity_of(d: date) -> Optional[str]:
-    s = get_current_st()
+    s = grid()
     if not s.get("anchor"):
         return None
     a = parse_date(s["anchor"])
@@ -164,32 +291,39 @@ def set_current_parity(parity: str) -> None:
 
 
 def lessons_on(d: date) -> list:
-    s = get_current_st()
+    s = grid()
     par = parity_of(d)
     iso = d.isoformat()
-    cancelled = {e.get("lesson_id") for e in s["exceptions"] if e["date"] == iso and e["kind"] == "cancel"}
+    exceptions = s.get("exceptions") or []
+    lessons = s.get("lessons") or []
+    cancelled = {e.get("lesson_id") for e in exceptions if isinstance(e, dict) and e.get("date") == iso and e.get("kind") == "cancel"}
     out = []
-    for l in s["lessons"]:
-        if l["weekday"] != d.weekday() or l["id"] in cancelled:
+    for l in lessons:
+        if not isinstance(l, dict):
             continue
-        if l["parity"] != "all" and par is not None and l["parity"] != par:
+        if l.get("weekday") != d.weekday() or l.get("id") in cancelled:
             continue
-        x = dict(l)
-        x["unsure_parity"] = l["parity"] != "all" and par is None
+        if l.get("parity") != "all" and par is not None and l.get("parity") != par:
+            continue
+        x = public_lesson(l)
+        x["unsure_parity"] = l.get("parity") != "all" and par is None
         out.append(x)
-    for e in s["exceptions"]:
-        if e["date"] == iso and e["kind"] == "add":
-            x = dict(e["lesson"])
-            x.update({"extra": True, "id": 0, "exc_id": e["id"]})
+    for e in exceptions:
+        if isinstance(e, dict) and e.get("date") == iso and e.get("kind") == "add" and isinstance(e.get("lesson"), dict):
+            x = public_lesson(e["lesson"])
+            x.update({"extra": True, "id": 0, "exc_id": e.get("id", 0)})
             out.append(x)
-    out.sort(key=lambda l: l["start"])
+    out.sort(key=lambda l: l.get("start", ""))
     return out
 
 
 def cancelled_on(d: date) -> list:
+    s = grid()
     iso = d.isoformat()
-    ids = {e.get("lesson_id") for e in ST["exceptions"] if e["date"] == iso and e["kind"] == "cancel"}
-    return [l for l in ST["lessons"] if l["id"] in ids]
+    exceptions = s.get("exceptions") or []
+    lessons = s.get("lessons") or []
+    ids = {e.get("lesson_id") for e in exceptions if isinstance(e, dict) and e.get("date") == iso and e.get("kind") == "cancel"}
+    return [public_lesson(l) for l in lessons if isinstance(l, dict) and l.get("id") in ids]
 
 
 def day_title(d: date) -> str:
@@ -307,6 +441,14 @@ def lessons_overview(lessons: list, with_ids: bool = False) -> str:
 # ======================================================================
 # Операции над данными (используются и ботом, и мини-приложением)
 # ======================================================================
+def record_change(state, text):
+    seq = state.get("change_seq", 0) + 1
+    state["change_seq"] = seq
+    entries = state.setdefault("changes", [])
+    entries.append({"seq": seq, "text": text})
+    del entries[:-20]
+
+
 def add_lessons(items: list, merge_dupes: bool = True) -> list:
     s = get_current_st()
     added = []
@@ -322,6 +464,7 @@ def add_lessons(items: list, merge_dupes: bool = True) -> list:
         s["next_id"] += 1
         s["lessons"].append(l)
         added.append(l)
+        record_change(s, f"Добавлена пара: {l['subject']} · {DAYS_SHORT[l['weekday']]} {l['start']}")
     return added
 
 
@@ -331,12 +474,15 @@ def update_lesson(lid: int, fields: dict) -> Optional[dict]:
         if l["id"] == lid:
             merged = dict(l)
             for k, v in fields.items():
-                if v not in (None, ""):
+                if v is not None and (v != "" or k in ("room", "teacher", "kind")):
                     merged[k] = v
             new = clean_lesson(merged)
             if not new:
                 return None
             new["id"] = lid
+            if new != l:
+                record_change(s, f"Изменена пара: {new['subject']} · {DAYS_SHORT[new['weekday']]} {new['start']}" +
+                              (f" · ауд. {new['room']}" if new["room"] else ""))
             l.clear()
             l.update(new)
             return l
@@ -346,6 +492,9 @@ def update_lesson(lid: int, fields: dict) -> Optional[dict]:
 def delete_lesson(lid: int) -> bool:
     s = get_current_st()
     before = len(s["lessons"])
+    for l in s["lessons"]:
+        if l["id"] == lid:
+            record_change(s, f"Удалена пара: {l['subject']} · {DAYS_SHORT[l['weekday']]} {l['start']}")
     s["lessons"] = [l for l in s["lessons"] if l["id"] != lid]
     s["exceptions"] = [e for e in s["exceptions"] if e.get("lesson_id") != lid]
     return len(s["lessons"]) != before
@@ -370,12 +519,18 @@ def add_exception(d: date, kind: str, lesson_id: int = 0, lesson: Optional[dict]
         exc["lesson"] = l
     s["next_exc"] += 1
     s["exceptions"].append(exc)
+    changed = exc.get("lesson") or next(l for l in s["lessons"] if l["id"] == lesson_id)
+    label = "Отменена пара" if kind == "cancel" else "Добавлена пара"
+    record_change(s, f"{label}: {changed['subject']} · {d:%d.%m} {changed['start']}")
     return exc
 
 
 def delete_exception(exc_id: int) -> bool:
     s = get_current_st()
     before = len(s["exceptions"])
+    for exc in s["exceptions"]:
+        if exc["id"] == exc_id:
+            record_change(s, f"Отменено разовое изменение на {exc['date']}")
     s["exceptions"] = [e for e in s["exceptions"] if e["id"] != exc_id]
     return len(s["exceptions"]) != before
 
@@ -412,14 +567,15 @@ def _ics_escape(s: str) -> str:
 
 
 def build_ics() -> bytes:
+    state = grid()
     stamp = core.now_local().strftime("%Y%m%dT%H%M%S")
     lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//GeminiBot//Timetable//RU", "CALSCALE:GREGORIAN",
              "X-WR-CALNAME:Расписание пар"]
     base = monday(today())
-    for l in ST["lessons"]:
+    for l in state["lessons"]:
         d = base + timedelta(days=l["weekday"])
         interval, count = 1, 26
-        if l["parity"] != "all" and ST.get("anchor"):
+        if l["parity"] != "all" and state.get("anchor"):
             interval, count = 2, 13
             if parity_of(d) != l["parity"]:
                 d += timedelta(days=7)
@@ -445,7 +601,7 @@ def build_ics() -> bytes:
 # ======================================================================
 async def _private_ok(message) -> bool:
     uid = message.from_user.id if message.from_user else None
-    return message.chat.type == "private" and core.is_allowed(message) and core.is_primary_user(uid)
+    return message.chat.type == "private" and bool(uid) and core.CURRENT_ACCOUNT.get() is not None
 
 
 async def show_day(message, d: date) -> None:
@@ -468,23 +624,25 @@ async def cmd_week(message):
 
 
 async def cmd_schedule(message):
+    state = grid()
     if not await _private_ok(message):
         return
-    if not ST["lessons"]:
+    if not state["lessons"]:
         await message.answer("Расписание пока пустое. Пришли фото, скриншот, PDF или текст со своими парами — "
                              "я разберу и сохраню.")
         return
     par = parity_of(today())
     await message.answer(f"📚 <b>Моё расписание</b>" + (f" · сейчас {PARITY_NAME[par]}" if par else "")
-                         + "\n\n" + lessons_overview(ST["lessons"], with_ids=True)
+                         + "\n\n" + lessons_overview(state["lessons"], with_ids=True)
                          + "\n\nИзменить можно словами: «перенеси физику на среду на 11:30», «завтра первой пары нет».",
                          reply_markup=day_kb(today()), parse_mode=ParseMode.HTML)
 
 
 async def cmd_ics(message):
+    state = grid()
     if not await _private_ok(message):
         return
-    if not ST["lessons"]:
+    if not state["lessons"]:
         await message.answer("Расписание пустое — экспортировать нечего.")
         return
     await message.answer_document(BufferedInputFile(build_ics(), filename="raspisanie.ics"),
@@ -526,6 +684,8 @@ def pending_kb() -> InlineKeyboardMarkup:
 
 
 async def cb_pending(call):
+    pending = get_pending()
+    state = get_current_st()
     action = call.data
     if action == "tt_fix":
         await call.message.answer("Напиши, что поправить, например: «в пятницу вместо физики информатика» или "
@@ -533,28 +693,28 @@ async def cb_pending(call):
         await call.answer()
         return
     if action == "tt_no":
-        PENDING.clear()
+        pending.clear()
         with suppress(Exception):
             await call.message.edit_reply_markup(reply_markup=None)
         await call.message.answer("Хорошо, расписание не менял.")
         await call.answer()
         return
-    if not PENDING.get("lessons"):
+    if not pending.get("lessons"):
         await call.answer("Черновика уже нет — пришли расписание ещё раз", show_alert=True)
         return
-    if PENDING.get("mode") == "replace":
-        ST["lessons"] = []
-        ST["exceptions"] = []
-    added = add_lessons(PENDING["lessons"], merge_dupes=PENDING.get("mode") != "replace")
-    if PENDING.get("parity") in ("odd", "even"):
-        set_current_parity(PENDING["parity"])
+    if pending.get("mode") == "replace":
+        state["lessons"] = []
+        state["exceptions"] = []
+    added = add_lessons(pending["lessons"], merge_dupes=pending.get("mode") != "replace")
+    if pending.get("parity") in ("odd", "even"):
+        set_current_parity(pending["parity"])
     if not core.ADMIN_IDS:
-        ST["owner"] = call.message.chat.id
-    PENDING.clear()
+        state["owner"] = call.message.chat.id
+    pending.clear()
     save()
     with suppress(Exception):
         await call.message.edit_reply_markup(reply_markup=None)
-    note = "" if ST.get("anchor") or not any(l["parity"] != "all" for l in ST["lessons"]) else \
+    note = "" if state.get("anchor") or not any(l["parity"] != "all" for l in state["lessons"]) else \
         "\n\n⚠️ В расписании есть чётные/нечётные недели. Скажи, какая неделя сейчас («сейчас нечётная»)."
     await call.message.answer(f"✅ Сохранено пар: {len(added)}.{note}\n\n" + format_day(today()),
                               reply_markup=day_kb(today()), parse_mode=ParseMode.HTML)
@@ -633,6 +793,7 @@ def _items(val) -> list:
 
 
 async def t_save_schedule(message, scope, is_private, args, origin) -> str:
+    pending = get_pending()
     if not is_private:
         await message.reply("Расписание сохраняю только в личных сообщениях.")
         return "[расписание: только в личке]"
@@ -642,8 +803,8 @@ async def t_save_schedule(message, scope, is_private, args, origin) -> str:
                             "фото или текстом.")
         return "[расписание не распознано]"
     mode = "merge" if args.get("mode") == "merge" else "replace"
-    PENDING.clear()
-    PENDING.update({"lessons": cleaned, "mode": mode, "chat": message.chat.id,
+    pending.clear()
+    pending.update({"lessons": cleaned, "mode": mode, "chat": message.chat.id,
                     "parity": args.get("current_week_parity") if args.get("current_week_parity") in ("odd", "even") else ""})
     text = (f"🔎 Вот что я разобрал ({len(cleaned)} пар, режим: {'замена' if mode == 'replace' else 'добавление'}):\n\n"
             + lessons_overview(cleaned) + "\n\nВсё верно?")
@@ -686,6 +847,7 @@ async def t_edit_schedule(message, scope, is_private, args, origin) -> str:
 
 
 async def t_schedule_exception(message, scope, is_private, args, origin) -> str:
+    state = get_current_st()
     d = parse_date(args.get("date"))
     action = args.get("action")
     if not d or action not in ("cancel", "move", "add"):
@@ -701,10 +863,10 @@ async def t_schedule_exception(message, scope, is_private, args, origin) -> str:
         for t in targets:
             exc = add_exception(d, "cancel", lesson_id=t)
             if exc:
-                lesson = next(l for l in ST["lessons"] if l["id"] == t)
+                lesson = next(l for l in state["lessons"] if l["id"] == t)
                 done.append(f"❌ отменена: {lesson['subject']} ({lesson['start']})")
     elif action == "move":
-        src = next((l for l in ST["lessons"] if l["id"] == lid), None)
+        src = next((l for l in state["lessons"] if l["id"] == lid), None)
         if src:
             new = dict(src)
             for k in ("start", "end", "room", "teacher", "kind", "subject"):
@@ -756,25 +918,26 @@ async def t_set_week_parity(message, scope, is_private, args, origin) -> str:
 
 
 async def t_settings(message, scope, is_private, args, origin) -> str:
+    state = get_current_st()
     changes = []
     if "digest_on" in args and args["digest_on"] is not None:
-        ST["digest_on"] = bool(args["digest_on"])
-        changes.append("утренняя сводка " + ("включена" if ST["digest_on"] else "выключена"))
+        state["digest_on"] = bool(args["digest_on"])
+        changes.append("утренняя сводка " + ("включена" if state["digest_on"] else "выключена"))
     if args.get("digest_hour") is not None:
         with suppress(TypeError, ValueError):
             h = int(float(args["digest_hour"]))
             if 0 <= h <= 23:
-                ST["digest_hour"] = h
-                ST["digest_on"] = True
+                state["digest_hour"] = h
+                state["digest_on"] = True
                 changes.append(f"сводка в {h:02d}:00")
     if args.get("remind_minutes") is not None:
         with suppress(TypeError, ValueError):
             m = int(float(args["remind_minutes"]))
             if 0 <= m <= 180:
-                ST["remind_min"] = m
+                state["remind_min"] = m
                 changes.append("напоминания перед парой выключены" if m == 0 else f"напоминание за {m} мин до пары")
-    if not ST["owner"] and not core.ADMIN_IDS:
-        ST["owner"] = message.chat.id
+    if not state["owner"] and not core.ADMIN_IDS:
+        state["owner"] = message.chat.id
     if not changes:
         await message.reply("Не понял, что настроить. Например: «присылай сводку в 7 утра» или «напоминай за 15 минут».")
         return "[настройки не изменены]"
@@ -784,10 +947,12 @@ async def t_settings(message, scope, is_private, args, origin) -> str:
 
 
 def prompt_hook(scope, is_private) -> str:
+    pending = get_pending()
+    state = get_current_st()
     if not is_private:
         return ""
     lines = []
-    for l in sorted(ST["lessons"], key=lambda x: (x["weekday"], x["start"]))[:90]:
+    for l in sorted(state["lessons"], key=lambda x: (x["weekday"], x["start"]))[:90]:
         par = {"odd": " [нечёт.]", "even": " [чёт.]"}.get(l["parity"], "")
         lines.append(f"#{l['id']} {DAYS_SHORT[l['weekday']]} {l['start']}–{l['end']} {l['subject']}"
                      + (f", ауд. {l['room']}" if l["room"] else "") + (f", {l['teacher']}" if l["teacher"] else "")
@@ -807,10 +972,10 @@ def prompt_hook(scope, is_private) -> str:
         f"Неделя сейчас: {PARITY_NAME[par_now] if par_now else 'неизвестно (спроси, если в расписании есть чёт/нечёт)'}.",
         "ТЕКУЩЕЕ РАСПИСАНИЕ:\n" + ("\n".join(lines) if lines else "пока не сохранено"),
     ]
-    if PENDING.get("lessons"):
+    if pending.get("lessons"):
         draft = [f"{DAYS_SHORT[l['weekday']]} {l['start']}–{l['end']} {l['subject']}"
                  + (f", ауд. {l['room']}" if l["room"] else "") + (f", {l['teacher']}" if l["teacher"] else "")
-                 + (f" [{l['parity']}]" if l["parity"] != "all" else "") for l in PENDING["lessons"][:90]]
+                 + (f" [{l['parity']}]" if l["parity"] != "all" else "") for l in pending["lessons"][:90]]
         parts.append("ЧЕРНОВИК, ожидающий подтверждения (правки к нему вноси повторным save_schedule с ПОЛНЫМ "
                      "исправленным списком):\n" + "\n".join(draft))
     return "\n".join(parts)
@@ -819,19 +984,22 @@ def prompt_hook(scope, is_private) -> str:
 # ======================================================================
 # Сводка и напоминания (вызывается планировщиком бота)
 # ======================================================================
-def owner_chats() -> list:
-    if core.ADMIN_IDS:
-        return list(core.ADMIN_IDS)
-    return [ST["owner"]] if ST.get("owner") else []
-
-
 def build_digest() -> str:
     esc = core.esc
     d = today()
-    out = ["☀️ <b>Доброе утро!</b>", "", format_day(d, with_next=False)]
+    lessons = lessons_on(d)
+    if lessons:
+        first = lessons[0]
+        room = f" · ауд. {esc(first['room'])}" if first.get("room") else ""
+        intro = f"☀️ Сегодня первая пара в <b>{first['start']}</b> — <b>{esc(first['subject'])}</b>{room}."
+    else:
+        intro = "☀️ Сегодня пар нет."
+    out = [intro, "", format_day(d, with_next=False)]
     soon = []
     now = core.now_local()
     for t in core.active_tasks():
+        if not core.account_owns_task(core.CURRENT_ACCOUNT.get(), t):
+            continue
         dl = core.parse_deadline(t.get("deadline"))
         if dl and dl <= now + timedelta(days=2):
             when = "🔴 просрочено" if dl < now else f"до {dl:%d.%m %H:%M}"
@@ -847,45 +1015,56 @@ def build_digest() -> str:
     return "\n".join(out)
 
 
-async def _send_all(text: str, kb=None) -> None:
-    for chat in owner_chats():
-        try:
-            await core.bot.send_message(chat, text, parse_mode=ParseMode.HTML, reply_markup=kb,
-                                        disable_notification=False)
-        except Exception as e:
-            core.log.warning("Расписание: не удалось отправить в %s: %s", chat, e)
-
-
 async def tick() -> None:
+    for account in list(core.USER_SETTINGS.get("accounts", {}).values()):
+        uid = account.get("tg_id")
+        if not uid:
+            continue
+        with core.timetable_account_context({"id": uid}, account):
+            state = get_current_st()
+            if not (state.get("lessons") or state.get("exceptions") or subscription() or state.get("owner") or core.is_primary_user(uid)):
+                continue
+            try:
+                await tick_account(uid, state)
+            except Exception:
+                core.log.exception("Не удалось отправить уведомление расписания")
+
+
+async def tick_account(uid, state):
     now = core.now_local()
     iso = now.date().isoformat()
-    sent = ST["sent"]
+    following = state.get("following", {})
+    if following.get("notify") and subscription():
+        pending = [c for c in grid().get("changes", []) if c["seq"] > following.get("seen", 0)]
+        if pending:
+            lines = [c["text"] for c in pending[-8:]]
+            await core.bot.send_message(uid, "Изменения в расписании группы\n\n" + "\n".join(lines))
+            following["seen"] = pending[-1]["seq"]
+            save()
+    if "sent" not in state or not isinstance(state["sent"], dict):
+        state["sent"] = {}
+    sent = state["sent"]
     stale = [k for k in sent if not k.startswith(iso)]
     for k in stale:
         del sent[k]
     changed = bool(stale)
-    if not owner_chats():
-        if changed:
-            save()
-        return
-    if ST["digest_on"] and ST["digest_hour"] <= now.hour < ST["digest_hour"] + 3 and f"{iso}:digest" not in sent:
+    if state.get("digest_on") and state.get("digest_hour", 8) <= now.hour < state.get("digest_hour", 8) + 3 and f"{iso}:digest" not in sent:
+        await core.bot.send_message(uid, build_digest(), reply_markup=day_kb(now.date()), parse_mode="HTML")
         sent[f"{iso}:digest"] = 1
         changed = True
-        if ST["lessons"] or True:
-            await _send_all(build_digest(), day_kb(now.date()))
-    mins = int(ST.get("remind_min") or 0)
+    mins = int(state.get("remind_min") or 0)
     if mins > 0:
         for l in lessons_on(now.date()):
-            key = f"{iso}:{l['id'] or 'x' + str(l.get('exc_id'))}:{l['start']}"
+            key = f"{iso}:{l.get('id') or 'x' + str(l.get('exc_id'))}:{l.get('start', '')}"
             if key in sent:
                 continue
             h, m = map(int, l["start"].split(":"))
             left = (datetime.combine(now.date(), time(h, m), tzinfo=now.tzinfo) - now).total_seconds() / 60
             if 0 < left <= mins:
+                room = f" · ауд. {core.esc(l['room'])}" if l.get("room") else ""
+                await core.bot.send_message(uid, f"⏰ Через {int(left + 0.5)} мин: <b>{core.esc(l['subject'])}</b> в {l['start']}{room}", parse_mode="HTML")
                 sent[key] = 1
                 changed = True
-                room = f" · ауд. {core.esc(l['room'])}" if l.get("room") else ""
-                await _send_all(f"⏰ Через {int(left + 0.5)} мин: <b>{core.esc(l['subject'])}</b> в {l['start']}{room}")
     if changed:
         save()
 
@@ -896,14 +1075,30 @@ async def tick() -> None:
 def api_snapshot() -> dict:
     s = get_current_st()
     t = today()
-    return {"lessons": s["lessons"], "exceptions": [e for e in s["exceptions"] if e["date"] >= (t - timedelta(days=7)).isoformat()],
-            "anchor": s.get("anchor", ""), "parity_now": parity_of(t), "today": t.isoformat(),
+    timetable = grid()
+    exceptions = []
+    for e in timetable["exceptions"]:
+        if e["date"] >= (t - timedelta(days=7)).isoformat():
+            public = {k: e[k] for k in ("id", "date", "kind", "lesson_id") if k in e}
+            if e.get("lesson"):
+                public["lesson"] = public_lesson(e["lesson"])
+            exceptions.append(public)
+    return {"lessons": [public_lesson(l) for l in timetable["lessons"]], "exceptions": exceptions,
+            "sharing": share_info(), "anchor": timetable.get("anchor", ""), "parity_now": parity_of(t), "today": t.isoformat(),
             "settings": {"digest_on": s["digest_on"], "digest_hour": s["digest_hour"], "remind_min": s["remind_min"]}}
 
 
 def day_payload(d: date) -> dict:
+    lessons = lessons_on(d)
+    source = grid_id()
+    records = get_current_st().get("materials", {})
+    for l in lessons:
+        meta = records.get(material_key(source, d, l), {})
+        l.update(source=source, date=d.isoformat(), homework=meta.get("homework", ""),
+                 description=meta.get("description", ""), has_notes=bool(meta.get("notes")),
+                 file_count=len(meta.get("files", [])), shared=bool(subscription()))
     return {"date": d.isoformat(), "title": day_title(d), "weekday": d.weekday(), "parity": parity_of(d),
-            "lessons": lessons_on(d), "cancelled": cancelled_on(d)}
+            "lessons": lessons, "cancelled": cancelled_on(d)}
 
 
 async def api_timetable(request, user):
@@ -918,11 +1113,13 @@ async def api_day(request, user):
 async def api_week(request, user):
     d = parse_date(request.query.get("date")) or today()
     mon = monday(d)
-    return {"monday": mon.isoformat(), "parity": parity_of(mon),
+    return {"monday": mon.isoformat(), "sharing": share_info(), "parity": parity_of(mon),
             "days": [day_payload(mon + timedelta(days=i)) for i in range(7)]}
 
 
 async def api_lesson_save(request, user):
+    if subscription():
+        raise ValueError("Сетку пар может менять только автор расписания")
     body = await request.json()
     lid = int(body.get("id") or 0)
     if lid:
@@ -942,12 +1139,16 @@ async def api_lesson_save(request, user):
 
 
 async def api_lesson_delete(request, user):
+    if subscription():
+        raise ValueError("Сетку пар может менять только автор расписания")
     ok = delete_lesson(int(request.match_info["id"]))
     save()
     return {"ok": ok}
 
 
 async def api_exception_save(request, user):
+    if subscription():
+        raise ValueError("Сетку пар может менять только автор расписания")
     body = await request.json()
     d = parse_date(body.get("date"))
     kind = body.get("kind")
@@ -961,6 +1162,8 @@ async def api_exception_save(request, user):
 
 
 async def api_exception_delete(request, user):
+    if subscription():
+        raise ValueError("Сетку пар может менять только автор расписания")
     ok = delete_exception(int(request.match_info["id"]))
     save()
     return {"ok": ok}
@@ -968,17 +1171,23 @@ async def api_exception_delete(request, user):
 
 async def api_settings(request, user):
     body = await request.json()
+    state = get_current_st()
+    if subscription() and "notify_changes" in body:
+        following = state["following"]
+        if body["notify_changes"] and not following.get("notify"):
+            following["seen"] = grid().get("change_seq", 0)
+        following["notify"] = bool(body["notify_changes"])
     if "digest_on" in body:
-        ST["digest_on"] = bool(body["digest_on"])
+        state["digest_on"] = bool(body["digest_on"])
     if "digest_hour" in body:
         h = int(body["digest_hour"])
         if 0 <= h <= 23:
-            ST["digest_hour"] = h
+            state["digest_hour"] = h
     if "remind_min" in body:
         m = int(body["remind_min"])
         if 0 <= m <= 180:
-            ST["remind_min"] = m
-    if body.get("parity") in ("odd", "even"):
+            state["remind_min"] = m
+    if not subscription() and body.get("parity") in ("odd", "even"):
         set_current_parity(body["parity"])
     save()
     return {"ok": True, **api_snapshot()}
@@ -1000,6 +1209,9 @@ def setup(c) -> None:
     core.PLUGIN_PROMPT.append(prompt_hook)
     core.PLUGIN_TICKS.append(tick)
     core.API_ROUTES.extend([
+        ("POST", "/api/timetable/share", api_share),
+        ("GET", "/api/timetable/materials", api_materials),
+        ("POST", "/api/timetable/materials", api_materials),
         ("GET", "/api/timetable", api_timetable), ("GET", "/api/timetable/day", api_day),
         ("GET", "/api/timetable/week", api_week), ("POST", "/api/timetable/lesson", api_lesson_save),
         ("DELETE", "/api/timetable/lesson/{id}", api_lesson_delete),

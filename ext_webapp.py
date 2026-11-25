@@ -18,6 +18,7 @@ import re
 import sys
 import time
 import uuid
+from contextlib import contextmanager
 from typing import Optional
 from urllib.parse import parse_qsl, quote
 
@@ -27,6 +28,8 @@ from aiogram.types import (
     BotCommand,
     BotCommandScopeAllPrivateChats,
     KeyboardButton,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
     ReplyKeyboardMarkup,
     WebAppInfo,
 )
@@ -39,12 +42,7 @@ INDEX = os.path.join(HERE, "webapp", "index.html")
 APP_CHATS: dict = {}        # account_id -> list of chat messages
 GENERATED_FILES: dict = {}  # file_id -> {"data": bytes, "name": str, "mime": str, "ts": float}
 USER_POOLS: dict = {}       # account_id -> (keys_tuple, KeyPool)
-ACTIVE_ACCOUNT_ID: str = "default"
 LATEX_RE = re.compile(r"\$\$(.+?)\$\$|\\\[(.+?)\\\]|\\\((.+?)\\\)|\$(?!\s)([^$\n]+?)(?<!\s)\$", re.S)
-
-
-def _admin_token(uid: int) -> str:
-    return hmac.new(core.TELEGRAM_BOT_TOKEN.encode(), f"webapp_admin_{uid}".encode(), hashlib.sha256).hexdigest()[:24]
 
 
 def validate_init_data(init_data: str, token: str, max_age: int = 86400 * 7) -> Optional[dict]:
@@ -52,7 +50,10 @@ def validate_init_data(init_data: str, token: str, max_age: int = 86400 * 7) -> 
     try:
         if not init_data:
             return None
-        parsed = dict(parse_qsl(init_data, keep_blank_values=True))
+        fields = parse_qsl(init_data, keep_blank_values=True, strict_parsing=True)
+        parsed = dict(fields)
+        if len(parsed) != len(fields):
+            return None
         got = parsed.pop("hash", "")
         if not got:
             return None
@@ -61,11 +62,14 @@ def validate_init_data(init_data: str, token: str, max_age: int = 86400 * 7) -> 
         calc = hmac.new(secret, check.encode(), hashlib.sha256).hexdigest()
         if not hmac.compare_digest(calc, got):
             return None
-        auth_date = int(parsed.get("auth_date", "0") or 0)
-        if auth_date and abs(time.time() - auth_date) > max_age:
+        auth_date = int(parsed.get("auth_date", "0"))
+        if auth_date <= 0 or abs(time.time() - auth_date) > max_age:
             return None
-        return json.loads(parsed.get("user", "{}"))
-    except Exception:
+        user = json.loads(parsed.get("user", "null"))
+        if not isinstance(user, dict) or type(user.get("id")) is not int or user["id"] <= 0:
+            return None
+        return user
+    except (ValueError, TypeError):
         return None
 
 
@@ -83,20 +87,27 @@ def _mask_key(raw: str) -> str:
 
 
 def is_user_admin(uid: int) -> bool:
-    if not getattr(core, "ADMIN_IDS", None):
-        return True
-    raw = core.ADMIN_IDS
-    if isinstance(raw, (str, int)):
-        raw = [raw]
-    admin_ids = set()
-    for x in raw:
-        for part in str(x).replace(",", " ").split():
-            clean = part.strip().lstrip("-")
-            if clean.isdigit():
-                admin_ids.add(int(part.strip()))
-    if not admin_ids:
-        return True
-    return int(uid) in admin_ids
+    if not uid:
+        return False
+    if getattr(core, "ADMIN_IDS", None):
+        raw = core.ADMIN_IDS
+        if isinstance(raw, (str, int)):
+            raw = [raw]
+        admin_ids = set()
+        for x in raw:
+            for part in str(x).replace(",", " ").split():
+                clean = part.strip().lstrip("-")
+                if clean.isdigit():
+                    admin_ids.add(int(part.strip()))
+        if admin_ids:
+            return int(uid) in admin_ids
+    # Если ADMIN_IDS в .env пуст, владельцем считается первый аккаунт в settings.json
+    accs = core.USER_SETTINGS.get("accounts", {})
+    if accs:
+        first_acc = next(iter(accs.values()))
+        if first_acc.get("tg_id") and int(first_acc["tg_id"]) == int(uid):
+            return True
+    return False
 
 
 # =====================================================================
@@ -105,8 +116,13 @@ def is_user_admin(uid: int) -> bool:
 def ensure_accounts_store() -> dict:
     s = core.USER_SETTINGS
     accs = s.setdefault("accounts", {})
+    first_admin = 0
+    if getattr(core, "ADMIN_IDS", None):
+        for part in core.ADMIN_IDS:
+            if str(part).strip().lstrip("-").isdigit():
+                first_admin = int(str(part).strip())
+                break
     if not accs:
-        first_admin = next(iter(core.ADMIN_IDS), 0) if core.ADMIN_IDS else 0
         aid = f"tg_{first_admin}" if first_admin else "acc_main"
         accs[aid] = {
             "id": aid,
@@ -135,17 +151,18 @@ def ensure_accounts_store() -> dict:
 def get_or_create_account(user: dict, requested_acc_id: str = "") -> dict:
     accs = ensure_accounts_store()
     uid = int(user.get("id") or 0)
-    uname = (user.get("first_name") or "").strip() or "Артём"
+    uname = (user.get("first_name") or "").strip() or "Пользователь"
     admin_ok = is_user_admin(uid)
 
     req_id = (requested_acc_id or "").strip()
     if req_id and req_id in accs:
         target = accs[req_id]
-        # Внешний пользователь может открывать только свой аккаунт
-        if admin_ok or int(target.get("tg_id") or 0) == uid:
+        # Безопасность: пользователь может открывать ТОЛЬКО свои профили!
+        if int(target.get("tg_id") or 0) == uid:
             if target.get("name") == "Основной аккаунт":
                 target["name"] = uname
             return target
+        # Чужой аккаунт переключать запрещено
 
     if uid:
         for a in accs.values():
@@ -212,20 +229,6 @@ def _guest_has_own_key(uid: int) -> bool:
     return False
 
 
-GUEST_FILE = "guests.json"      # личные расписание и карточки гостей: {tg_id: {"timetable": {...}, "study": {...}}}
-GUESTS: dict = {}
-_GUEST_LOCK = asyncio.Lock()
-
-
-def _load_guests() -> None:
-    GUESTS.clear()
-    GUESTS.update(core.load_json(GUEST_FILE, {}) or {})
-
-
-def _save_guests() -> None:
-    core.save_json(GUEST_FILE, GUESTS)
-
-
 def guest_error(user: dict):
     """None, если можно работать; иначе ответ-ошибка (гость без своего ключа не должен тратить ключи владельца)."""
     uid = int(user.get("id") or 0)
@@ -236,124 +239,33 @@ def guest_error(user: dict):
     return None
 
 
-class plugin_ctx:
-    """Подменяет состояние расписания/карточек и пул ключей на личные для гостя. Владельцу ничего не меняет."""
-
-    def __init__(self, user: dict):
-        self.uid = int(user.get("id") or 0)
-        self.guest = not is_user_admin(self.uid)
-        self.saved = []
-        self.pool = None
-
-    async def __aenter__(self):
-        if not self.guest:
-            return self
-        await _GUEST_LOCK.acquire()
-        try:
-            slot = GUESTS.setdefault(str(self.uid), {})
-            for name, key in (("ext_timetable", "timetable"), ("ext_study", "study")):
-                m = mod(name)
-                if m is None:
-                    continue
-                state = slot.get(key)
-                if not isinstance(state, dict):
-                    state = m.default_state()
-                    slot[key] = state
-                self.saved.append((m, m.ST, m.save))
-                m.ST = state
-                m.save = _save_guests
-            acc = next((a for a in ensure_accounts_store().values() if int(a.get("tg_id") or 0) == self.uid), None)
-            user_pool, is_custom = get_account_pool(acc) if acc else (None, False)
-            if user_pool is not None and is_custom:
-                self.pool = core.pool
-                core.pool = user_pool
-        except BaseException:
-            await self.__aexit__(None, None, None)
-            raise
-        return self
-
-    async def __aexit__(self, *exc):
-        if not self.guest:
-            return False
-        try:
-            for m, st, sv in self.saved:
-                m.ST, m.save = st, sv
-            if self.pool is not None:
-                core.pool = self.pool
-        finally:
-            if _GUEST_LOCK.locked():
-                _GUEST_LOCK.release()
-        return False
-
-
-def _primary_account() -> dict:
-    return next(iter(ensure_accounts_store().values()))
-
-
-_SYNC_KEYS = ("user_profile", "custom_instructions", "user_readme", "answer_mode", "media_enabled",
-              "preferred_model", "model_fallback")
-
-
-def finish_account(acc: dict) -> None:
-    """После обработки события гостя: сохранить его настройки в его аккаунт и вернуть глобальные значения владельцу."""
-    if not acc or is_primary_account(acc["id"]):
-        return
-    s = core.USER_SETTINGS
-    for k in _SYNC_KEYS:
-        if k in s:
-            acc[k] = s[k]
-    core.save_json(core.SETTINGS_FILE, s)
-    activate_account(_primary_account())
-
-
-def activate_account(acc: dict) -> None:
-    global ACTIVE_ACCOUNT_ID
-    if not acc:
-        return
-    ACTIVE_ACCOUNT_ID = acc["id"]
-    s = core.USER_SETTINGS
-    s["user_profile"] = acc.get("user_profile", "")
-    s["custom_instructions"] = acc.get("custom_instructions", "")
-    s["user_readme"] = acc.get("user_readme", "")
-    s["answer_mode"] = acc.get("answer_mode", "detailed")
-    s["media_enabled"] = bool(acc.get("media_enabled", True))
-    pref = acc.get("preferred_model") or core.GEMINI_MODEL
-    s["preferred_model"] = pref
-    s["model_fallback"] = bool(acc.get("model_fallback", True))
-    core.GEMINI_MODEL = pref
+@contextmanager
+def account_context(user: dict, account: dict, *, private: bool = True):
+    uid = user["id"]
+    guest_uid = uid if private and not is_user_admin(uid) else None
+    account_token = core.CURRENT_ACCOUNT.set(account)
+    guest_token = core.CURRENT_GUEST.set(guest_uid)
+    try:
+        yield
+    finally:
+        core.CURRENT_GUEST.reset(guest_token)
+        core.CURRENT_ACCOUNT.reset(account_token)
 
 
 def authenticate(request: web.Request):
-    """Авторизует любого пользователя Telegram (админам — общий пул, остальным — BYOK со своим ключом)."""
-    dev = os.environ.get("WEBAPP_DEV_USER", "").strip()
-    if dev.isdigit():
-        return {"id": int(dev), "first_name": "dev"}
-
+    """Require signed Telegram Mini App credentials."""
     raw_init = request.headers.get("X-Init-Data", "") or request.query.get("initData", "")
     user = validate_init_data(raw_init, core.TELEGRAM_BOT_TOKEN)
-
-    if not user or "id" not in user:
-        ak = request.headers.get("X-Admin-Key", "") or request.query.get("ak", "")
-        for admin_id in (core.ADMIN_IDS or ()):
-            if ak and hmac.compare_digest(ak, _admin_token(admin_id)):
-                return {"id": admin_id, "first_name": "Артём"}
-        if core.ADMIN_IDS and (request.headers.get("X-WebApp-Client") == "tg" or request.query.get("client") == "tg"):
-            req_acc = request.headers.get("X-Account-Id", "") or request.query.get("acc", "")
-            accs = ensure_accounts_store()
-            if req_acc in accs and accs[req_acc].get("tg_id"):
-                return {"id": int(accs[req_acc]["tg_id"]), "first_name": accs[req_acc].get("name", "Артём")}
-            first_admin = next(iter(core.ADMIN_IDS))
-            return {"id": first_admin, "first_name": "Артём"}
-        return web.json_response({"error": "Откройте приложение из Telegram"}, status=401)
-
-    return user
+    if user is not None:
+        return user
+    return web.json_response(
+        {"error": "Пожалуйста, откройте мини-приложение через Telegram-бота."}, status=401
+    )
 
 
 def get_request_account(request: web.Request, user: dict) -> dict:
     req_acc = request.headers.get("X-Account-Id", "") or request.query.get("acc", "")
-    acc = get_or_create_account(user, req_acc)
-    activate_account(acc)
-    return acc
+    return get_or_create_account(user, req_acc)
 
 
 def wrap(handler):
@@ -362,8 +274,9 @@ def wrap(handler):
         if isinstance(user, web.Response):
             return user
         try:
-            get_request_account(request, user)
-            data = await handler(request, user)
+            account = get_request_account(request, user)
+            with account_context(user, account):
+                data = await handler(request, user)
             if isinstance(data, web.StreamResponse):
                 return data
         except asyncio.CancelledError:
@@ -397,7 +310,7 @@ def mod(name: str):
 
 
 def prompt_hook(scope, is_private) -> str:
-    readme = (core.USER_SETTINGS.get("user_readme") or "").strip()
+    readme = (core.get_current_account_settings().get("user_readme") or "").strip()
     if not readme:
         return ""
     return (
@@ -416,8 +329,8 @@ def _store_generated_file(data: bytes, filename: str, mime: str) -> str:
     while len(GENERATED_FILES) >= 60:
         oldest = min(GENERATED_FILES, key=lambda k: GENERATED_FILES[k]["ts"])
         GENERATED_FILES.pop(oldest, None)
-    fid = uuid.uuid4().hex[:12]
-    GENERATED_FILES[fid] = {"data": data, "name": filename, "mime": mime, "ts": now}
+    fid = uuid.uuid4().hex
+    GENERATED_FILES[fid] = {"owner": core.CURRENT_ACCOUNT.get()["id"], "data": data, "name": filename, "mime": mime, "ts": now}
     return fid
 
 
@@ -452,10 +365,11 @@ async def _decode_uploaded_files(raw_files: list) -> tuple:
 
 def accounts_summary_list(user: dict) -> list:
     accs = ensure_accounts_store()
-    admin_ok = is_user_admin(int(user.get("id") or 0))
+    uid = int(user.get("id") or 0)
     out = []
     for a in accs.values():
-        if not admin_ok and int(a.get("tg_id") or 0) != int(user.get("id") or 0):
+        # Изоляция аккаунтов: пользователь видит ТОЛЬКО свои собственные профили!
+        if int(a.get("tg_id") or 0) != uid:
             continue
         has_own_key = bool(_parse_keys(a.get("custom_api_key", "")))
         out.append({
@@ -486,7 +400,8 @@ async def api_me(request, user):
             "has_custom_key": has_own_key,
             "masked_key": _mask_key(acc.get("custom_api_key", "")),
         },
-        "needs_onboarding": account_needs_key(acc, user),
+        "needs_onboarding": False,
+        "has_ai": has_own_key or (admin_ok and bool(core.pool.keys)),
         "accounts": accounts_summary_list(user),
         "now": core.now_local().isoformat(),
         "tz": getattr(core.TZ, "key", "UTC"),
@@ -509,13 +424,14 @@ async def api_verify_key(request, user):
 
     try:
         client = genai.Client(api_key=test_key, http_options=genai_types.HttpOptions(timeout=10000))
-        # Проверяем только по актуальным моделям
-        test_models = [
-            getattr(core, "GEMINI_MODEL", "gemini-2.5-flash"),
+        cascade = getattr(core, "MODEL_CASCADE", [])
+        test_models = [getattr(core, "GEMINI_MODEL", "gemini-3.8-flash")] + list(cascade) + [
+            "gemini-3.8-flash",
+            "gemini-3.6-flash",
+            "gemini-3.5-flash-lite",
             "gemini-2.5-flash",
-            "gemini-2.0-flash",
-            "gemini-1.5-flash",
         ]
+        test_models = list(dict.fromkeys(test_models))
 
         last_err = None
         for m in test_models:
@@ -530,13 +446,10 @@ async def api_verify_key(request, user):
             except Exception as ex:
                 last_err = ex
                 up_sub = str(ex).upper()
-                # 429 / RESOURCE_EXHAUSTED означает, что ключ валидный (просто упёрся в квоту)
                 if any(w in up_sub for w in ("429", "RESOURCE_EXHAUSTED", "QUOTA")):
                     return {"ok": True, "count": len(keys), "masked": _mask_key(body.get("api_key", ""))}
-                # Ошибки недействительного ключа
                 if any(w in up_sub for w in ("API_KEY_INVALID", "INVALID", "UNAUTHENTICATED", "401", "403", "PERMISSION_DENIED")):
                     return {"error": "Ключ недействителен. Проверьте правильность копирования из Google AI Studio."}
-                # Если 404 (модель не поддерживается данным аккаунтом) — пробуем следующую
                 if "404" in up_sub or "NOT_FOUND" in up_sub:
                     continue
                 continue
@@ -561,35 +474,34 @@ async def api_account_save(request, user):
     body = await request.json()
     accs = ensure_accounts_store()
     action = body.get("action", "create")
+    uid = int(user.get("id") or 0)
 
     if action == "delete":
         aid = str(body.get("id") or "")
-        if len(accs) <= 1:
-            return {"error": "Нельзя удалить единственный аккаунт"}
-        if aid in accs:
+        user_accs = [a for a in accs.values() if int(a.get("tg_id") or 0) == uid]
+        if len(user_accs) <= 1:
+            return {"error": "Нельзя удалить единственный профиль"}
+        if aid in accs and int(accs[aid].get("tg_id") or 0) == uid:
             del accs[aid]
             APP_CHATS.pop(aid, None)
             USER_POOLS.pop(aid, None)
             core.save_json(core.SETTINGS_FILE, core.USER_SETTINGS)
-        next_acc = next(iter(accs.values()))
-        activate_account(next_acc)
+        remaining = [a for a in accs.values() if int(a.get("tg_id") or 0) == uid]
+        next_acc = remaining[0] if remaining else next(iter(accs.values()))
         return {"ok": True, "active_id": next_acc["id"], "accounts": accounts_summary_list(user)}
 
     name = str(body.get("name") or "").strip()[:40]
     if not name:
-        return {"error": "Укажите имя аккаунта"}
+        return {"error": "Укажите имя профиля"}
     avatar = str(body.get("avatar") or "").strip() or "🧑‍💻"
-    tg_id = 0
-    if str(body.get("tg_id") or "").strip().lstrip("-").isdigit():
-        tg_id = int(str(body.get("tg_id")).strip())
 
     aid = str(body.get("id") or "").strip()
     if aid and aid in accs:
         acc = accs[aid]
+        if int(acc.get("tg_id") or 0) != uid:
+            return {"error": "Нет доступа к этому профилю"}
         acc["name"] = name
         acc["avatar"] = avatar
-        if tg_id:
-            acc["tg_id"] = tg_id
         if "custom_api_key" in body:
             acc["custom_api_key"] = str(body.get("custom_api_key") or "").strip()
             USER_POOLS.pop(aid, None)
@@ -599,7 +511,7 @@ async def api_account_save(request, user):
             "id": aid,
             "name": name,
             "avatar": avatar,
-            "tg_id": tg_id or (int(user.get("id") or 0) if not is_user_admin(int(user.get("id") or 0)) else 0),
+            "tg_id": uid,
             "custom_api_key": str(body.get("custom_api_key") or "").strip(),
             "user_profile": f"Меня зовут {name}.",
             "custom_instructions": "Объясняй понятно, по делу, при решении задач давай пошаговый ход мысли.",
@@ -612,7 +524,6 @@ async def api_account_save(request, user):
         accs[aid] = acc
 
     core.save_json(core.SETTINGS_FILE, core.USER_SETTINGS)
-    activate_account(acc)
     return {
         "ok": True,
         "active_id": acc["id"],
@@ -629,19 +540,15 @@ async def api_account_save(request, user):
 
 
 async def api_home(request, user):
-    err = guest_error(user)
-    if err is not None:
-        return err
-    async with plugin_ctx(user):
-        return _home_body(user)
-
-
-def _home_body(user):
+    acc = get_request_account(request, user)
     out = {"today": None, "tasks": [], "cards_due": 0, "cards_total": 0, "parity": None}
     tt, st = mod("ext_timetable"), mod("ext_study")
     if tt:
         try:
             out["today"] = tt.day_payload(tt.today())
+            out["has_schedule"] = bool(tt.grid().get("lessons") or tt.grid().get("exceptions"))
+            out["sharing"] = tt.share_info()
+            out["now"] = core.now_local().isoformat()
             out["parity"] = tt.parity_of(tt.today())
         except Exception:
             core.log.exception("home timetable error")
@@ -651,7 +558,7 @@ def _home_body(user):
             out["cards_due"], out["cards_total"] = s["due"], s["total"]
         except Exception:
             core.log.exception("home study stats error")
-    out["tasks"] = task_list(only_deadline=True)[:8]
+    out["tasks"] = task_list(acc["id"], only_deadline=True)[:8]
     return out
 
 
@@ -662,18 +569,18 @@ def is_primary_account(acc_id: str) -> bool:
     return acc_id == first_id
 
 
-def task_list(only_deadline: bool = False) -> list:
+def task_list(account_id: str, only_deadline: bool = False) -> list:
     now = core.now_local()
     items = []
-    primary = is_primary_account(ACTIVE_ACCOUNT_ID)
+    primary = is_primary_account(account_id)
     for t in core.active_tasks():
         t_acc = t.get("acc", "")
         # Главный аккаунт видит свои и общие задачи групп; новые аккаунты — строго только свои
         if primary:
-            if t_acc and t_acc != ACTIVE_ACCOUNT_ID:
+            if t_acc and t_acc != account_id:
                 continue
         else:
-            if t_acc != ACTIVE_ACCOUNT_ID:
+            if t_acc != account_id:
                 continue
 
         dl = core.parse_deadline(t.get("deadline"))
@@ -694,7 +601,7 @@ async def api_tasks(request, user):
     acc = get_request_account(request, user)
     primary = is_primary_account(acc["id"])
     groups: dict = {}
-    for t in task_list():
+    for t in task_list(acc["id"]):
         g = groups.setdefault(t["chat_id"], {"chat_id": t["chat_id"], "title": core.chat_label(t["chat_id"]), "topics": {}})
         tp = g["topics"].setdefault(t["thread"], {"thread": t["thread"], "name": "", "tasks": []})
         tp["tasks"].append(t)
@@ -798,9 +705,10 @@ async def api_task_done(request, user):
     acc = get_request_account(request, user)
     for t in core.TASKS["items"]:
         if t["id"] == tid and not t.get("done"):
-            if not is_primary_account(acc["id"]) and t.get("acc") != acc["id"]:
-                return {"ok": False}  # чужую задачу гость закрыть не может
+            if not core.account_owns_task(acc, t):
+                return {"error": "Задача недоступна"}
             t["done"], t["done_at"] = True, time.time()
+            t["paused_notifications"] = [dict(n) for n in core.SCHEDULE["items"] if n["task_id"] == tid]
             core.cancel_notifications(tid)
             core.save_json(core.TASKS_FILE, core.TASKS)
             return {"ok": True}
@@ -811,8 +719,13 @@ async def api_task_undone(request, user):
     acc = get_request_account(request, user)
     for t in core.TASKS["items"]:
         if t["id"] == tid and t.get("done"):
-            if not is_primary_account(acc["id"]) and t.get("acc") != acc["id"]:
-                return {"ok": False}
+            if not core.account_owns_task(acc, t):
+                return {"error": "Задача недоступна"}
+            pending_ids = {n["id"] for n in core.SCHEDULE["items"]}
+            restored = [n for n in t.pop("paused_notifications", []) if n["ts"] > time.time() and n["id"] not in pending_ids]
+            if restored:
+                core.SCHEDULE["items"].extend(restored)
+                core.save_json(core.SCHEDULE_FILE, core.SCHEDULE)
             t["done"] = False
             t.pop("done_at", None)
             core.save_json(core.TASKS_FILE, core.TASKS)
@@ -863,11 +776,17 @@ async def api_chat_delete(request, user):
     if msg_id:
         chat_list[:] = [m for m in chat_list if m.get("id") != msg_id]
     if hist_ts is not None:
-        core.HISTORY["items"] = [
-            it for it in core.HISTORY["items"]
-            if abs(float(it.get("ts", 0)) - float(hist_ts)) > 0.01
-        ]
-        core.save_json(core.HISTORY_FILE, core.HISTORY)
+        try:
+            target_ts = float(hist_ts)
+            core.HISTORY["items"] = [
+                it for it in core.HISTORY["items"]
+                if not ((it.get("acc") == acc["id"] or (not it.get("acc") and is_primary_account(acc["id"])))
+                        and (msg_id in it.get("message_ids", []) if "message_ids" in it
+                             else float(it.get("ts") or 0) == target_ts))
+            ]
+            core.save_json(core.HISTORY_FILE, core.HISTORY)
+        except (ValueError, TypeError):
+            pass
     return {"ok": True}
 
 
@@ -880,7 +799,7 @@ async def api_chat_clear(request, user):
 async def api_file_download(request, user):
     fid = request.match_info.get("id", "")
     f = GENERATED_FILES.get(fid)
-    if not f:
+    if not f or f.get("owner") != get_request_account(request, user)["id"] or time.time() - f["ts"] > 7200:
         return web.json_response({"error": "Файл устарел или не найден"}, status=404)
     inline = request.query.get("inline") == "1"
     disp_type = "inline" if inline else "attachment"
@@ -895,7 +814,7 @@ async def api_file_download(request, user):
 async def api_file_send_tg(request, user):
     fid = request.match_info.get("id", "")
     f = GENERATED_FILES.get(fid)
-    if not f:
+    if not f or f.get("owner") != get_request_account(request, user)["id"] or time.time() - f["ts"] > 7200:
         return {"error": "Файл устарел или не найден"}
     acc = get_request_account(request, user)
     target_uid = int(acc.get("tg_id") or user["id"])
@@ -904,17 +823,29 @@ async def api_file_send_tg(request, user):
     return {"ok": True}
 
 
+async def api_export(request, user):
+    body = await request.json()
+    content = str(body.get("content") or "").strip()
+    fmt = str(body.get("format") or "pdf").lower().strip()
+    title = str(body.get("title") or "Ответ").strip()
+    if not content:
+        return {"error": "Текст для экспорта пуст"}
+    if fmt not in ("pdf", "docx", "tex"):
+        return {"error": f"Формат {fmt} не поддерживается (доступны: pdf, docx, tex)"}
+
+    data, fname, mime = await asyncio.to_thread(core.build_document, fmt, title, content)
+    fid = _store_generated_file(data, fname, mime)
+    return {"ok": True, "id": fid, "name": fname, "size": len(data)}
+
+
 async def _generate_with_account_pool(acc: dict, user: dict, **kwargs):
-    """Вызывает core.generate_reply, временно подставляя личный пул ключей аккаунта (если он задан)."""
+    """Вызывает core.generate_reply с личным пулом ключей и настройками аккаунта."""
     pool_to_use, is_custom = get_account_pool(acc)
     if pool_to_use is None:
         raise RuntimeError("Для работы укажите свой бесплатный API-ключ Gemini в настройках профиля (aistudio.google.com/apikey).")
-    orig_pool = core.pool
-    try:
-        core.pool = pool_to_use
-        return await core.generate_reply(**kwargs), pool_to_use, is_custom
-    finally:
-        core.pool = orig_pool
+    user_name = acc.get("name") or user.get("first_name") or "Пользователь"
+    resp = await core.generate_reply(pool=pool_to_use, account=acc, user_name=user_name, **kwargs)
+    return resp, pool_to_use, is_custom
 
 
 async def api_ask(request, user):
@@ -932,6 +863,8 @@ async def api_ask(request, user):
     if not text and raw_files:
         text = "Изучи прикреплённый файл и кратко опиши, что в нём, либо реши задания из него."
 
+    if get_account_pool(acc)[0] is None:
+        return {"error": "ИИ недоступен для этого профиля"}
     extra_parts, uploaded_names, uploaded_meta = await _decode_uploaded_files(raw_files)
 
     history = []
@@ -944,7 +877,8 @@ async def api_ask(request, user):
         history.append({"type": "text", "text": entry["text"]})
     recent_file_names.extend(uploaded_names)
 
-    scope = core.enabled_groups()
+    can_publish = is_user_admin(user["id"])
+    scope = core.enabled_groups() if can_publish else []
     resp, active_pool, _ = await _generate_with_account_pool(
         acc,
         user,
@@ -995,6 +929,9 @@ async def api_ask(request, user):
                 elif not texts:
                     tool_reports.append(f"📄 Документ **{filename}** готов!")
         elif call.name == "send_group_topic_message":
+            if not can_publish:
+                tool_reports.append("⛔ Публиковать в группы могут только администраторы.")
+                continue
             topic = str(args.get("topic_name", ""))
             post = str(args.get("message_text", ""))
             deadline = str(args.get("deadline", "") or "")
@@ -1010,9 +947,14 @@ async def api_ask(request, user):
                 rep += f"\nЗадача **#{task['id']}** сохранена в /tasks."
             tool_reports.append(rep)
         elif call.name == "mark_tasks_done":
-            ids = {int(float(x)) for x in (args.get("task_ids") or []) if str(x).lstrip("-").replace(".", "").isdigit()}
+            ids = set()
+            for value in args.get("task_ids") or []:
+                if type(value) is int and value > 0:
+                    ids.add(value)
             done_cnt = 0
             for t in core.TASKS["items"]:
+                if not core.account_owns_task(acc, t):
+                    continue
                 if t["id"] in ids and not t.get("done"):
                     t["done"], t["done_at"] = True, time.time()
                     core.cancel_notifications(t["id"])
@@ -1051,6 +993,7 @@ async def api_ask(request, user):
     core.HISTORY["items"].append({
         "ts": ts,
         "src": f"приложение ({user_name})",
+        "message_ids": [user_msg_id, bot_msg_id],
         "acc": acc["id"],
         "who": user_name[:40],
         "q": text[:600],
@@ -1076,17 +1019,8 @@ async def api_settings_get(request, user):
     acc = get_request_account(request, user)
     pref_model = acc.get("preferred_model") or core.GEMINI_MODEL
     active_pool, is_custom = get_account_pool(acc)
-    pool_for_report = active_pool or core.pool
 
-    models_meta = getattr(core, "AVAILABLE_MODELS", [
-        {"id": "gemini-3.8-flash", "name": "Gemini 3.8 Flash", "desc": "Флагман · 5 RPM / 20 RPD"},
-        {"id": "gemini-3.6-flash", "name": "Gemini 3.6 Flash", "desc": "Быстрая и точная · 5 RPM / 20 RPD"},
-        {"id": "gemini-3.5-flash-lite", "name": "Gemini 3.5 Flash Lite", "desc": "Высокий лимит · 15 RPM / 500 RPD"},
-        {"id": "gemini-3.1-flash-lite", "name": "Gemini 3.1 Flash Lite", "desc": "Высокий лимит · 15 RPM / 500 RPD"},
-        {"id": "gemini-3-flash", "name": "Gemini 3 Flash", "desc": "Базовая 3.0 · 5 RPM / 20 RPD"},
-        {"id": "gemini-2.5-flash", "name": "Gemini 2.5 Flash", "desc": "Стабильная 2.5 · 5 RPM / 20 RPD"},
-        {"id": "gemini-2.5-flash-lite", "name": "Gemini 2.5 Flash Lite", "desc": "Лёгкая 2.5 · 10 RPM / 20 RPD"},
-    ])
+    models_meta = getattr(core, "AVAILABLE_MODELS", [])
     return {
         "account": {
             "id": acc["id"],
@@ -1095,7 +1029,6 @@ async def api_settings_get(request, user):
             "tg_id": acc.get("tg_id") or 0,
             "has_custom_key": bool(_parse_keys(acc.get("custom_api_key", ""))),
             "masked_key": _mask_key(acc.get("custom_api_key", "")),
-            "custom_api_key": acc.get("custom_api_key", ""),
         },
         "is_admin": is_user_admin(int(user.get("id") or 0)),
         "using_custom_pool": is_custom,
@@ -1107,9 +1040,9 @@ async def api_settings_get(request, user):
         "user_readme": acc.get("user_readme", ""),
         "model": pref_model,
         "model_fallback": bool(acc.get("model_fallback", True)),
-        "last_used_model": getattr(pool_for_report, "last_used_model", pref_model),
+        "last_used_model": getattr(active_pool, "last_used_model", pref_model),
         "available_models": models_meta,
-        "keys": pool_for_report.report().split("\n") if active_pool else ["Свой ключ ещё не подключён"],
+        "keys": active_pool.report().split("\n") if active_pool else ["Свой ключ ещё не подключён"],
     }
 
 
@@ -1140,7 +1073,6 @@ async def api_settings_set(request, user):
     if isinstance(body.get("user_readme"), str):
         acc["user_readme"] = body["user_readme"].strip()[:40000]
 
-    activate_account(acc)
     core.save_json(core.SETTINGS_FILE, core.USER_SETTINGS)
     return await api_settings_get(request, user)
 
@@ -1174,23 +1106,10 @@ async def compact_setup_bot_commands() -> None:
     await core.bot.set_my_commands(private, scope=BotCommandScopeAllPrivateChats())
 
 
-def per_account(handler):
-    """Расписание, карточки и квиз: у владельца общие данные, у каждого гостя — свои."""
-    async def inner(request, user):
-        err = guest_error(user)
-        if err is not None:
-            return err
-        async with plugin_ctx(user):
-            return await handler(request, user)
-    return inner
-
-
 def mount(app: web.Application) -> None:
     app._client_max_size = 25 * 1024 * 1024
     app.router.add_get("/app", index)
     for method, path, handler in core.API_ROUTES:
-        if getattr(handler, "__module__", "") in ("ext_timetable", "ext_study"):
-            handler = per_account(handler)  # у гостя — своё расписание и карточки
         app.router.add_route(method, path, wrap(handler))
     core.log.info("📱 Мини-приложение: /app (%d маршрутов API)", len(core.API_ROUTES))
 
@@ -1203,8 +1122,9 @@ async def _handle_start_cmd(message):
     print(f"--> [TG] Получен /start от ID={message.from_user.id} ({message.from_user.first_name})", flush=True)
     menu = compact_reply_main_menu()
     await message.answer(
-        "👋 **Привет! Я твой академический помощник.**\n\n"
-        "Нажми кнопку **«📱 Приложение»** внизу клавиатуры, чтобы открыть расписание, задачи, карточки и чат с ИИ.",
+        "👋 **Привет!** Я твой помощник по учёбе.\n\n"
+        "Расписание, задачи и карточки — по кнопке **«📱 Приложение»** внизу. "
+        "А если нужно что-то разобрать или просто спросить — пиши мне сюда как обычному человеку.",
         reply_markup=menu,
         parse_mode="Markdown"
     )
@@ -1213,27 +1133,25 @@ async def _handle_start_cmd(message):
 async def _handle_menu_cmd(message):
     print(f"--> [TG] Получен /menu от ID={message.from_user.id}", flush=True)
     menu = compact_reply_main_menu()
-    await message.answer("🎛 Кнопки меню обновлены!", reply_markup=menu)
+    await message.answer("Готово, кнопки на месте 👌", reply_markup=menu)
     
 def setup(c) -> None:
     global core
     core = c
     core.PLUGIN_PROMPT.append(prompt_hook)
+    core.timetable_account_context = account_context
     core.GUEST_CHECK = _guest_has_own_key
-    core.STATE_FILES = tuple(core.STATE_FILES) + (GUEST_FILE,)
-    core.PLUGIN_LOADERS.append(_load_guests)
 
     @core.dp.callback_query.outer_middleware()
     async def _tg_account_cb_middleware(handler, event, data):
         u = getattr(event, "from_user", None)
-        acc = None
-        if u and getattr(u, "id", None):
-            acc = get_or_create_account({"id": u.id, "first_name": u.first_name or ""})
-            activate_account(acc)
-        try:
+        if not u or not u.id:
             return await handler(event, data)
-        finally:
-            finish_account(acc)
+        user = {"id": u.id, "first_name": u.first_name or ""}
+        account = get_or_create_account(user)
+        chat = getattr(getattr(event, "message", None), "chat", None)
+        with account_context(user, account, private=getattr(chat, "type", "") == "private"):
+            return await handler(event, data)
 
     core.get_reply_main_menu = compact_reply_main_menu
     orig_setup_cmds = core.setup_bot_commands
@@ -1245,55 +1163,32 @@ def setup(c) -> None:
     core.setup_bot_commands = _patched_setup_cmds
 
     @core.dp.message.outer_middleware()
-    async def _tg_account_finish_middleware(handler, event, data):
-        """Внешний слой: после сообщения гостя вернуть глобальные настройки владельцу."""
-        u = getattr(event, "from_user", None)
-        try:
-            return await handler(event, data)
-        finally:
-            if u and getattr(u, "id", None) and not is_user_admin(int(u.id)):
-                finish_account(get_or_create_account({"id": u.id, "first_name": u.first_name or ""}))
-
-    @core.dp.message.outer_middleware()
     async def _tg_account_middleware(handler, event, data):
         u = getattr(event, "from_user", None)
-        acc = None
         if u and getattr(u, "id", None):
-            acc = get_or_create_account({"id": u.id, "first_name": u.first_name or ""})
-            activate_account(acc)
+            user = {"id": u.id, "first_name": u.first_name or ""}
+            acc = get_or_create_account(user)
+            data["account"] = acc
+            user_pool, _ = get_account_pool(acc)
+            data["pool"] = user_pool
+            private = getattr(getattr(event, "chat", None), "type", "") == "private"
 
-        txt = (getattr(event, "text", None) or "").strip()
-        if txt.startswith("/start"):
-            await event.answer(
-                "👋 Привет! Я твой академический помощник.\n\n"
-                "Нажми кнопку «📱 Приложение» внизу клавиатуры, чтобы открыть расписание, задачи, карточки и чат с ИИ.",
-                reply_markup=compact_reply_main_menu(),
-            )
-            return
-        if txt.startswith("/menu"):
-            await event.answer(
-                "🎛 Кнопки меню обновлены!",
-                reply_markup=compact_reply_main_menu(),
-            )
-            return
+            # Если гость в личке без ключа пытается спросить ИИ (не команда)
+            if user_pool is None and private:
+                txt = (getattr(event, "text", None) or "").strip()
+                entry = txt.split(maxsplit=1)[0].split("@")[0] if txt else ""
+                tab = {"/cards": "study", "🧠 Карточки": "study", "/tasks": "tasks", "📋 Задачи": "tasks"}.get(txt) or {"/cards":"study","/tasks":"tasks"}.get(entry)
+                if tab and core.webapp_url():
+                    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Открыть ежедневник",
+                        web_app=WebAppInfo(url=f"{core.webapp_url()}?tab={tab}"))]])
+                    await event.answer("Ваши карточки" if tab == "study" else "Ваши задачи", reply_markup=kb)
+                    return
+                if entry not in ("/start", "/help", "/menu", "/app", "/today", "/week", "/tomorrow", "/schedule", "/ics") and txt not in ("📅 Сегодня", "📅 Завтра", "🗓 Неделя"):
+                    await event.answer("Расписание, задачи и карточки доступны в ежедневнике.", reply_markup=compact_reply_main_menu())
+                    return
 
-        # Если пишет пользователь со своим API-ключом — временно подставляем его пул ключей
-        if acc and u:
-            user_pool, is_custom = get_account_pool(acc)
-            if is_custom and user_pool is not None:
-                orig_pool = core.pool
-                try:
-                    core.pool = user_pool
-                    return await handler(event, data)
-                finally:
-                    core.pool = orig_pool
-            elif user_pool is None and getattr(getattr(event, "chat", None), "type", "") == "private":
-                await event.answer(
-                    "🔑 Чтобы общаться с ИИ, подключите свой бесплатный ключ Gemini в мини-приложении (кнопка «📱 Приложение» внизу).",
-                    reply_markup=compact_reply_main_menu(),
-                )
-                return
-
+            with account_context(user, acc, private=private):
+                return await handler(event, data)
         return await handler(event, data)
 
     # Ставим наш outer_middleware самым первым в очереди диспетчера
@@ -1317,6 +1212,7 @@ def setup(c) -> None:
         ("POST", "/api/chat/clear", api_chat_clear),
         ("GET", "/api/files/{id}", api_file_download),
         ("POST", "/api/files/{id}/send", api_file_send_tg),
+        ("POST", "/api/export", api_export),
         ("GET", "/api/settings", api_settings_get),
         ("POST", "/api/settings", api_settings_set),
     ])

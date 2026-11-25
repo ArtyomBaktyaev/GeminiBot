@@ -2,11 +2,14 @@
 <html lang="ru">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="color-scheme" content="dark light">
 <meta name="theme-color" content="#080b11">
 <title>Академический Помощник</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
 <style>
 /* =========================================================
    1. DESIGN TOKENS, THEMES, FONTS & ADAPTIVE SCALING
@@ -647,8 +650,13 @@ details.acc .content{padding:0 14px 12px}
 .bubble .act-btn{
   display:inline-flex;align-items:center;gap:3px;padding:3px 7px;
   border-radius:6px;background:rgba(255,255,255,0.14);font-size:0.72rem;font-weight:600;
+  cursor:pointer;user-select:none;transition:background 0.15s;
 }
 .bubble.bot .act-btn{background:var(--surface-2);border:1px solid var(--line)}
+.bubble.bot .act-btn:hover{background:var(--surface-3, rgba(255,255,255,0.08))}
+.math-display-block{margin:8px 0;overflow-x:auto;text-align:center}
+.katex-display{overflow-x:auto;overflow-y:hidden;padding:4px 0;margin:0.5em 0 !important}
+.katex{font-size:1.05em}
 
 .msg-att-list{display:flex;flex-direction:column;gap:6px;margin-bottom:8px;max-width:100%}
 .msg-att-item{
@@ -881,6 +889,55 @@ input[type=date],input[type=time]{min-width:0;padding:9px 10px;font-size:0.92rem
 .g-day-cell.done{background:linear-gradient(135deg,#84cc16,#10b981);border-color:transparent;color:#052e16;box-shadow:0 4px 12px rgba(132,204,22,0.28)}
 .g-day-cell.done .w-lbl,.g-day-cell.done .w-num{color:#052e16}
 .g-day-cell.today{outline:2px solid var(--accent);outline-offset:1px}
+[data-theme="journal"]{
+  color-scheme:light;--bg:#f8f7f0;--surface:#fffef9;--surface-2:#edeFE7;--surface-3:#e3e9df;
+  --glass:#fffef8;--text:#172e27;--text-2:#52675d;--text-3:#626f66;
+  --accent:#245e51;--accent-2:#2c6859;--accent-text:#fff;--accent-soft:#d7e8df;--accent-soft-2:#e3eee6;
+  --line:#dbe0d5;--line-2:#cbd4c8;--line-3:#b7c3b7;--shadow:0 4px 18px #172e2710
+}
+[data-theme="journal"][data-journal-dark="true"]{
+  color-scheme:dark;--bg:#14211c;--surface:#202e27;--surface-2:#293931;--surface-3:#33473b;
+  --glass:#202e27;--text:#f1f4e9;--text-2:#bbcdc0;--text-3:#a0b2a6;
+  --accent:#91d6b7;--accent-2:#85c9ad;--accent-text:#102d20;--accent-soft:#304e43;--accent-soft-2:#273e34;
+  --line:#35463c;--line-2:#475a4d;--line-3:#526958
+}
+[data-theme="journal"] body{background-image:none}
+[data-theme="journal"] .btn.ghost{background:var(--surface);color:var(--text)}
+/* Дневная повестка */
+.daily{display:grid;gap:15px;padding:4px 0 12px}
+.day-head,.day-line{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.daily .day-head h1{font:500 clamp(34px,9vw,52px)/1.08 Georgia,serif;letter-spacing:-.045em;margin:5px 0 0}
+.daily h2{margin:0;text-transform:none;letter-spacing:-.02em;font-size:1.15rem}
+.day-head small,.day-line small,.day-share small{display:block;color:var(--text-2)}
+.day-feature{background:#164f44;color:#f3f9ed;border-radius:20px;padding:clamp(18px,5vw,28px);display:grid;gap:8px;overflow-wrap:anywhere}
+.day-feature small{color:#c6e3d5}
+.day-feature strong{font:500 clamp(36px,11vw,56px)/1.08 Georgia,serif;font-variant-numeric:tabular-nums;letter-spacing:-.05em}
+.day-feature .day-time span{color:#c9e3d9}.day-feature h2{color:inherit;margin:0;font-size:1.3rem}
+.day-feature p{margin:0;color:#dfede6}.day-feature .btn{justify-self:start;background:#ecf5ec;color:#17473c;border:0;margin-top:5px}
+.day-line{justify-content:flex-start;padding:9px 0;border-bottom:1px solid var(--line-2);overflow-wrap:anywhere}
+.daily .day-head{align-items:flex-start;flex-wrap:wrap}
+.daily .day-head h2{flex:1 1 180px;min-width:0}
+.daily .day-head .btn{flex:0 0 auto;white-space:nowrap}
+.daily .day-line{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:start;gap:12px}
+.daily .day-line>div{min-width:0;overflow-wrap:anywhere}
+.daily .day-line>.btn{min-width:88px;white-space:nowrap;align-self:start}
+.daily .day-line small{margin-top:4px}
+.reaction-row{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0 2px}
+.reaction-choice{min-width:36px;min-height:36px;padding:4px;border-radius:12px;border:1px solid var(--line-2);background:var(--surface-2)}
+.reaction-choice.selected{background:var(--accent-soft);border-color:var(--accent)}
+.study-links{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:14px 0}
+.study-links .btn{min-width:0;white-space:normal}
+@media(max-width:360px){.study-links{grid-template-columns:1fr}}
+@media(prefers-reduced-motion:reduce){
+ *,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important;scroll-behavior:auto!important}
+}
+.empty .big,.g-float-island,.g-sparkle{animation:none}
+.day-share,.day-check{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.day-check input[type=checkbox]{width:20px;height:20px;margin:0}
+.day-share{margin:4px 0 12px}.day-head .btn{min-height:40px}
+[data-theme="journal"] .day-feature .btn{background:#ebf4eb;color:#164f44}
+#nav button{flex:1}.daily button,.day-share button{min-height:44px}
+[hidden]{display:none!important}
 </style>
 </head>
 <body>
@@ -891,13 +948,7 @@ input[type=date],input[type=time]{min-width:0;padding:9px 10px;font-size:0.92rem
     <div class="skeleton"></div>
   </div>
 </div>
-<nav id="nav">
-  <button class="on"><span class="ic">🏠</span>Главная</button>
-  <button><span class="ic">📅</span>Пары</button>
-  <button><span class="ic">📋</span>Задачи</button>
-  <button><span class="ic">🧠</span>Учёба</button>
-  <button><span class="ic">💬</span>Чат</button>
-</nav>
+<nav id="nav" aria-label="Разделы ежедневника"></nav>
 <div id="toasts"></div>
 <script>
 window.onerror = function(msg, src, line) {
@@ -947,7 +998,7 @@ if (tg) {
   if (tg.initData) {
     try {
       sessionStorage.setItem("tg_init_data", tg.initData);
-      localStorage.setItem("tg_init_data_backup", tg.initData);
+      localStorage.removeItem("tg_init_data_backup");
     } catch (e) {}
   }
 }
@@ -963,6 +1014,7 @@ const FONTS_MAP = {
   serif: 'Georgia,"Times New Roman",serif'
 };
 const THEMES_LIST = [
+  { id:"journal", name:"Ежедневник", color:"#28685c" },
   { id: "ink", name: "Чернила", color: "#d7ff3f" },
   { id: "sapphire", name: "Сапфир", color: "#3b82f6" },
   { id: "violet", name: "Аметист", color: "#8b5cf6" },
@@ -976,19 +1028,22 @@ const AVATAR_EMOJIS = ["🧑‍💻","🎓","🦊","⚡","🚀","🐱","🔥","�
 
 function loadUiPrefs() {
   try {
-    return Object.assign({ theme: "ink", font: "system", scale: 1.0 }, JSON.parse(localStorage.getItem(UI_PREFS_KEY) || "{}"));
+    return Object.assign({ theme: "journal", font: "system", scale: 1.0 }, JSON.parse(localStorage.getItem(UI_PREFS_KEY) || "{}"));
   } catch (e) {
-    return { theme: "ink", font: "system", scale: 1.0 };
+    return { theme: "journal", font: "system", scale: 1.0 };
   }
 }
 function applyUiPrefs(prefs) {
   prefs = prefs || loadUiPrefs();
-  document.documentElement.setAttribute("data-theme", prefs.theme || "ink");
+  document.documentElement.setAttribute("data-theme", prefs.theme || "journal");
+  document.documentElement.dataset.journalDark = String(tg?.colorScheme === "dark" ||
+    (!tg?.colorScheme && window.matchMedia("(prefers-color-scheme: dark)").matches));
   document.documentElement.style.setProperty("--font-main", FONTS_MAP[prefs.font] || FONTS_MAP.system);
   document.documentElement.style.setProperty("--ui-scale", String(prefs.scale || 1.0));
   try { localStorage.setItem(UI_PREFS_KEY, JSON.stringify(prefs)); } catch (e) {}
 }
 applyUiPrefs();
+if (tg?.onEvent) tg.onEvent("themeChanged", () => applyUiPrefs());
 
 /* =========================================================
    HELPERS, AVATAR RENDERER & API
@@ -1070,6 +1125,12 @@ function h(tag, props, ...kids) {
   }
   for (const kid of kids.flat(Infinity)) {
     if (kid == null || kid === false) continue;
+    if (typeof kid === "string") {
+      const clean = kid.replace(/^(null|undefined)(?=$|[\s·:,])|([\s·:,])(null|undefined)$/gi, "");
+      if (!clean.trim() && kid.trim()) continue;
+      el.append(document.createTextNode(clean));
+      continue;
+    }
     el.append(kid.nodeType ? kid : document.createTextNode(String(kid)));
   }
   return el;
@@ -1116,7 +1177,7 @@ function getInitData() {
     const fromHash = hashParams.get("tgWebAppData");
     if (fromHash) return fromHash;
   } catch (e) {}
-  return sessionStorage.getItem("tg_init_data") || localStorage.getItem("tg_init_data_backup") || "";
+  return sessionStorage.getItem("tg_init_data") || "";
 }
 
 function getActiveAccountId() {
@@ -1177,6 +1238,14 @@ function toast(msg, kind) {
     t.style.opacity = "0"; t.style.transform = "translateY(-8px)";
     setTimeout(() => t.remove(), 260);
   }, 2500);
+}
+
+const CONFIRMATIONS = ["Готово, задача добавлена", "Задача в списке", "Записал задачу"];
+let confirmationIndex = 0;
+function taskConfirmation() {
+  const message = CONFIRMATIONS[confirmationIndex % CONFIRMATIONS.length];
+  confirmationIndex++;
+  toast(message + " ✅", "ok");
 }
 
 const DAYS = ["Пн","Вт","Ср","Чт","Пт","Сб","Вс"];
@@ -1280,40 +1349,10 @@ function fmtRemainingTime(t) {
   return hrs + " ч " + (mins % 60) + " мин";
 }
 
-const TT_META_KEY = "tt_lesson_meta_v2";
-function loadAllLessonMeta() {
-  try { return JSON.parse(localStorage.getItem(TT_META_KEY) || "{}"); }
-  catch (e) { return {}; }
-}
-function lessonMetaKey(l) {
-  if (l.id) return "id_" + l.id;
-  if (l.exc_id) return "exc_" + l.exc_id;
-  return "sub_" + (l.weekday || 0) + "_" + l.start + "_" + l.subject;
-}
 function getLessonMeta(l) {
-  const store = loadAllLessonMeta();
-  const saved = store[lessonMetaKey(l)] || {};
-  return {
-    description: l.description || saved.description || "",
-    homework: l.homework || saved.homework || "",
-    notes: l.notes || saved.notes || "",
-    files: Array.isArray(l.files) ? l.files : (Array.isArray(saved.files) ? saved.files : [])
-  };
+  return {description:l.description || "", homework:l.homework || "", notes:l.notes || "", files:l.files || []};
 }
-function saveLessonMeta(l, meta) {
-  const store = loadAllLessonMeta();
-  store[lessonMetaKey(l)] = {
-    description: meta.description || "",
-    homework: meta.homework || "",
-    notes: meta.notes || "",
-    files: Array.isArray(meta.files) ? meta.files : []
-  };
-  try {
-    localStorage.setItem(TT_META_KEY, JSON.stringify(store));
-  } catch (e) {
-    toast("Файл слишком большой для локальной памяти", "err");
-  }
-}
+
 function fmtBytes(bytes) {
   if (!bytes) return "";
   if (bytes < 1024) return bytes + " Б";
@@ -1432,6 +1471,29 @@ function previewFileModal(fileObj, onRemove) {
   });
 }
 
+async function exportMessageDoc(text, fmt) {
+  if (!text || !text.trim()) {
+    toast("Нет текста для экспорта", "err");
+    return;
+  }
+  const fmtNames = { pdf: "PDF (Claude)", docx: "Word", tex: "LaTeX PDF" };
+  const label = fmtNames[fmt] || fmt.toUpperCase();
+  toast(`Генерация ${label}… ⏳`, "info");
+  try {
+    const fileObj = await api("/api/export", {
+      method: "POST",
+      body: { content: text, format: fmt, title: "Ответ Gemini" }
+    });
+    if (fileObj && fileObj.id) {
+      previewFileModal(fileObj);
+    } else {
+      toast("Не удалось создать документ", "err");
+    }
+  } catch (err) {
+    toast(err.message || "Ошибка экспорта", "err");
+  }
+}
+
 /* =========================================================
    MARKDOWN RENDERER
    ========================================================= */
@@ -1450,6 +1512,37 @@ const _UI_TEX = {
   "\\Gamma":"Γ","\\Delta":"Δ","\\Theta":"Θ","\\Lambda":"Λ","\\Pi":"Π","\\Sigma":"Σ","\\Phi":"Φ","\\Omega":"Ω"
 };
 
+function renderWithKatex(el) {
+  if (!el) return;
+  const doRender = () => {
+    if (window.renderMathInElement) {
+      try {
+        window.renderMathInElement(el, {
+          delimiters: [
+            { left: "$$", right: "$$", display: true },
+            { left: "\\[", right: "\\]", display: true },
+            { left: "$", right: "$", display: false },
+            { left: "\\(", right: "\\)", display: false }
+          ],
+          throwOnError: false
+        });
+      } catch (e) {
+        console.warn("KaTeX render error:", e);
+      }
+    }
+  };
+  if (window.renderMathInElement) {
+    doRender();
+  } else {
+    setTimeout(doRender, 300);
+    setTimeout(doRender, 1000);
+  }
+}
+
+function restoreMath(str, tokens) {
+  return str.replace(/\x00MATH_(\d+)\x00/g, (_, id) => tokens[parseInt(id, 10)] || "");
+}
+
 function cleanMathUi(str) {
   let s = String(str || "");
   s = s.replace(/\\(?:dfrac|tfrac|frac)\s*\{([^{}]+)\}\s*\{([^{}]+)\}/g, "($1)/($2)");
@@ -1466,22 +1559,33 @@ function cleanMathUi(str) {
 }
 
 function renderInlineMd(text) {
-  const parts = cleanMathUi(text).split(INLINE_MD_RE);
+  if (!text) return [];
+  if (!window.renderMathInElement && !window.katex) {
+    text = cleanMathUi(text);
+  }
+  const mathTokens = [];
+  const protectedText = String(text).replace(/(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\$(?!\s)[^$\n]+?(?<!\s)\$|\\\([\s\S]*?\\\))/g, (m) => {
+    const idx = mathTokens.length;
+    mathTokens.push(m);
+    return "\x00MATH_" + idx + "\x00";
+  });
+
+  const parts = protectedText.split(INLINE_MD_RE);
   const nodes = [];
   for (const part of parts) {
     if (!part) continue;
     if (part.startsWith("`") && part.endsWith("`") && part.length > 2) {
-      nodes.push(h("code", {}, part.slice(1, -1)));
+      nodes.push(h("code", {}, restoreMath(part.slice(1, -1), mathTokens)));
     } else if ((part.startsWith("**") && part.endsWith("**")) || (part.startsWith("__") && part.endsWith("__"))) {
-      nodes.push(h("b", {}, ...renderInlineMd(part.slice(2, -2))));
+      nodes.push(h("b", {}, ...renderInlineMd(restoreMath(part.slice(2, -2), mathTokens))));
     } else if (part.startsWith("*") && part.endsWith("*") && part.length > 2) {
-      nodes.push(h("i", {}, ...renderInlineMd(part.slice(1, -1))));
+      nodes.push(h("i", {}, ...renderInlineMd(restoreMath(part.slice(1, -1), mathTokens))));
     } else if (part.startsWith("[")) {
       const m = part.match(/^\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)$/);
-      if (m) nodes.push(h("a", { href: m[2], target: "_blank", rel: "noopener" }, m[1]));
-      else nodes.push(part);
+      if (m) nodes.push(h("a", { href: m[2], target: "_blank", rel: "noopener" }, restoreMath(m[1], mathTokens)));
+      else nodes.push(restoreMath(part, mathTokens));
     } else {
-      nodes.push(part);
+      nodes.push(restoreMath(part, mathTokens));
     }
   }
   return nodes;
@@ -1496,12 +1600,27 @@ function renderMd(src) {
       root.append(h("pre", {}, h("code", {}, codeBody)));
       return;
     }
+    const dispMath = [];
+    const withPlaceholders = part.replace(/\$\$([\s\S]*?)\$\$/g, (m) => {
+      const idx = dispMath.length;
+      dispMath.push(m);
+      return "\n\x00DISPMATH_" + idx + "\x00\n";
+    });
+
     let list = null;
-    const lines = part.split(NL);
+    const lines = withPlaceholders.split(NL);
     for (let li = 0; li < lines.length; li++) {
       const line = lines[li];
       const trimmed = line.trim();
       if (!trimmed) { list = null; continue; }
+
+      const dmMatch = trimmed.match(/^\x00DISPMATH_(\d+)\x00$/);
+      if (dmMatch) {
+        list = null;
+        root.append(h("div", { class:"math-display-block" }, dispMath[parseInt(dmMatch[1], 10)]));
+        continue;
+      }
+
       if (/^(?:-{3,}|\*{3,}|_{3,})$/.test(trimmed)) {
         list = null;
         root.append(h("hr"));
@@ -1522,6 +1641,7 @@ function renderMd(src) {
       }
     }
   });
+  renderWithKatex(root);
   return root;
 }
 
@@ -1529,7 +1649,7 @@ function renderMd(src) {
    STATE + NAV
    ========================================================= */
 const S = {
-  tab:"home", ttDate:null, studySub:"cards", chatSub:"chat", me:null, today:null,
+  renderSerial:0, tab:"home", ttDate:null, studySub:"cards", chatSub:"chat", me:null, today:null,
   chatsByAcc: {}, chatFiles: [], sending: false, abortCtrl: null,
   homeDeadlinesOpen: false,
   tasksQuery:"", tasksFilter:"all", tasksKindFilter:"all",
@@ -1542,6 +1662,25 @@ function currentChatList() {
   return S.chatsByAcc[aid];
 }
 
+const REACTION_CHOICES = ["👍", "❤️", "🔥", "😂", "🤔"];
+function reactionKey(message) {
+  const account = (S.me && S.me.account && S.me.account.id) || "default";
+  return "chat_reaction_" + account + "_" + message.id;
+}
+function reactionPicker(message, redraw) {
+  const selected = localStorage.getItem(reactionKey(message));
+  return h("div", {class:"reaction-row", "aria-label":"Реакция на ответ"},
+    ...REACTION_CHOICES.map(emoji => h("button", {
+      type:"button", class:"reaction-choice" + (selected === emoji ? " selected" : ""),
+      "aria-label":"Реакция " + emoji,
+      onclick: () => {
+        if (selected === emoji) localStorage.removeItem(reactionKey(message));
+        else localStorage.setItem(reactionKey(message), emoji);
+        redraw();
+      }
+    }, emoji)));
+}
+
 const NAV_SVGS = {
   home: '<svg viewBox="0 0 24 24"><path d="M3 10.5L12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1v-9.5z"/></svg>',
   tt: '<svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="17" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>',
@@ -1552,12 +1691,10 @@ const NAV_SVGS = {
 };
 
 const TABS = [
-  ["home", "Главная"],
-  ["tt", "Пары"],
+  ["home", "Сегодня"],
+  ["tt", "Расписание"],
   ["tasks", "Задачи"],
   ["study", "Учёба"],
-  ["growth", "Рост"],
-  ["chat", "Чат"],
 ];
 
 function switchTab(id) {
@@ -1580,7 +1717,7 @@ function drawNav() {
     icSpan.innerHTML = NAV_SVGS[id] || "⚡";
     return h("button", {
       type: "button",
-      class: S.tab === id ? "on" : "",
+      class: (S.tab === id || (id === "study" && ["growth","chat"].includes(S.tab))) ? "on" : "",
       onclick: (e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -1596,17 +1733,16 @@ async function render() {
   const view = document.getElementById("view");
   const nav = document.getElementById("nav");
   view.replaceChildren(...skeleton(3));
-  const tab = S.tab;
+  const tab = S.tab, stamp = ++S.renderSerial;
   try {
-    if (S.me && S.me.needs_onboarding) {
-      if (nav) nav.style.display = "none";
-      view.replaceChildren(renderOnboardingView());
-      return;
-    }
     if (nav) nav.style.display = "flex";
     const node = await VIEWS[tab]();
-    if (tab === S.tab) view.replaceChildren(node);
+    if (tab === S.tab && stamp === S.renderSerial) {
+      view.replaceChildren(node);
+      renderWithKatex(view);
+    }
   } catch (e) {
+    if (stamp !== S.renderSerial) return;
     if (nav) nav.style.display = "flex";
     view.replaceChildren(h("div", { class:"card" },
       h("h3", {}, "Не получилось загрузить"),
@@ -1618,105 +1754,6 @@ async function render() {
 function seg(items, cur, onPick) {
   return h("div", { class:"seg" }, items.map(([id, label]) =>
     h("button", { class: cur === id ? "on" : "", onclick: () => onPick(id) }, label)));
-}
-
-/* =========================================================
-   ONBOARDING / REGISTRATION VIEW (ПУНКТ 1: BYOK БЕЗ КОСТЫЛЕЙ)
-   ========================================================= */
-function renderOnboardingView() {
-  const acc = (S.me && S.me.account) || { name: "", avatar: "🧑‍💻" };
-  let curAvatar = acc.avatar || "🧑‍💻";
-  const avatarPreviewWrap = h("div", { class:"center", style:{marginBottom:"10px"} });
-  const nameInp = h("input", { type:"text", value: acc.name || "", placeholder:"Как к вам обращаться (напр., Артём)" });
-  const keyInp = h("input", { type:"text", placeholder:"Вставьте ваш ключ из Google AI Studio (AQ... или AIzaSy...)" });
-  const emojiGrid = h("div", { class:"emoji-grid" });
-
-  const drawAvatarState = () => {
-    avatarPreviewWrap.replaceChildren(renderAvatar(curAvatar, "lg"));
-    emojiGrid.replaceChildren(...AVATAR_EMOJIS.map(em =>
-      h("button", {
-        type:"button",
-        class: "emoji-pick" + (curAvatar === em ? " active" : ""),
-        onclick: () => { hap(); curAvatar = em; drawAvatarState(); }
-      }, em)
-    ));
-  };
-  drawAvatarState();
-
-  const photoInput = h("input", {
-    type:"file", accept:"image/*", class:"hidden",
-    onchange: async (e) => {
-      const f = e.target.files && e.target.files[0];
-      if (!f) return;
-      try {
-        curAvatar = await resizeAvatarImage(f);
-        drawAvatarState();
-        toast("Фото выбрано ✅", "ok");
-      } catch (err) { toast(err.message, "err"); }
-    }
-  });
-
-  return h("div", {},
-    h("div", { class:"hero center" },
-      avatarPreviewWrap,
-      h("h1", {}, "Добро пожаловать! 👋"),
-      h("div", { class:"sub", style:{marginTop:"6px"} },
-        "Настройте свой профиль и подключите личный ключ Google AI Studio для безлимитной работы.")
-    ),
-    h("div", { class:"card" },
-      h("div", { class:"row between", style:{marginBottom:"6px"} },
-        h("label", { style:{fontSize:"0.82rem", fontWeight:600, color:"var(--text-2)"} }, "Выберите аватарку"),
-        h("label", { class:"chip", style:{cursor:"pointer"} }, "📷 Загрузить фото", photoInput)
-      ),
-      emojiGrid,
-      h("div", { style:{marginTop:"14px"} }, field("👤 Ваше имя", nameInp)),
-      h("div", { style:{marginTop:"12px"} },
-        field("🔑 Ваш API-ключ Gemini (Bring Your Own Key)", keyInp),
-        h("div", { class:"sub", style:{marginTop:"6px"} },
-          "Получите бесплатно за 10 секунд на ",
-          h("a", { href:"https://aistudio.google.com/apikey", target:"_blank" }, "aistudio.google.com/apikey"),
-          ". Ваш ключ используется только для вашего профиля.")
-      ),
-      h("div", { class:"btn-row", style:{marginTop:"16px"} },
-        h("button", {
-          class:"btn ghost",
-          onclick: async (ev) => {
-            const k = keyInp.value.trim();
-            if (!k) return toast("Сначала вставьте ключ", "err");
-            ev.target.disabled = true;
-            try {
-              const res = await api("/api/keys/verify", { method:"POST", body: { api_key: k } });
-              pick("success"); toast("Ключ работает! (" + res.masked + ") ✅", "ok");
-            } catch (err) { toast(err.message, "err"); }
-            ev.target.disabled = false;
-          }
-        }, "🔍 Проверить ключ"),
-        h("button", {
-          class:"btn",
-          onclick: async (ev) => {
-            const name = nameInp.value.trim();
-            const k = keyInp.value.trim();
-            if (!name) return toast("Введите ваше имя", "err");
-            if (!k) return toast("Укажите ваш API-ключ Gemini", "err");
-            ev.target.disabled = true;
-            try {
-              await api("/api/keys/verify", { method:"POST", body: { api_key: k } });
-              await api("/api/settings", {
-                method:"POST",
-                body: { account_name: name, avatar: curAvatar, custom_api_key: k }
-              });
-              S.me = await api("/api/me");
-              pick("success"); toast("Профиль готов к работе! 🚀", "ok");
-              render();
-            } catch (err) {
-              toast(err.message, "err");
-              ev.target.disabled = false;
-            }
-          }
-        }, "🚀 Войти в приложение")
-      )
-    )
-  );
 }
 
 /* =========================================================
@@ -1735,9 +1772,8 @@ async function openProfileEditor() {
     const emojiGrid = h("div", { class:"emoji-grid" });
     const nameInp = h("input", { type:"text", value: curAcc.name || "", placeholder:"Ваше имя" });
     const keyInp = h("input", {
-       type:"text",
-       value: curAcc.custom_api_key || "",
-       placeholder: s.is_admin ? "Оставьте пустым для использования общих ключей бота…" : "Вставьте ваш ключ из Google AI Studio"
+       type:"password", autocomplete:"off", value:"",
+       placeholder:"Оставьте пустым, чтобы сохранить текущие настройки"
     });
 
     const photoInput = h("input", {
@@ -1777,17 +1813,17 @@ async function openProfileEditor() {
       avatarWrap,
       emojiGrid,
       h("div", { style:{marginTop:"14px"} }, field("✏️ Имя аккаунта", nameInp)),
-      h("div", { style:{marginTop:"12px"} },
-        field("🔑 Личный API-ключ Gemini (Bring Your Own Key)", keyInp),
+      S.me.has_ai ? h("div", { style:{marginTop:"12px"} },
+        field("Личный API-ключ Gemini", keyInp),
         h("div", { class:"sub", style:{marginTop:"4px"} },
           curAcc.has_custom_key
             ? "✅ Сейчас подключён личный ключ (" + curAcc.masked_key + ")"
             : (s.is_admin ? "☁️ Сейчас используется общий пул ключей администратора" : "⚠️ Ключ не задан"),
           " · ",
-          h("a", { href:"https://aistudio.google.com/apikey", target:"_blank" }, "Получить ключ"))
-      ),
+          h("a", { href:"https://aistudio.google.com/apikey", target:"_blank" }, "Настройки ключа"))
+      ) : null,
       h("div", { class:"btn-row", style:{marginTop:"16px"} },
-        h("button", {
+        S.me.has_ai ? h("button", {
           type:"button",
           class:"btn ghost",
           onclick: async (ev) => {
@@ -1800,7 +1836,7 @@ async function openProfileEditor() {
             } catch (err) { toast(err.message, "err"); }
             ev.target.disabled = false;
           }
-        }, "🔍 Проверить ключ"),
+        }, "🔍 Проверить ключ") : null,
         h("button", {
           type:"button",
           class:"btn",
@@ -1814,7 +1850,7 @@ async function openProfileEditor() {
                 body: {
                   account_name: newName,
                   avatar: curAvatar,
-                  custom_api_key: keyInp.value.trim()
+                  ...(keyInp.value.trim() ? { custom_api_key: keyInp.value.trim() } : {})
                 }
               });
               S.me = await api("/api/me");
@@ -1998,11 +2034,11 @@ async function openAccountSwitcher() {
         class:"btn ghost small block",
         style:{marginTop:"4px"},
         onclick: () => { close(); openProfileEditor(); }
-      }, "✏️ Изменить имя, аватарку или ключ текущего профиля"),
+      }, "Изменить текущий профиль"),
       h("h2", { style:{marginTop:"16px", marginBottom:"8px"} }, "➕ Создать новый аккаунт"),
       emojiRow,
       h("div", { style:{marginTop:"8px"} }, field("Имя пользователя", newNameInp)),
-      h("div", { style:{marginTop:"8px"} }, field("🔑 Личный API-ключ Gemini", newKeyInp)),
+      S.me.has_ai ? h("div", { style:{marginTop:"8px"} }, field("Личный API-ключ Gemini", newKeyInp)) : null,
       h("button", { class:"btn block", style:{marginTop:"12px"}, onclick: async (e) => {
         const name = newNameInp.value.trim();
         if (!name) return toast("Введите имя аккаунта", "err");
@@ -2113,7 +2149,7 @@ function lessonRow(l, now) {
   if (l.extra) cls.push("extra");
 
   const meta = getLessonMeta(l);
-  const filesCount = meta.files ? meta.files.length : 0;
+  const filesCount = l.file_count || meta.files.length;
 
   return h("div", { class: cls.join(" ") },
     h("div", { class:"time" }, l.start, h("small", {}, l.end)),
@@ -2126,7 +2162,7 @@ function lessonRow(l, now) {
         l.room && h("span", { class:"chip" }, "ауд. " + l.room),
         l.teacher && h("span", { class:"chip gray" }, l.teacher),
         l.kind && h("span", { class:"chip gray" }, l.kind),
-        meta.notes ? h("span", { class:"chip cyan" }, "📝 конспект") : null,
+        (l.has_notes || meta.notes) ? h("span", { class:"chip cyan" }, "📝 конспект") : null,
         filesCount ? h("span", { class:"chip purple" }, "📎 " + filesCount) : null,
         l.extra && h("span", { class:"chip warn" }, "разово"),
         l.parity !== "all" && !l.extra && h("span", { class:"chip gray" }, l.parity === "odd" ? "нечёт." : "чёт.")
@@ -2385,176 +2421,94 @@ function openFocusModal(gStateInitial) {
   });
 }
 
-async function viewHome() {
-  const [d, gState] = await Promise.all([
-    api("/api/home").catch(() => ({ today: null, tasks: [], cards_due: 0, cards_total: 0, parity: null })),
-    api("/api/g/state").catch(() => null)
-  ]);
-  const me = S.me;
-  const now = new Date().toTimeString().slice(0, 5);
-  const dateStr = new Date().toLocaleDateString("ru-RU", { weekday: "long", day: "numeric", month: "long" });
-  const acc = (me && me.account) || { name: "Артём", avatar: "🧑‍💻" };
-  const accName = acc.name || "Артём";
+function dailyButton(label, action, kind="ghost") {
+  return h("button", {type:"button", class:"btn "+kind, onclick:async ev => {
+    const btn = ev.currentTarget;
+    btn.disabled = true;
+    try { await action(); } catch (e) { toast(e.message, "err"); }
+    finally { btn.disabled = false; }
+  }}, label);
+}
 
-  const root = h("div", {});
+function dailyProfile() {
+  sheet("Мой ежедневник", close => h("div", {class:"stack"},
+    dailyButton("Как пользоваться", () => { close(); openGuide(); }),
+    dailyButton("Оформление", () => { close(); openAppearanceSheet(); }),
+    dailyButton("Профили", () => { close(); return openAccountSwitcher(); }),
+    dailyButton("Имя и аватар", () => { close(); return openProfileEditor(); })));
+}
 
-  // 1. Классический чистый Hero-блок
-  root.append(h("div", { class: "hero" },
-    h("div", { class: "row", style: { gap: "12px", marginBottom: "10px" } },
-      renderAvatar(acc.avatar, "", openProfileEditor),
-      h("div", { class: "grow" },
-        h("h1", { style: { cursor: "pointer" }, onclick: openProfileEditor }, "Привет, " + accName + " 👋"),
-        h("div", { class: "sub", style: { marginTop: "2px" } },
-          dateStr.charAt(0).toUpperCase() + dateStr.slice(1) + (d.parity ? " · " + PARITY[d.parity] : ""))
-      )
-    ),
-    h("div", { class: "row wrap", style: { gap: "6px" } },
-      h("button", { class: "acc-pill", onclick: openProfileEditor, title: "Изменить имя, аватарку или API-ключ" },
-        renderAvatar(acc.avatar, "sm"),
-        h("span", { class: "truncate" }, accName),
-        h("span", { style: { opacity: .6, fontSize: "0.7rem" } }, "✏️")),
-      h("button", { class: "model-pill", onclick: openModelPicker, title: "Сменить модель" },
-        h("span", { class: "dot" }),
-        shortModelName(me && me.model),
-        acc.has_custom_key ? " 🔑" : ""),
-      gState ? h("button", {
-        class: "chip green",
-        onclick: () => switchTab("growth")
-      }, `🔥 ${gState.streak} дн. · ⚡ Ур. ${gState.level}`) : null,
-      h("button", { class: "btn ghost small icon", onclick: openAppearanceSheet, title: "Оформление и масштаб" }, "🎨")
-    )
-  ));
+function sampleDay() {
+  sheet("Пример учебного дня", () => h("div", {class:"stack"},
+    h("div", {class:"day-feature"}, h("small", {}, "Ближайшая пара"), h("strong", {}, "12:10"),
+      h("h2", {}, "Математический анализ"), h("p", {}, "Семинар · аудитория 314")),
+    h("div", {class:"day-line"}, h("b", {}, "До 18:00"), h("span", {}, "Сдать лабораторную № 7")),
+    h("div", {class:"sub"}, "Это пример. Ваше расписание заполняется отдельно.")));
+}
 
-  // 2. Сегодня (пары)
-  const t = d.today;
-  const lessons = (t && Array.isArray(t.lessons)) ? t.lessons : [];
-  root.append(h("h2", {}, "Сегодня"));
-  if (!t) {
-    root.append(empty("📅", "Модуль расписания не подключён", null));
-  } else if (!lessons.length) {
-    root.append(h("div", { class: "card", style: { textAlign: "center", padding: "18px 14px" } },
-      h("div", { style: { fontSize: "32px", marginBottom: "4px" } }, "🎉"),
-      h("div", { style: { fontWeight: 700 } }, "Пар нет"),
-      h("div", { class: "sub", style: { marginTop: "2px" } }, "Свободный день")));
-  } else {
-    lessons.forEach(l => {
-      const el = lessonRow(l, now);
-      if (l.session_exam) {
-        el.style.borderColor = "rgba(168,85,247,0.45)";
-        el.addEventListener("click", () => sessionExamActions(l));
-      } else {
-        el.addEventListener("click", () => lessonActions(l, { date: S.today }));
-      }
-      root.append(el);
-    });
-  }
-
-  // 3. Ближайшие дедлайны
-  const tasksList = (d.tasks && Array.isArray(d.tasks)) ? d.tasks : [];
-  if (tasksList.length) {
-    const sortedHomeTasks = [...tasksList].sort((a, b) => getTaskTimestamp(a) - getTaskTimestamp(b));
-    const urgentCount = sortedHomeTasks.filter(k => k.overdue || k.soon || isBurning30Min(k)).length;
-    const nearest = sortedHomeTasks[0];
-
-    root.append(
-      h("details", {
-        class: "group-acc",
-        style: { marginTop: "14px" },
-        open: S.homeDeadlinesOpen,
-        ontoggle: (e) => { S.homeDeadlinesOpen = e.target.open; }
-      },
-        h("summary", {},
-          h("div", { class: "group-icon" }, "⏳"),
-          h("div", { class: "group-meta" },
-            h("div", { class: "g-title" }, "Ближайшие дедлайны"),
-            h("div", { class: "g-sub truncate" },
-              nearest ? "Ближайший: " + fmtDeadline(nearest) + " — " + nearest.text : "Нажмите, чтобы развернуть")
-          ),
-          urgentCount ? h("span", { class: "chip red" }, "🔥 " + urgentCount) : null,
-          h("span", { class: "chip" }, sortedHomeTasks.length),
-          h("span", { class: "chev" })
-        ),
-        h("div", { class: "group-body" },
-          ...sortedHomeTasks.map(k => {
-            const burning = isBurning30Min(k);
-            const urgent = burning || k.overdue ? "red" : k.soon ? "warn" : "gray";
-            const kindInfo = getTaskKindInfo(k);
-            return h("div", { class: "card tight", style: { marginBottom: 0 } },
-              h("div", { class: "row" },
-                h("div", { class: "grow" },
-                  h("div", { class: "line-clamp-2", style: { fontWeight: 600, fontSize: "0.92rem" } }, k.text),
-                  h("div", { class: "chips" },
-                    h("span", { class: "chip " + (kindInfo.chipCls || "gray") }, kindInfo.icon + " " + kindInfo.label),
-                    h("span", { class: "chip " + urgent },
-                      (k.overdue ? "⏰ просрочено · " : "📅 ") + fmtDeadline(k)),
-                    h("span", { class: "chip gray" }, k.topic)
-                  )),
-                h("button", { class: "btn small", title: "Отметить выполненным", onclick: async () => {
-                  await api("/api/tasks/" + k.id + "/done", { method: "POST" });
-                  hap("medium"); pick("success"); toast("Готово ✅", "ok"); render();
-                }}, "✅"))
-            );
-          })
-        )
-      )
+function openGuide() {
+  const steps = [
+    ["Сегодня", "Здесь ближайшая пара, дедлайны и карточки к повторению. Нажми на пару, чтобы записать домашнее задание и заметки."],
+    ["Расписание", "Добавь первую пару или открой ссылку от одногруппника. Изменения общей сетки увидят подписчики, а материалы к занятиям останутся личными."],
+    ["Задачи", "Добавь дело со сроком. Кнопка «Готово» отмечает его выполненным."],
+    ["Учёба", "Создай карточки по предмету и повторяй их. Чат и дополнительные инструменты доступны здесь, если настроен ИИ."]
+  ];
+  let index = 0;
+  sheet("Как пользоваться", close => {
+    const content = h("div", {class:"stack"});
+    const draw = () => content.replaceChildren(
+      h("div", {class:"sub"}, (index+1)+" из "+steps.length),
+      h("h2", {}, steps[index][0]),
+      h("p", {}, steps[index][1]),
+      dailyButton(index === steps.length-1 ? "Готово" : "Дальше", () => {
+        if (index === steps.length-1) { close(); return; }
+        index++; draw();
+      }, "block"),
+      index ? dailyButton("Назад", () => { index--; draw(); }) : null
     );
+    draw();
+    return content;
+  });
+}
+
+async function viewHome() {
+  const d = await api("/api/home");
+  if (!d.today) throw new Error("Расписание временно недоступно");
+  const day = d.today, now = (d.now || S.me.now).slice(11,16);
+  S.today = day.date;
+  const lessons = day.lessons || [];
+  const next = lessons.find(l => l.end > now);
+  const root = h("div", {class:"daily"},
+    h("header", {class:"day-head"}, h("div", {}, h("small", {}, day.title), h("h1", {}, "Сегодня")),
+      dailyButton("Мой профиль", dailyProfile)));
+  if (next) {
+    root.append(h("section", {class:"day-feature"},
+      h("small", {}, next.start <= now ? "Сейчас идёт" : "Ближайшая пара"),
+      h("div", {class:"day-time"}, h("strong", {}, next.start), h("span", {}, " — "+next.end)),
+      h("h2", {}, next.subject), h("p", {}, [next.kind, next.room && "ауд. "+next.room, next.teacher].filter(Boolean).join(" · ")),
+      dailyButton(next.session_exam ? "Открыть экзамен" : "Материалы пары", () => next.session_exam ? sessionExamActions(next) : lessonActions(next, day))));
+  } else if (!d.has_schedule && !d.sharing?.following && !lessons.length) {
+    root.append(h("section", {class:"day-feature"}, h("h2", {}, "Добавьте первую пару"),
+      h("p", {}, "Если одногруппник уже ведёт расписание, откройте его ссылку в Telegram."),
+      dailyButton("Добавить пару", () => lessonForm(null, day.date)),
+      dailyButton("Посмотреть пример дня", sampleDay)));
+  } else {
+    root.append(h("section", {class:"day-feature"}, h("h2", {}, lessons.length ? "Пары на сегодня закончились" : "Сегодня пар нет"),
+      dailyButton("Посмотреть неделю", () => { S.ttDate=day.date; switchTab("tt"); })));
   }
-
-  // 4. Карточки (ровное кольцо прогресса)
-  if (S.me && S.me.features.study) {
-    root.append(h("h2", {}, "Карточки"));
-    const pct = d.cards_total ? Math.round(100 * (d.cards_total - d.cards_due) / d.cards_total) : 0;
-    root.append(h("div", { class: "card row", style: { gap: "14px", alignItems: "center" } },
-      h("div", { class: "ring" + (pct >= 100 ? " ok" : ""), style: { "--p": pct } }, h("div", {}, pct + "%")),
-      h("div", { class: "grow" },
-        h("b", {}, d.cards_due ? d.cards_due + " к повторению" : "На сегодня всё 🎉"),
-        h("div", { class: "sub" }, "Всего карточек: " + d.cards_total),
-        h("button", { class: "btn subtle small", style: { marginTop: "8px" }, onclick: () => {
-          S.studySub = "cards"; switchTab("study");
-        }}, d.cards_due ? "Учить" : "Открыть колоды"))));
-  }
-
-  // 5. Выдвигающееся меню Фокус-таймера по предметам
-  const curMin = String(Math.floor(S.pomoSec / 60)).padStart(2, "0");
-  const curSec = String(S.pomoSec % 60).padStart(2, "0");
-  root.append(h("h2", {}, "Фокус и Таймеры"));
-  root.append(
-    h("div", {
-      class: "card tappable row between",
-      onclick: () => openFocusModal(gState)
-    },
-      h("div", { class: "row", style: { gap: "12px" } },
-        h("div", { class: "group-icon", style: { fontSize: "20px" } }, "🍅"),
-        h("div", { class: "grow" },
-          h("div", { style: { fontWeight: 800, fontSize: "0.96rem" } },
-            S.pomoRun ? `Идёт фокус: ${S.focusSubj} (${curMin}:${curSec})` : "Фокус-таймер по предметам"),
-          h("div", { class: "sub" }, "Таймеры предметов, учёт каждой паузы и ИИ-отчёт недели")
-        )
-      ),
-      h("span", { class: "chip green" }, S.pomoRun ? `${curMin}:${curSec}` : "Открыть →")
-    )
-  );
-
-  // 6. Быстрые действия
-  root.append(h("h2", {}, "Быстрые действия"));
-  root.append(h("div", { class: "stack" },
-    h("button", { class: "btn ghost", style: { justifyContent: "flex-start", padding: "12px 14px" },
-      onclick: () => { S.chatSub = "chat"; switchTab("chat"); } },
-      h("span", { style: { fontSize: "19px" } }, "💬"), h("span", {}, "Задать вопрос ИИ")),
-    h("button", { class: "btn ghost", style: { justifyContent: "flex-start", padding: "12px 14px" },
-      onclick: () => taskCreateForm() },
-      h("span", { style: { fontSize: "19px" } }, "📋"), h("span", {}, "Добавить задачу или таймер")),
-    h("button", { class: "btn ghost", style: { justifyContent: "flex-start", padding: "12px 14px" },
-      onclick: () => lessonForm(null, S.today) },
-      h("span", { style: { fontSize: "19px" } }, "➕"), h("span", {}, "Добавить пару")),
-    h("button", { class: "btn ghost", style: { justifyContent: "flex-start", padding: "12px 14px" },
-      onclick: openProfileEditor },
-      h("span", { style: { fontSize: "19px" } }, "🔑"), h("span", {}, "Профиль, аватарка и свой API-ключ"))
-  ));
-
+  root.append(h("div",{class:"day-head"},h("h2",{},"Ближайшие дедлайны"),dailyButton("+ Задача", () => taskCreateForm())));
+  const tasks = (d.tasks || []).slice(0,3);
+  tasks.forEach(t => root.append(h("div",{class:"day-line"},
+    dailyButton("Готово", async () => { const r = await api("/api/tasks/"+t.id+"/done",{method:"POST"});
+      if (!r.ok) throw new Error("Задача уже изменилась"); await render(); }),
+    h("div",{},h("b",{},t.text || "Задача"),h("small",{},(t.overdue ? "Просрочено · " : "") + fmtDeadline(t))))));
+  if (!tasks.length) root.append(h("p",{class:"sub"},"Задач со сроком пока нет."));
+  if (d.cards_due) root.append(dailyButton("Повторить карточки · "+d.cards_due, () => session(), "block"));
+  if (lessons.length > 1) root.append(dailyButton("Все занятия на сегодня · "+lessons.length, () => { S.ttDate=day.date; switchTab("tt"); }, "ghost block"));
+  root.append(dailyButton("Открыть фокус-таймер", () => openFocusModal(null), "ghost block"));
   return root;
 }
-   
+
 /* =========================================================
    TIMETABLE
    ========================================================= */
@@ -2585,6 +2539,9 @@ async function viewTT() {
     )
   ));
 
+  const shared = w.sharing?.following;
+  root.append(h("div",{class:"day-share"}, shared ? h("small",{}, "Общее расписание · "+w.sharing.publisher) : null,
+    dailyButton(shared ? "Управление подпиской" : "Поделиться расписанием", () => sharingSheet(w.sharing))));
   root.append(h("div", { class:"week-nav" },
     h("button", { onclick: () => { S.ttDate = addDays(w.monday, -7); render(); }, "aria-label":"Назад" }, "‹"),
     h("div", { class:"label" }, fmtShort(w.monday) + " – " + fmtShort(addDays(w.monday, 6))),
@@ -2629,8 +2586,8 @@ async function viewTT() {
       isSess ? "В этот день экзаменов нет" : "Пар нет",
       isSess ? "Нажми кнопку ниже, чтобы назначить экзамен, коллоквиум, зачёт, тест или защиту лабы на этот день" : "Свободный день — отличный повод отдохнуть",
       h("div", { class:"btn-row", style:{maxWidth:"340px"} },
-        h("button", { class:"btn", onclick: () => isSess ? sessionExamForm(null, day.date) : lessonForm(null, day.date) },
-          isSess ? "🎓 Назначить экзамен / коллоквиум" : "➕ Добавить пару"),
+        (isSess || !shared) ? h("button", { class:"btn", onclick: () => isSess ? sessionExamForm(null, day.date) : lessonForm(null, day.date) },
+          isSess ? "🎓 Назначить экзамен / коллоквиум" : "➕ Добавить пару") : null,
         !isSess ? h("button", { class:"btn ghost", onclick: () => sessionExamForm(null, day.date) }, "🎓 Добавить экзамен") : null
       )
     ));
@@ -2652,7 +2609,7 @@ async function viewTT() {
       "❌ Отменено: " + day.cancelled.map(l => l.subject + " (" + l.start + ")").join(", ")));
   }
 
-  root.append(h("button", {
+  if (isSess || !shared) root.append(h("button", {
     class:"fab",
     onclick: () => isSess ? sessionExamForm(null, day.date) : lessonForm(null, day.date),
     title: isSess ? "Назначить экзамен" : "Добавить пару"
@@ -2785,118 +2742,100 @@ function readFilesAsDataURL(fileList) {
   })));
 }
 
-function lessonActions(l, day) {
-  const meta = getLessonMeta(l);
-  const dDate = (day && day.date) || S.ttDate || S.today;
+function shareAction(action, body={}) {
+  return api("/api/timetable/share", {method:"POST", body:{action, ...body}});
+}
 
-  sheet(l.subject, (close) => {
-    const wrap = h("div", {});
-
-    const drawContent = () => {
-      wrap.replaceChildren(
-        h("div", { class:"chips", style:{marginTop:0, marginBottom:"14px"} },
-          h("span", { class:"chip" }, "🕒 " + l.start + "–" + l.end),
-          l.room ? h("span", { class:"chip" }, "ауд. " + l.room) : null,
-          l.teacher ? h("span", { class:"chip gray" }, l.teacher) : null,
-          l.kind ? h("span", { class:"chip gray" }, l.kind) : null
-        ),
-
-        h("div", { class:"info-box" },
-          h("div", { class:"info-title" }, "📌 Краткое описание"),
-          h("div", { class:"info-body", style:{color: meta.description ? "var(--text)" : "var(--text-3)"} },
-            meta.description || "Нет краткого описания. Нажмите «Изменить», чтобы добавить.")
-        ),
-
-        h("div", { class:"info-box" },
-          h("div", { class:"info-title" }, "📚 Домашнее задание (ДЗ)"),
-          h("div", { class:"info-body", style:{color: meta.homework ? "var(--text)" : "var(--text-3)"} },
-            meta.homework || "ДЗ пока не записано.")
-        ),
-
-        h("div", { class:"info-box" },
-          h("div", { class:"info-title" }, "📝 Информация с пары / Конспект"),
-          h("div", { class:"info-body", style:{color: meta.notes ? "var(--text)" : "var(--text-3)"} },
-            meta.notes || "Заметок с пары пока нет.")
-        ),
-
-        h("div", { class:"info-box" },
-          h("div", { class:"row between wrap" },
-            h("div", { class:"info-title", style:{marginBottom:0} }, "📎 Файлы (" + meta.files.length + ")"),
-            h("label", { class:"chip", style:{cursor:"pointer"} },
-              "➕ Добавить файл",
-              h("input", {
-                type:"file", multiple:true, class:"hidden",
-                onchange: async (e) => {
-                  if (!e.target.files || !e.target.files.length) return;
-                  try {
-                    const added = await readFilesAsDataURL(e.target.files);
-                    meta.files.push(...added);
-                    saveLessonMeta(l, meta);
-                    toast("Файл(ы) прикреплены 📎", "ok");
-                    drawContent();
-                    render();
-                  } catch (err) { toast(err.message, "err"); }
-                }
-              })
-            )
-          ),
-          meta.files.length ? h("div", { class:"file-list" },
-            meta.files.map((f, idx) => {
-              const isImg = (f.type || "").startsWith("image/");
-              return h("div", { class:"file-item", onclick: () => previewFileModal(f) },
-                isImg && f.data
-                  ? h("img", { class:"file-thumb", src: f.data, alt: f.name })
-                  : h("div", { class:"file-thumb" }, "📄"),
-                h("div", { class:"file-info" },
-                  h("div", { class:"file-name" }, f.name),
-                  h("div", { class:"file-size" }, fmtBytes(f.size) + " · нажми для просмотра")
-                ),
-                h("button", {
-                  class:"btn danger small icon",
-                  title:"Удалить файл",
-                  onclick: (ev) => {
-                    ev.stopPropagation();
-                    meta.files.splice(idx, 1);
-                    saveLessonMeta(l, meta);
-                    drawContent();
-                    render();
-                  }
-                }, "✕")
-              );
-            })
-          ) : h("div", { class:"sub", style:{marginTop:"6px"} }, "Прикрепите фото доски, методичку или PDF к паре.")
-        ),
-
-        h("div", { class:"stack", style:{marginTop:"14px"} },
-          h("button", { class:"btn block", onclick: () => { close(); lessonForm(l, dDate); } },
-            "✏️ Изменить пару, ДЗ, аудиторию и материалы"),
-          l.id ? h("button", { class:"btn ghost block", onclick: async () => {
-            await api("/api/timetable/exception", { method:"POST", body: { date: dDate, kind: "cancel", lesson_id: l.id } });
-            close(); toast("Отменено на этот день", "ok"); render();
-          }}, "🚫 Отменить на " + fmtShort(dDate)) : null,
-          h("button", { class:"btn danger block", onclick: async () => {
-            if (!confirm("Удалить пару из расписания совсем?")) return;
-            if (l.id) {
-              await api("/api/timetable/lesson/" + l.id, { method:"DELETE" });
-            } else if (l.exc_id) {
-              await api("/api/timetable/exception/" + l.exc_id, { method:"DELETE" });
-            }
-            close(); toast("Удалено"); render();
-          }}, "🗑 Удалить")
-        )
-      );
-    };
-
-    drawContent();
-    return wrap;
+function sharingSheet(info) {
+  sheet(info.following ? "Подписка на расписание" : "Расписание для группы", close => {
+    if (info.following) return h("div",{class:"stack"},
+      h("p",{},"Расписание ведёт "+info.publisher+". Ваши материалы к занятиям видны только вам."),
+      dailyButton("Настроить уведомления", () => { close(); return ttSettings(); }),
+      dailyButton("Вернуться к своему расписанию", async () => { await shareAction("leave"); close(); await render(); }));
+    const box = h("div",{class:"stack"});
+    const revoke = dailyButton("Отозвать ссылку", async () => {
+      if (!confirm("Отключить ссылку и подписки на вашу сетку пар?")) return;
+      await shareAction("revoke"); close(); await render();
+    });
+    revoke.hidden = !info.published;
+    box.append(h("p",{},"По ссылке одногруппники увидят предметы, преподавателей, аудитории и переносы. Домашние задания, файлы и оценки останутся личными."),
+      dailyButton("Получить ссылку", async () => {
+        const {url} = await shareAction("publish");
+        const input = h("input",{value:url,readonly:true,"aria-label":"Ссылка-приглашение",onclick:e=>e.target.select()});
+        const shareUrl = "https://t.me/share/url?url="+encodeURIComponent(url)+"&text="+encodeURIComponent("Наше расписание пар");
+        box.replaceChildren(input, dailyButton("Выбрать чат в Telegram", () => {
+          if (tg?.openTelegramLink) tg.openTelegramLink(shareUrl);
+          else window.open(shareUrl,"_blank","noopener");
+        }), revoke);
+        revoke.hidden = false;
+      },"block"), revoke);
+    return box;
   });
 }
-   
+
+async function showInvite(code) {
+  try {
+    const info = await shareAction("preview", {code});
+    sheet("Приглашение в расписание", close => {
+      const notify = h("input",{type:"checkbox"});
+      return h("div",{class:"stack"},h("p",{},"Расписание ведёт "+info.publisher+". Можно вернуться к своему расписанию в любой момент."),
+        h("label",{class:"day-check"}, notify, "Сообщать об изменениях в Telegram"),
+        dailyButton("Подписаться", async () => {
+          await shareAction("follow",{code,notify:notify.checked});
+          close(); S.tab="tt"; S.ttDate=S.today; drawNav(); await render();
+        },"block"),dailyButton("Закрыть",close));
+    });
+  } catch (e) { toast(e.message,"err"); }
+}
+
+async function lessonActions(l, day) {
+  const key = {id:l.id || 0, exc_id:l.exc_id || 0, date:day.date, source:l.source};
+  try {
+    const meta = await api("/api/timetable/materials?"+new URLSearchParams(key), {fresh:true});
+    sheet(l.subject, close => {
+      const homework=h("textarea", {placeholder:"Что задали?"}, meta.homework || "");
+      const notes=h("textarea", {placeholder:"Записи с занятия"}, meta.notes || "");
+      const description=h("input", {value:meta.description || "",placeholder:"Тема занятия"});
+      let files=[...(meta.files || [])];
+      const list=h("div",{class:"stack"});
+      const draw=()=>list.replaceChildren(...files.map(f=>h("div",{class:"row"},
+        dailyButton(f.name,()=>previewFileModal(f)),dailyButton("Убрать",()=>{files=files.filter(item=>item!==f);draw();}))));
+      draw();
+      const upload=h("input",{type:"file",multiple:true,onchange:async e=>{
+        const selected = Array.from(e.target.files);
+        if (files.length+selected.length>8 || [...files,...selected].reduce((n,f)=>n+f.size,0)>3*1024*1024) {
+          toast("До 8 файлов, всего до 3 МБ","err"); e.target.value=""; return;
+        }
+        try { files.push(...await readFilesAsDataURL(selected)); draw(); }
+        catch (err) { toast(err.message,"err"); }
+        finally { upload.value=""; }
+      }});
+      return h("div",{class:"stack"},
+        h("p",{class:"sub"},fmtShort(day.date)+" · "+l.start+"–"+l.end+(l.room ? " · ауд. "+l.room : "")),
+        h("h2",{},"Мои материалы"),field("Тема занятия",description),field("Домашнее задание",homework),
+        field("Конспект",notes),field("Файлы · до 3 МБ",upload),list,
+        dailyButton("Сохранить материалы",async()=>{
+          if (upload.files?.length) throw new Error("Дождитесь чтения файлов");
+          await api("/api/timetable/materials",{method:"POST",body:{...key,revision:meta.revision || 0,
+            homework:homework.value,description:description.value,notes:notes.value,files}});
+          close(); toast("Материалы сохранены","ok"); await render();
+        },"block"),
+        !l.shared && l.id ? dailyButton("Изменить пару",()=>{close();lessonForm(l,day.date);}) : null,
+        !l.shared && l.id ? dailyButton("Отменить на "+fmtShort(day.date),async()=>{
+          await api("/api/timetable/exception",{method:"POST",body:{date:day.date,kind:"cancel",lesson_id:l.id}});
+          close(); await render();
+        }) : null,
+        !l.shared ? dailyButton("Удалить из расписания",async()=>{
+          if (!confirm("Удалить пару из расписания?")) return;
+          await api("/api/timetable/"+(l.id ? "lesson/"+l.id : "exception/"+l.exc_id),{method:"DELETE"});
+          close(); await render();
+        }) : null);
+    });
+  } catch (e) { toast(e.message,"err"); }
+}
+
 function lessonForm(l, date) {
   const wd = l ? l.weekday : (parse(date || S.today).getDay() + 6) % 7;
-  const existingMeta = l ? getLessonMeta(l) : { description:"", homework:"", notes:"", files:[] };
-  let attachedFiles = [...existingMeta.files];
-
   sheet(l ? "Изменить пару" : "Новая пара", (close) => {
     const f = {
       weekday: h("select", {}, DAYS.map((d, i) => h("option", { value: i, selected: i === wd }, d))),
@@ -2908,44 +2847,7 @@ function lessonForm(l, date) {
       kind: h("input", { type:"text", value: l ? l.kind : "", placeholder:"Лекция, семинар…" }),
       parity: h("select", {}, [["all","Каждую неделю"],["odd","Нечётные недели"],["even","Чётные недели"]]
         .map(([v, t]) => h("option", { value: v, selected: l && l.parity === v }, t))),
-      description: h("input", { type:"text", value: existingMeta.description, placeholder:"Краткое описание занятия…" }),
-      homework: h("textarea", { placeholder:"Что задали на дом, номера задач…" }, existingMeta.homework),
-      notes: h("textarea", { placeholder:"Информация с пары, важные тезисы…" }, existingMeta.notes)
     };
-
-    const filesContainer = h("div", { class:"file-list" });
-    const renderAttachedFiles = () => {
-      filesContainer.replaceChildren(...attachedFiles.map((file, idx) => {
-        const isImg = (file.type || "").startsWith("image/");
-        return h("div", { class:"file-item", onclick: () => previewFileModal(file) },
-          isImg && file.data
-            ? h("img", { class:"file-thumb", src: file.data, alt: file.name })
-            : h("div", { class:"file-thumb" }, "📎"),
-          h("div", { class:"file-info" },
-            h("div", { class:"file-name" }, file.name),
-            h("div", { class:"file-size" }, fmtBytes(file.size))
-          ),
-          h("button", {
-            type:"button", class:"btn danger small icon",
-            onclick: (ev) => { ev.stopPropagation(); attachedFiles.splice(idx, 1); renderAttachedFiles(); }
-          }, "✕")
-        );
-      }));
-    };
-    renderAttachedFiles();
-
-    const fileInput = h("input", {
-      type:"file", multiple:true, class:"hidden",
-      onchange: async (e) => {
-        if (!e.target.files || !e.target.files.length) return;
-        try {
-          const added = await readFilesAsDataURL(e.target.files);
-          attachedFiles.push(...added);
-          renderAttachedFiles();
-          toast("Добавлено файлов: " + added.length, "ok");
-        } catch (err) { toast(err.message, "err"); }
-      }
-    });
 
     return h("div", {},
       field("День недели", f.weekday),
@@ -2959,18 +2861,6 @@ function lessonForm(l, date) {
       h("div", { style:{marginTop:"8px"} }, field("Преподаватель", f.teacher)),
       h("div", { style:{marginTop:"8px"} }, field("Недели", f.parity)),
 
-      h("h2", { style:{marginTop:"16px", marginBottom:"8px"} }, "Характеристики и материалы пары"),
-      h("div", { style:{marginTop:"6px"} }, field("📌 Краткое описание", f.description)),
-      h("div", { style:{marginTop:"8px"} }, field("📚 Домашнее задание (ДЗ)", f.homework)),
-      h("div", { style:{marginTop:"8px"} }, field("📝 Информация с пары / Конспект", f.notes)),
-      h("div", { style:{marginTop:"10px"} },
-        field("📎 Файлы (ДЗ, презентации, фото конспектов)",
-          h("label", { class:"file-upload-zone" },
-            "📎 Выбрать и прикрепить файлы", fileInput)
-        ),
-        filesContainer
-      ),
-
       h("button", { class:"btn block", style:{marginTop:"18px"}, onclick: async (e) => {
         e.target.disabled = true;
         const payload = {
@@ -2979,18 +2869,10 @@ function lessonForm(l, date) {
           start: f.start.value, end: f.end.value,
           subject: f.subject.value, room: f.room.value,
           teacher: f.teacher.value, kind: f.kind.value,
-          parity: f.parity.value,
-          description: f.description.value.trim(),
-          homework: f.homework.value.trim(),
-          notes: f.notes.value.trim(),
-          files: attachedFiles
+          parity: f.parity.value
         };
         try {
-          const res = await api("/api/timetable/lesson", { method:"POST", body: payload });
-          const newId = (res && res.lesson && res.lesson.id) || (res && res.id);
-          const targetLesson = Object.assign({}, l || {}, payload, newId ? { id: newId } : {});
-          saveLessonMeta(targetLesson, payload);
-          saveLessonMeta(payload, payload);
+          await api("/api/timetable/lesson", {method:"POST",body:payload});
           close(); toast("Сохранено ✅", "ok"); render();
         } catch (er) { toast(er.message, "err"); e.target.disabled = false; }
       }}, "Сохранить"));
@@ -3004,20 +2886,22 @@ async function ttSettings() {
       .map(([v, n]) => h("option", { value: v, selected: (t.parity_now || "") === v }, n)));
     const dig = h("button", { class:"sw" + (t.settings.digest_on ? " on" : ""),
       onclick: (e) => e.target.classList.toggle("on") });
+    const changeNotice = h("input",{type:"checkbox",checked:t.sharing?.notify_changes});
     const hour = h("input", { type:"number", min:0, max:23, value: t.settings.digest_hour });
     const rem = h("input", { type:"number", min:0, max:180, value: t.settings.remind_min });
     return h("div", {},
-      field("Сейчас идёт неделя", par),
+      t.sharing?.following ? h("div",{class:"sub"},"Чётность недели задаёт автор расписания") : field("Сейчас идёт неделя", par),
       h("div", { class:"row between", style:{marginTop:"14px", marginBottom:"8px"} },
         h("div", { class:"grow" }, h("div", {style:{fontWeight:600}}, "Утренняя сводка"),
           h("div", { class:"sub" }, "Присылать расписание и дедлайны утром")), dig),
+      t.sharing?.following ? h("label",{class:"day-check"}, changeNotice, "Изменения расписания в Telegram") : null,
       h("div", { style:{marginTop:"6px"} }, field("Час сводки (0–23)", hour)),
       h("div", { style:{marginTop:"6px"} }, field("Напоминать о паре за (минут, 0 — выкл.)", rem)),
       h("button", { class:"btn block", style:{marginTop:"14px"}, onclick: async () => {
         try {
           await api("/api/timetable/settings", { method:"POST", body: {
             digest_on: dig.classList.contains("on"),
-            digest_hour: +hour.value, remind_min: +rem.value, parity: par.value
+            digest_hour: +hour.value, remind_min: +rem.value, parity: par.value, notify_changes: changeNotice.checked
           }});
           close(); toast("Сохранено ✅", "ok"); render();
         } catch (e) { toast(e.message, "err"); }
@@ -3128,7 +3012,7 @@ async function taskCreateForm(availGroups) {
               publish: pubSw.classList.contains("on") && g.chat_id < 0
             }
           });
-          pick("success"); toast("Задача добавлена ✅", "ok");
+          pick("success"); taskConfirmation();
           close();
           render();
         } catch (err) {
@@ -3452,6 +3336,8 @@ async function viewStudy() {
   const root = h("div", {},
     h("h1", { style:{marginBottom:"14px"} }, "Учёба"),
     seg([["cards","🃏 Карточки"],["quiz","🎯 Квизы"]], S.studySub, (id) => { S.studySub = id; render(); }));
+  root.append(h("div",{class:"study-links"},
+    S.me.has_ai ? dailyButton("Чат", () => switchTab("chat")) : null, dailyButton("Рост и цели", () => switchTab("growth"))));
   root.append(S.studySub === "cards" ? await cardsPane() : await quizPane());
   return root;
 }
@@ -3465,6 +3351,13 @@ async function cardsPane() {
   const allCards = list.cards || [];
   const pct = c.total ? Math.round(100 * c.learned / c.total) : 0;
   const box = h("div", {});
+
+  if (!allCards.length) {
+    box.append(empty("🃏", "Пока нет карточек",
+      "Создай первую карточку и повторяй материал по предметам.",
+      h("button", {class:"btn", onclick:cardForm}, "Создать карточку")));
+    return box;
+  }
 
   box.append(h("div", { class:"stats" },
     h("div", { class:"stat" }, h("b", {}, c.total), h("span", {}, "Всего")),
@@ -3481,12 +3374,6 @@ async function cardsPane() {
         h("button", { class:"btn ghost small", onclick: cardForm }, "➕ Добавить / ИИ-генерация"),
         h("button", { class:"btn subtle small", disabled: !c.total, onclick: () => session(null) }, "🔀 Микс всех тем")
       ))));
-
-  if (!allCards.length) {
-    box.append(empty("🃏", "Пока нет карточек", "Добавь слова или сгенерируй карточки по любой теме с помощью ИИ",
-      h("button", { class:"btn", onclick: cardForm }, "➕ Создать карточки")));
-    return box;
-  }
 
   // Группируем карточки строго по темам (deck)
   const decksMap = new Map();
@@ -3953,8 +3840,12 @@ function chatDialogPane() {
           );
         }),
 
+        !m.loading && !isMe && m.text ? reactionPicker(m, drawMessages) : null,
         !m.loading ? h("div", { class:"meta-row" },
           m.model ? h("span", {}, "⚡ " + shortModelName(m.model)) : null,
+          !isMe && m.text ? h("button", { class:"act-btn", onclick: () => exportMessageDoc(m.text, "pdf") }, "📄 PDF") : null,
+          !isMe && m.text ? h("button", { class:"act-btn", onclick: () => exportMessageDoc(m.text, "docx") }, "📝 Word") : null,
+          !isMe && m.text ? h("button", { class:"act-btn", onclick: () => exportMessageDoc(m.text, "tex") }, "📐 LaTeX PDF") : null,
           h("button", { class:"act-btn", onclick: () => {
             navigator.clipboard.writeText(m.text || "");
             toast("Скопировано 📋", "ok");
@@ -5725,6 +5616,8 @@ async function boot() {
     if (S.me && S.me.account && S.me.account.id) {
       setActiveAccountId(S.me.account.id);
     }
+    const requestedTab = new URLSearchParams(location.search).get("tab");
+    if (["tasks","study","tt"].includes(requestedTab)) { S.tab=requestedTab; drawNav(); }
     S.today = (S.me && S.me.now ? S.me.now.slice(0, 10) : "") || iso(new Date());
     if (!S.ttDate) S.ttDate = S.today;
 
@@ -5736,11 +5629,20 @@ async function boot() {
       S.growthSub = "social";
       drawNav();
       setTimeout(() => openDuelModal(startParam.slice(5)), 350);
-    } else if (startParam) {
+    } else if (startParam && !startParam.startsWith("tt_")) {
       setTimeout(() => openDuelModal(startParam), 350);
     }
 
     await render();
+    const invite = new URLSearchParams(location.search).get("invite") ||
+      (startParam.startsWith("tt_") ? startParam.slice(3) : "");
+    if (invite && !S.inviteShown) {
+      S.inviteShown=true;
+      await showInvite(invite);
+    } else if (!localStorage.getItem("planner_guide_seen_v1")) {
+      localStorage.setItem("planner_guide_seen_v1", "1");
+      openGuide();
+    }
   } catch (e) {
     document.getElementById("view").replaceChildren(
       h("div", { class:"card" },
@@ -5752,6 +5654,11 @@ async function boot() {
   }
 }
 
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden && S.me && ["home","tt"].includes(S.tab) && !document.querySelector(".overlay")) {
+    API_CACHE.clear(); render();
+  }
+});
 boot();
 </script>
 </body>

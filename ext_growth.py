@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""
+r"""
 Рост v2.1:
 - Авто-починка карточек ext_study после разбора конспектов
 - Чистая математика без сырого LaTeX ($\Pi_1$, \neq -> Π₁, ≠)
@@ -104,9 +104,10 @@ def _init_sqlite() -> None:
 def _repair_study_cards() -> None:
     """Чинит карточки в ext_study и защищает /api/home от падений при проверке due."""
     st = sys.modules.get("ext_study")
-    if not st or not hasattr(st, "ST") or not isinstance(st.ST, dict):
+    if st is None:
         return
-    cards = st.ST.get("cards")
+    state = st.get_current_st()
+    cards = state.get("cards")
     if not isinstance(cards, list):
         return
 
@@ -126,9 +127,9 @@ def _repair_study_cards() -> None:
         if not isinstance(c.get("due"), str) or len(str(c.get("due"))) != 10:
             c["due"] = t_str
         fixed.append(c)
-    st.ST["cards"] = fixed
+    state["cards"] = fixed
     if fixed:
-        st.ST["next_id"] = max(int(x.get("id") or 0) for x in fixed) + 1
+        state["next_card"] = max(state.get("next_card") or 1, max(int(x.get("id") or 0) for x in fixed) + 1)
     with suppress(Exception):
         st.save()
 
@@ -224,7 +225,7 @@ def U(request, user) -> dict:
             "plan_subject": "",
             "plan_date": "",
             "plan_analysis": "",
-            "notify": True,
+            "notify": False,
             "gids": [],
             "lessons_checked": "",
         },
@@ -491,13 +492,12 @@ async def a_card_undo(request, user):
     prev_due = str(b.get("due") or day())
     st = sys.modules.get("ext_study")
     if st:
-        async with W().plugin_ctx(user):
-            for c in st.ST.get("cards", []):
-                if int(c.get("id") or 0) == cid:
-                    c["box"] = prev_box
-                    c["due"] = prev_due
-                    st.save()
-                    break
+        for c in st.get_current_st().get("cards", []):
+            if int(c.get("id") or 0) == cid:
+                c["box"] = prev_box
+                c["due"] = prev_due
+                st.save()
+                break
     u["xp"] = max(0, int(u.get("xp", 0)) - XP["cards"])
     save()
     return {"ok": True}
@@ -679,24 +679,9 @@ async def a_snap(request, user):
     st = sys.modules.get("ext_study")
     if st and cards and b.get("save_cards", True):
         try:
-            async with W().plugin_ctx(user):
-                if isinstance(st.ST, dict) and isinstance(st.ST.get("cards"), list):
-                    next_id = max([int(x.get("id") or 0) for x in st.ST["cards"]] + [int(st.ST.get("next_id") or 1)])
-                    for c in cards:
-                        next_id += 1
-                        st.ST["cards"].append({
-                            "id": next_id,
-                            "front": c["front"],
-                            "ph": "",
-                            "back": c["back"],
-                            "ex": "",
-                            "deck": deck_title,
-                            "box": 1,
-                            "due": str(day()),
-                        })
-                        saved_cards += 1
-                    st.ST["next_id"] = next_id + 1
-                    _repair_study_cards()
+            saved_cards = len(st.add_cards(cards, deck_title))
+            if saved_cards:
+                st.save()
         except Exception:
             core.log.exception("auto save cards")
 
@@ -1038,30 +1023,30 @@ async def a_plan(request, user):
     tt = sys.modules.get("ext_timetable")
     if tt and push_tt:
         try:
-            async with W().plugin_ctx(user):
-                tt.ST["exceptions"] = [
-                    ex for ex in tt.ST.get("exceptions", [])
-                    if not (ex.get("kind") == "add" and str(ex.get("subject", "")).startswith(f"🎯 Подготовка: {subj}"))
-                ]
-                h_start, m_start = [int(x) for x in (slot_time.split(":") if ":" in slot_time else ("19", "00"))[:2]]
-                end_total = min(23 * 60 + 50, h_start * 60 + m_start + 45)
-                end_time = f"{end_total // 60:02d}:{end_total % 60:02d}"
-                for item in plan_days[:21]:
-                    tt.ST["exceptions"].append({
-                        "id": tt.ST["next_id"],
-                        "date": str(item["d"]),
-                        "kind": "add",
-                        "start": f"{h_start:02d}:{m_start:02d}",
-                        "end": end_time,
-                        "subject": f"🎯 Подготовка: {subj}",
-                        "room": "Самоподготовка",
-                        "teacher": "",
-                        "lesson_kind": "Подготовка к экзамену",
-                        "homework": str(item["t"])[:200],
-                    })
-                    tt.ST["next_id"] += 1
-                    added_to_tt += 1
-                tt.save()
+            state = tt.get_current_st()
+            state["exceptions"] = [
+                ex for ex in state.get("exceptions", [])
+                if not (ex.get("kind") == "add" and str(ex.get("subject", "")).startswith(f"🎯 Подготовка: {subj}"))
+            ]
+            h_start, m_start = [int(x) for x in (slot_time.split(":") if ":" in slot_time else ("19", "00"))[:2]]
+            end_total = min(23 * 60 + 50, h_start * 60 + m_start + 45)
+            end_time = f"{end_total // 60:02d}:{end_total % 60:02d}"
+            for item in plan_days[:21]:
+                state["exceptions"].append({
+                    "id": state["next_id"],
+                    "date": str(item["d"]),
+                    "kind": "add",
+                    "start": f"{h_start:02d}:{m_start:02d}",
+                    "end": end_time,
+                    "subject": f"🎯 Подготовка: {subj}",
+                    "room": "Самоподготовка",
+                    "teacher": "",
+                    "lesson_kind": "Подготовка к экзамену",
+                    "homework": str(item["t"])[:200],
+                })
+                state["next_id"] += 1
+                added_to_tt += 1
+            tt.save()
         except Exception:
             core.log.exception("push plan to timetable")
 
@@ -1306,11 +1291,10 @@ def build_briefing_text(u: dict) -> str:
 
     # 2. Ближайшие актуальные дедлайны (отсортированные по дате, без мусора и обрывков)
     now = core.now_local()
-    uid = u.get("tg")
-    is_main = core.is_primary_user(uid)
+    account = core.USER_SETTINGS.get("accounts", {}).get(u.get("id"))
     candidates = []
     for task in core.active_tasks():
-        if not is_main and task.get("acc") != u.get("id"):
+        if not core.account_owns_task(account, task):
             continue
         dl_raw = task.get("deadline", "")
         if not dl_raw:
@@ -1367,7 +1351,11 @@ async def tick() -> None:
             if not u.get("notify", True) or not u.get("tg") or u.get("sent") == t_str + hm:
                 continue
             if hm == "08:00":
-                msg = build_briefing_text(u)
+                account = core.USER_SETTINGS.get("accounts", {}).get(uid)
+                if not account or account.get("tg_id") != u["tg"]:
+                    continue
+                with W().account_context({"id": u["tg"]}, account):
+                    msg = build_briefing_text(u)
             elif hm == "22:00" and int(u.get("streak", 0)) > 0 and u.get("last") != t_str:
                 frz = int(u.get("freeze", 0))
                 frz_note = f" (в запасе ❄️ {frz} заморозка)" if frz > 0 else " (заморозок больше нет!)"

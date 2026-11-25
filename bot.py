@@ -24,14 +24,39 @@ import logging
 import os
 import random
 import re
+import socket
 import sys
 import time
+
+# Обход блокировок ТСПУ/РКН и сетевого таймаута семафора (WinError 121) к api.telegram.org:
+# Адрес 149.154.166.110 часто глушится, тогда как рабочий Anycast-узел 149.154.167.220 доступен моментально.
+_orig_getaddrinfo = socket.getaddrinfo
+
+
+def _telegram_dns_patch(host, port, *args, **kwargs):
+    res = _orig_getaddrinfo(host, port, *args, **kwargs)
+    if host == "api.telegram.org":
+        new_res = []
+        for item in res:
+            family, type_, proto, canonname, sockaddr = item
+            if sockaddr and sockaddr[0] == "149.154.166.110":
+                new_sockaddr = ("149.154.167.220", sockaddr[1])
+                new_res.append((family, type_, proto, canonname, new_sockaddr))
+            else:
+                new_res.append(item)
+        return new_res
+    return res
+
+
+socket.getaddrinfo = _telegram_dns_patch
 import zipfile
 import xml.etree.ElementTree as ET
 from collections import OrderedDict
 from contextlib import asynccontextmanager, suppress
+from contextvars import ContextVar
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Optional
+from urllib.parse import urlsplit
 
 import aiohttp
 from aiohttp import web
@@ -103,12 +128,28 @@ def _env_int(name: str, default: int) -> int:
 
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
 GEMINI_KEYS = _env_list("GEMINI_KEYS") or _env_list("GEMINI_API_KEY")
-TARGET_CHAT_ID = _env_int("TARGET_CHAT_ID", -1003900095395)  # не секрет — ID группы
+TARGET_CHAT_ID = _env_int("TARGET_CHAT_ID", 0)
 ADMIN_IDS = {int(x) for x in _env_list("ADMIN_IDS") if x.lstrip("-").isdigit()}
 # Группы, подключённые заранее через переменную (остальные подключаются командой /addgroup внутри группы)
 ALLOWED_CHAT_IDS = {int(x) for x in _env_list("ALLOWED_CHAT_IDS") if x.lstrip("-").isdigit()}
 
-GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.8-flash").strip()
+_env_models = _env_list("GEMINI_MODELS")
+if _env_models:
+    MODEL_CASCADE = _env_models
+else:
+    MODEL_CASCADE = [
+        "gemini-3.8-flash",
+        "gemini-3.6-flash",
+        "gemini-3.1-pro",
+        "gemini-3-flash",
+        "gemini-3.1-flash-lite",
+        "gemini-3.5-flash-lite",
+        "gemini-2.5-flash",
+        "gemini-4-hydrogen",
+        "gemini-4-argon",
+    ]
+
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", (MODEL_CASCADE[0] if MODEL_CASCADE else "gemini-3.8-flash")).strip()
 HISTORY_WINDOW = _env_int("HISTORY_WINDOW", 20)      # сколько текстовых реплик помнить в ветке
 MAX_MEDIA_PER_THREAD = _env_int("MAX_MEDIA_PER_THREAD", 3)  # сколько вложений держим в RAM на ветку
 MEDIA_BUDGET_BYTES = _env_int("MEDIA_BUDGET_MB", 60) * 1024 * 1024  # общий лимит RAM на вложения
@@ -117,34 +158,34 @@ IMG_MAX_SIDE = 1600
 INLINE_PDF_LIMIT = 6 * 1024 * 1024      # PDF меньше — шлём inline, больше — через File API
 TG_DOWNLOAD_LIMIT = 20 * 1024 * 1024    # лимит скачивания файла ботом в Telegram
 TG_LIMIT = 4096                         # лимит одного сообщения Telegram
-CHUNK_LIMIT = 3500                      # запас под HTML-теги и экранирование
+CHUNK_LIMIT = 3000                      # запас под HTML-теги и экранирование
 PORT = _env_int("PORT", 10000)
 DAILY_HOUR = _env_int("DAILY_HOUR", 9)  # во сколько (по BOT_TZ) слать ежедневные напоминания
-REQUEST_TIMEOUT_SEC = _env_int("REQUEST_TIMEOUT_SEC", 22)  # быстрый таймаут на одну попытку
+REQUEST_TIMEOUT_SEC = _env_int("REQUEST_TIMEOUT_SEC", 25)  # таймаут на одну попытку
 TOTAL_BUDGET_SEC = _env_int("TOTAL_BUDGET_SEC", 48)        # не держим запрос по 2 минуты
 
-AVAILABLE_MODELS = [
-    {"id": "gemini-3.8-flash", "name": "Gemini 3.8 Flash", "desc": "Флагман · 5 RPM / 20 RPD"},
-    {"id": "gemini-3.6-flash", "name": "Gemini 3.6 Flash", "desc": "Быстрая и точная · 5 RPM / 20 RPD"},
-    {"id": "gemini-3.5-flash-lite", "name": "Gemini 3.5 Flash Lite", "desc": "Высокий лимит · 15 RPM / 500 RPD"},
-    {"id": "gemini-3.1-flash-lite", "name": "Gemini 3.1 Flash Lite", "desc": "Высокий лимит · 15 RPM / 500 RPD"},
-    {"id": "gemini-3-flash", "name": "Gemini 3 Flash", "desc": "Базовая 3.0 · 5 RPM / 20 RPD"},
-    {"id": "gemini-2.5-flash", "name": "Gemini 2.5 Flash", "desc": "Стабильная 2.5 · 5 RPM / 20 RPD"},
-    {"id": "gemini-2.5-flash-lite", "name": "Gemini 2.5 Flash Lite", "desc": "Лёгкая 2.5 · 10 RPM / 20 RPD"},
-]
-MODEL_CASCADE = [m["id"] for m in AVAILABLE_MODELS]
+MODEL_DESCRIPTIONS = {
+    "gemini-3.8-flash": ("Gemini 3.8 Flash", "Флагман скорости · Reasoning и глубокие рассуждения"),
+    "gemini-3.6-flash": ("Gemini 3.6 Flash", "Быстрая и точная · Оптимальный баланс"),
+    "gemini-3.1-pro": ("Gemini 3.1 Pro", "Флагман Pro · Сложная математика, код и анализ"),
+    "gemini-3-flash": ("Gemini 3 Flash", "Базовая 3.0 · Быстрый отклик"),
+    "gemini-3.5-flash-lite": ("Gemini 3.5 Flash Lite", "Высокий лимит · Минимальная задержка"),
+    "gemini-3.1-flash-lite": ("Gemini 3.1 Flash Lite", "Легковесная · Экономичный расход"),
+    "gemini-2.5-flash": ("Gemini 2.5 Flash", "Стабильная 2.5 · Проверенная рабочая модель"),
+    "gemini-4-hydrogen": ("Gemini 4 Hydrogen", "Флагман следующего поколения"),
+    "gemini-4-argon": ("Gemini 4 Argon", "Продвинутая логика и reasoning"),
+}
 
-if not TELEGRAM_BOT_TOKEN or not GEMINI_KEYS:
-    # Диагностика: имена (ascii-экранированные, чтобы были видны пробелы и кириллические «двойники»)
-    # и ДЛИНЫ значений — сами значения в лог не попадают.
-    _seen = {k: len(v) for k, v in os.environ.items()
-             if any(s in k.upper() for s in ("TELEGRAM", "GEMINI", "TARGET", "ADMIN"))}
-    sys.exit(
-        "❌ Не заданы TELEGRAM_BOT_TOKEN и/или GEMINI_KEYS.\n"
-        f"   Токен: {'есть' if TELEGRAM_BOT_TOKEN else 'ПУСТО'}, ключей Gemini: {len(GEMINI_KEYS)}\n"
-        f"   Найденные переменные (имя -> длина значения): {ascii(_seen)}\n"
-        "   Локально: скопируй .env.example в .env и заполни. На хостинге: проверь имена и значения в Environment."
-    )
+AVAILABLE_MODELS = []
+seen_models = set()
+for m_id in MODEL_CASCADE + list(MODEL_DESCRIPTIONS.keys()):
+    if m_id not in seen_models:
+        seen_models.add(m_id)
+        name, desc = MODEL_DESCRIPTIONS.get(m_id, (m_id, "Модель Gemini"))
+        AVAILABLE_MODELS.append({"id": m_id, "name": name, "desc": desc})
+
+if not TELEGRAM_BOT_TOKEN:
+    sys.exit("Для запуска нужен TELEGRAM_BOT_TOKEN.")
 
 try:
     from zoneinfo import ZoneInfo
@@ -158,7 +199,8 @@ TASKS_FILE = "tasks.json"
 SCHEDULE_FILE = "schedule.json"  # запланированные напоминания и таймеры
 GROUPS_FILE = "groups.json"  # {chat_id: {title, enabled, topics: {имя: thread_id}}}
 HISTORY_FILE = "history.json"  # последние запросы (для мини-приложения)
-STATE_FILES = (GROUPS_FILE, TOPICS_FILE, SETTINGS_FILE, TASKS_FILE, SCHEDULE_FILE, HISTORY_FILE)
+GUEST_FILE = "guests.json"
+STATE_FILES = (GROUPS_FILE, TOPICS_FILE, SETTINGS_FILE, TASKS_FILE, SCHEDULE_FILE, HISTORY_FILE, GUEST_FILE)
 
 DEFAULT_SETTINGS = {
     "user_profile": "Студент технического вуза, изучаю математику, программирование, английский язык.",
@@ -192,6 +234,7 @@ GIST_ID = os.environ.get("GIST_ID", "").strip()
 GIST_TOKEN = os.environ.get("GIST_TOKEN", "").strip()
 GIST_ENABLED = bool(GIST_ID and GIST_TOKEN)
 _gist_task: Optional[asyncio.Task] = None
+_gist_dirty = False
 
 
 def _gist_headers() -> dict:
@@ -204,6 +247,7 @@ def _gist_headers() -> dict:
 
 async def gist_pull() -> None:
     """При старте подтягиваем сохранённое состояние из Gist (если настроен)."""
+    restoring_large_file = False
     if not GIST_ENABLED:
         return
     try:
@@ -213,25 +257,47 @@ async def gist_pull() -> None:
                     log.warning("Gist pull: HTTP %s", r.status)
                     return
                 data = await r.json()
-        for name in STATE_FILES:
-            f = (data.get("files") or {}).get(name)
-            if f and f.get("content") and not f.get("truncated"):
-                with open(name, "w", encoding="utf-8") as fh:
-                    fh.write(f["content"])
+            restored = {}
+            for name in STATE_FILES:
+                entry = (data.get("files") or {}).get(name)
+                if not entry:
+                    continue
+                content = entry.get("content")
+                restoring_large_file = bool(entry.get("truncated"))
+                if restoring_large_file:
+                    raw_url = entry.get("raw_url", "")
+                    url = urlsplit(raw_url)
+                    if url.scheme != "https" or url.hostname != "gist.githubusercontent.com" or GIST_ID not in url.path.split("/"):
+                        raise ValueError("Некорректный адрес файла резервной копии")
+                    async with s.get(raw_url, allow_redirects=False) as raw:
+                        if raw.status != 200:
+                            raise RuntimeError(f"Не удалось восстановить {name}: HTTP {raw.status}")
+                        content = await raw.text()
+                if content:
+                    json.loads(content)
+                    restored[name] = content
+                restoring_large_file = False
+        for name, content in restored.items():
+            tmp = name + ".restore.tmp"
+            with open(tmp, "w", encoding="utf-8") as fh:
+                fh.write(content)
+            os.replace(tmp, name)
         log.info("☁️ Состояние загружено из Gist")
     except Exception as e:
-        log.warning("Gist pull failed: %s", e)
+        log.warning("Не удалось восстановить резервную копию: %s", type(e).__name__)
+        if restoring_large_file and not os.path.exists(name):
+            raise RuntimeError(f"Не восстановлен {name}; локальной копии нет") from e
 
 
 async def gist_push() -> None:
-    files = {}
-    for name in STATE_FILES:
-        if os.path.exists(name):
-            with open(name, "r", encoding="utf-8") as fh:
-                files[name] = {"content": fh.read() or "{}"}
-    if not files:
-        return
     try:
+        files = {}
+        for name in STATE_FILES:
+            if os.path.exists(name):
+                with open(name, "r", encoding="utf-8") as fh:
+                    files[name] = {"content": fh.read() or "{}"}
+        if not files:
+            return
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20)) as s:
             async with s.patch(
                 f"https://api.github.com/gists/{GIST_ID}",
@@ -244,23 +310,39 @@ async def gist_push() -> None:
         log.warning("Gist push failed: %s", e)
 
 
+async def _drain_gist_pushes() -> None:
+    global _gist_dirty
+    while _gist_dirty:
+        _gist_dirty = False
+        await gist_push()
+
+
 def schedule_gist_push() -> None:
-    """Откладываем выгрузку на 5 секунд (склеиваем частые сохранения)."""
-    global _gist_task
+    """Coalesce saves before uploading and upload again if a save arrives in flight."""
+    global _gist_dirty, _gist_task
     if not GIST_ENABLED:
-        return
-    if _gist_task and not _gist_task.done():
         return
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
         return
+    _gist_dirty = True
+    if _gist_task is None or _gist_task.done():
+        async def upload_after_delay():
+            await asyncio.sleep(5)
+            await _drain_gist_pushes()
 
-    async def _job():
-        await asyncio.sleep(5)
-        await gist_push()
+        _gist_task = loop.create_task(upload_after_delay())
 
-    _gist_task = loop.create_task(_job())
+
+async def flush_gist() -> None:
+    global _gist_dirty, _gist_task
+    if not GIST_ENABLED:
+        return
+    _gist_dirty = True
+    if _gist_task is None or _gist_task.done():
+        _gist_task = asyncio.create_task(_drain_gist_pushes())
+    await _gist_task
 
 
 def save_json(filepath: str, data: Any) -> None:
@@ -285,13 +367,51 @@ def load_json(filepath: str, default: Any) -> Any:
 
 GROUPS: dict = {}  # темы хранятся отдельно для каждой группы
 USER_SETTINGS: dict = {}
+GUESTS: dict = {}
+CURRENT_ACCOUNT: ContextVar[Optional[dict]] = ContextVar("current_account", default=None)
+CURRENT_GUEST: ContextVar[Optional[int]] = ContextVar("current_guest", default=None)
 TASKS: dict = {"next_id": 1, "items": []}
 SCHEDULE: dict = {"next_id": 1, "items": []}
 HISTORY: dict = {"items": []}
 HISTORY_LIMIT = 150
 
 
+def get_plugin_state(section: str, shared: dict, factory: Callable[[], dict]) -> dict:
+    uid = CURRENT_GUEST.get()
+    if uid is None:
+        return shared
+    guest = GUESTS.setdefault(str(uid), {})
+    if not isinstance(guest.get(section), dict):
+        guest[section] = factory()
+    return guest[section]
+
+
+def profile_plugin_state(section, shared, factory):
+    state = get_plugin_state(section, shared, factory)
+    account = CURRENT_ACCOUNT.get()
+    uid = CURRENT_GUEST.get()
+    accounts = USER_SETTINGS.get("accounts", {})
+    legacy_id = next((aid for aid, acc in accounts.items() if uid is None or acc.get("tg_id") == uid), None)
+    aid = account["id"] if account else legacy_id
+    if isinstance(state.get(aid), dict):
+        return state[aid]
+    if aid == legacy_id or legacy_id is None:
+        return state
+    return state.setdefault(aid, factory())
+
+
+def save_plugin_state(filepath: str, shared: dict) -> None:
+    if CURRENT_GUEST.get() is None:
+        save_json(filepath, shared)
+    else:
+        save_json(GUEST_FILE, GUESTS)
+
+
 def load_state() -> None:
+    GUESTS.clear()
+    guests = load_json(GUEST_FILE, {})
+    if isinstance(guests, dict):
+        GUESTS.update(guests)
     GROUPS.clear()
     if os.path.exists(GROUPS_FILE):
         GROUPS.update(load_json(GROUPS_FILE, {}))
@@ -324,7 +444,7 @@ def load_state() -> None:
 
 def log_history(src: str, who: str, prompt: str, answer: str) -> None:
     """Короткая запись о запросе (для вкладки «История» в мини-приложении)."""
-    HISTORY["items"].append({"ts": time.time(), "src": src, "who": who[:40], "q": (prompt or "")[:600],
+    HISTORY["items"].append({"ts": time.time(), "acc": (CURRENT_ACCOUNT.get() or {}).get("id", ""), "src": src, "who": who[:40], "q": (prompt or "")[:600],
                              "a": (answer or "")[:1500]})
     del HISTORY["items"][:-HISTORY_LIMIT]
     save_json(HISTORY_FILE, HISTORY)
@@ -393,7 +513,7 @@ class KeyPool:
         self.idx = 0
         self.cooldown: dict = {}      # (key_idx, model) -> timestamp окончания паузы
         self.dead_keys: dict = {}     # key_idx -> timestamp (для невалидных ключей 401/403)
-        self.dead_models: set = set() # модели, вернувшие 404 Not Found
+        self.dead_models: dict = {}   # model -> timestamp окончания бана (TTL 30 мин)
         self._clients: dict = {}
         self.last_used_model: str = GEMINI_MODEL
         self.stats: dict = {
@@ -401,8 +521,31 @@ class KeyPool:
             for i in range(len(keys))
         }
 
+    def update_keys(self, new_keys: list) -> None:
+        """Динамически обновляет ключи пула без перезапуска процесса."""
+        if not new_keys:
+            return
+        self.keys = new_keys
+        self._clients.clear()
+        self.idx = 0
+        self.cooldown.clear()
+        self.dead_keys.clear()
+        self.stats = {
+            i: {"ok": 0, "quota": 0, "auth": 0, "transient": 0, "fatal": 0, "lat": 0.0, "last_model": ""}
+            for i in range(len(new_keys))
+        }
+
+    def is_model_dead(self, model: str) -> bool:
+        until = self.dead_models.get(model, 0)
+        return until > time.time()
+
+    def mark_model_dead(self, model: str, ttl: int = 1800) -> None:
+        self.dead_models[model] = time.time() + ttl
+
     def record(self, i: int, kind: str, latency: float = 0.0, model: str = "") -> None:
-        st = self.stats[i]
+        st = self.stats.get(i)
+        if not st:
+            return
         if kind in st:
             st[kind] += 1
         if kind == "ok":
@@ -414,7 +557,7 @@ class KeyPool:
     def report(self) -> str:
         now = time.time()
         lines = []
-        active_m = USER_SETTINGS.get("preferred_model") or GEMINI_MODEL
+        active_m = get_current_account_settings().get("preferred_model") or GEMINI_MODEL
         for i, st in self.stats.items():
             pause = max(
                 int(self.dead_keys.get(i, 0) - now),
@@ -447,17 +590,17 @@ class KeyPool:
                 self._clients[i] = genai.Client(api_key=self.keys[i])
         return self._clients[i]
 
-    def get_model_order(self) -> list:
-        pref = (USER_SETTINGS.get("preferred_model") or GEMINI_MODEL).strip()
+    def get_model_order(self, pref_model: Optional[str] = None, allow_fallback: bool = True) -> list:
+        pref = (pref_model or get_current_account_settings().get("preferred_model") or GEMINI_MODEL).strip()
         if pref in MODEL_CASCADE:
             idx = MODEL_CASCADE.index(pref)
             order = MODEL_CASCADE[idx:] + MODEL_CASCADE[:idx]
         else:
             order = [pref] + MODEL_CASCADE
-        if not USER_SETTINGS.get("model_fallback", True):
-            # Даже если тумблер выключен, оставляем резерв в конце на случай полного исчерпания
-            order = [pref] + [m for m in order if m != pref]
-        return [m for m in order if m not in self.dead_models] or [pref]
+        if not allow_fallback:
+            return [pref]
+        live_models = [m for m in order if not self.is_model_dead(m)]
+        return live_models or [pref]
 
     def pick_for_model(self, model: str) -> Optional[int]:
         now = time.time()
@@ -469,8 +612,8 @@ class KeyPool:
                 return i
         return None
 
-    def pick(self) -> Optional[int]:
-        for m in self.get_model_order():
+    def pick(self, pref_model: Optional[str] = None) -> Optional[int]:
+        for m in self.get_model_order(pref_model=pref_model):
             idx = self.pick_for_model(m)
             if idx is not None:
                 return idx
@@ -490,10 +633,10 @@ class KeyPool:
             i + 1, model or "все", seconds,
         )
 
-    def min_wait(self) -> int:
+    def min_wait(self, pref_model: Optional[str] = None) -> int:
         now = time.time()
         waits = []
-        for m in self.get_model_order():
+        for m in self.get_model_order(pref_model=pref_model):
             for i in range(len(self.keys)):
                 w = max(self.dead_keys.get(i, 0) - now, self.cooldown.get((i, m), 0) - now)
                 if w <= 0:
@@ -530,6 +673,80 @@ def classify_error(e: Exception) -> str:
 # =====================================================================
 _CODE_BLOCK = re.compile(r"```[ \t]*[\w+#.-]*\n?(.*?)```", re.S)
 _INLINE_CODE = re.compile(r"`([^`\n]+)`")
+RECENT_ANSWERS: dict = {}
+
+
+def make_response_action_kb(msg_id: int) -> InlineKeyboardMarkup:
+    """Инлайн-кнопки под ответом в ЛС: сделать красивый PDF (Claude-style), Word, LaTeX или открыть в приложении."""
+    url = webapp_url()
+    rows = [
+        [
+            InlineKeyboardButton(text="📄 PDF (Claude)", callback_data=f"doc_pdf:{msg_id}"),
+            InlineKeyboardButton(text="📝 Word", callback_data=f"doc_docx:{msg_id}"),
+            InlineKeyboardButton(text="📐 LaTeX (PDF)", callback_data=f"doc_tex:{msg_id}"),
+        ]
+    ]
+    if url:
+        rows.append([InlineKeyboardButton(text="📱 Открыть в приложении", web_app=WebAppInfo(url=url))])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def format_markdown_tables(text: str) -> str:
+    """Находит блоки таблиц Markdown и превращает их в моноширинный отформатированный текст."""
+    if not text or "|" not in text:
+        return text
+    lines = text.split("\n")
+    out = []
+    in_table = False
+    table_lines = []
+
+    def flush_table():
+        nonlocal table_lines
+        if not table_lines:
+            return
+        if len(table_lines) >= 2:
+            rows = []
+            for tl in table_lines:
+                if re.match(r"^\|?[\s\-:|]+\|?$", tl.strip()):
+                    continue
+                cells = [c.strip() for c in tl.strip("|").split("|")]
+                rows.append(cells)
+            if rows:
+                num_cols = max(len(r) for r in rows)
+                for r in rows:
+                    while len(r) < num_cols:
+                        r.append("")
+                col_widths = [0] * num_cols
+                for r in rows:
+                    for idx, c in enumerate(r):
+                        col_widths[idx] = max(col_widths[idx], len(c))
+                tbl_out = []
+                for r_idx, r in enumerate(rows):
+                    line_str = " | ".join(c.ljust(col_widths[i]) for i, c in enumerate(r))
+                    tbl_out.append(line_str)
+                    if r_idx == 0:
+                        tbl_out.append("-+-".join("-" * col_widths[i] for i in range(num_cols)))
+                formatted_tbl = "\n".join(tbl_out)
+                out.append(f"```text\n{formatted_tbl}\n```")
+            else:
+                out.extend(table_lines)
+        else:
+            out.extend(table_lines)
+        table_lines = []
+
+    for line in lines:
+        if "|" in line and (line.strip().startswith("|") or line.strip().endswith("|") or " | " in line):
+            in_table = True
+            table_lines.append(line)
+        else:
+            if in_table:
+                flush_table()
+                in_table = False
+            out.append(line)
+    if in_table:
+        flush_table()
+
+    return "\n".join(out)
 
 
 def md_to_html(text: str) -> str:
@@ -537,14 +754,27 @@ def md_to_html(text: str) -> str:
     Конвертирует типичный Markdown от LLM в HTML, который понимает Telegram.
     Весь «сырой» текст экранируется, поэтому символы _ * [ ] ~ < > & не ломают разметку.
     """
-    text = (text or "").replace("\x00", "")
+    if not text:
+        return ""
+    text = text.replace("\x00", "")
+
+    # 0. Таблицы -> аккуратные текстовые блоки кода
+    text = format_markdown_tables(text)
+
     stash: list = []
 
     def hold(fragment: str) -> str:
         stash.append(fragment)
         return f"\x00{len(stash) - 1}\x00"
 
-    text = _CODE_BLOCK.sub(lambda m: hold(f"<pre>{esc(m.group(1).rstrip())}</pre>"), text)
+    def _code_repl(m):
+        lang = (m.group(1) or "").strip()
+        code_content = esc(m.group(2).rstrip())
+        if lang:
+            return hold(f'<pre><code class="language-{esc(lang)}">{code_content}</code></pre>')
+        return hold(f"<pre>{code_content}</pre>")
+
+    text = re.sub(r"```[ \t]*([\w+#.-]*)\n?(.*?)```", _code_repl, text, flags=re.S)
     text = _INLINE_CODE.sub(lambda m: hold(f"<code>{esc(m.group(1))}</code>"), text)
     text = re.sub(r"\$\$(.+?)\$\$|\\\[(.+?)\\\]|\\\((.+?)\\\)|\$(?!\s)([^$\n]+?)(?<!\s)\$",
                   lambda m: tex_plain(next(g for g in m.groups() if g is not None)), text, flags=re.S)
@@ -553,9 +783,10 @@ def md_to_html(text: str) -> str:
     text = re.sub(r"(?m)^\s*(?:-{3,}|\*{3,}|_{3,})\s*$", "──────────", text)          # ---
     text = re.sub(r"(?m)^#{1,6}\s+(.+?)\s*#*\s*$", r"<b>\1</b>", text)                 # # Заголовок
     text = re.sub(r"(?m)^(\s*)[*+-]\s+", r"\1• ", text)                                # списки
-    text = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", text, flags=re.S)                    # **жирный**
-    text = re.sub(r"__(.+?)__", r"<b>\1</b>", text, flags=re.S)                        # __жирный__
-    text = re.sub(r"(?<![\w*])\*(?!\s)([^*\n]+?)(?<!\s)\*(?![\w*])", r"<i>\1</i>", text)  # *курсив*
+    # Безопасный жирный и курсив (не переходят через пустые строки!)
+    text = re.sub(r"\*\*([^\n]+?)\*\*", r"<b>\1</b>", text)
+    text = re.sub(r"__([^\n]+?)__", r"<b>\1</b>", text)
+    text = re.sub(r"(?<![\w*])\*([^*\n]+?)\*(?![\w*])", r"<i>\1</i>", text)
     text = re.sub(r'\[([^\]\n]+)\]\((https?://[^\s)"]+)\)', r'<a href="\2">\1</a>', text)  # [t](url)
 
     return re.sub(r"\x00(\d+)\x00", lambda m: stash[int(m.group(1))], text)
@@ -636,11 +867,18 @@ async def send_md(send: Callable, md_text: str, depth: int = 0):
     return await _try_send(send, strip_md(md_text)[:TG_LIMIT], None)
 
 
-async def reply_md(message: types.Message, text_md: str) -> None:
-    """Ответ Markdown-текстом: режет на части и отправляет цепочкой."""
-    for i, chunk in enumerate(split_message(text_md)):
+async def reply_md(message: types.Message, text_md: str, reply_markup: Optional[InlineKeyboardMarkup] = None) -> list:
+    """Ответ Markdown-текстом: режет на части и отправляет цепочкой, прикрепляя кнопки к последнему сообщению."""
+    chunks = split_message(text_md, limit=CHUNK_LIMIT)
+    sent_msgs = []
+    for i, chunk in enumerate(chunks):
+        is_last = (i == len(chunks) - 1)
+        kb = reply_markup if is_last else None
         fn = message.reply if i == 0 else message.answer
-        await send_md(lambda t, pm, fn=fn: fn(t, parse_mode=pm), chunk)
+        msg = await send_md(lambda t, pm, fn=fn, kb=kb: fn(t, parse_mode=pm, reply_markup=kb), chunk)
+        if msg:
+            sent_msgs.append(msg)
+    return sent_msgs
 
 
 async def safe_edit(msg: types.Message, text: str, kb: Optional[InlineKeyboardMarkup] = None) -> None:
@@ -811,11 +1049,11 @@ def prune_tasks() -> None:
 
 
 def add_task(chat_id: int, topic: str, thread_id: Optional[int], text: str, deadline: str, file_name: str = "",
-             kind: str = "task") -> dict:
+             kind: str = "task", acc_id: str = "", user_id: Optional[int] = None) -> dict:
     task = {
         "id": TASKS["next_id"], "chat_id": chat_id, "topic": topic, "thread_id": thread_id, "text": text,
         "deadline": (deadline or "").strip(), "created": time.time(), "done": False, "file": file_name,
-        "kind": kind,
+        "kind": kind, "acc": acc_id, "user_id": user_id or (chat_id if chat_id > 0 else 0),
     }
     TASKS["next_id"] += 1
     TASKS["items"].append(task)
@@ -1167,6 +1405,14 @@ def is_primary_user(user_id: Optional[int]) -> bool:
 GUEST_CHECK = None  # ставится из ext_webapp: функция uid -> есть ли у гостя свой API-ключ
 
 
+def account_owns_task(account, task):
+    if not account:
+        return False
+    if task.get("acc"):
+        return task["acc"] == account["id"]
+    return account["id"] == next(iter(USER_SETTINGS.get("accounts", {})), None)
+
+
 def can_see_chat(user_id: Optional[int], cid: int) -> bool:
     """Владелец видит все чаты; остальные — только свой личный (cid == их Telegram ID)."""
     return is_primary_user(user_id) or (user_id is not None and cid == user_id)
@@ -1270,68 +1516,78 @@ def tasks_block(scope: list) -> str:
     return "АКТИВНЫЕ ЗАДАЧИ:\n" + "\n".join(lines)
 
 
+PERSONA_BLOCK = (
+    "ХАРАКТЕР И МАНЕРА ОБЩЕНИЯ:\n"
+    "- Говори как живой человек в переписке: тёпло, просто, на «ты». Подстраивайся под тон собеседника: "
+    "на шутку можно ответить шуткой, на усталость — по-человечески поддержать, на сухой вопрос — ответить по делу.\n"
+    "- На короткую или бытовую реплику отвечай коротко (1–3 предложения), без заголовков, списков и «простыней». "
+    "Структуру и подробный разбор оставляй для учебных задач и просьб объяснить.\n"
+    "- Не начинай с шаблонов вроде «Конечно!», «Отличный вопрос!», «Я рад помочь» и не заканчивай «Обращайся, если что». "
+    "Сразу к сути. Не пересказывай вопрос заново.\n"
+    "- Имя собеседника используй изредка и к месту, а не в каждом сообщении.\n"
+    "- Эмодзи — редко и по настроению (не больше одного на сообщение), не как украшение каждой строки.\n"
+    "- Можно иметь мнение: если спрашивают «как лучше?», выбери вариант и объясни почему, а не перечисляй всё подряд. "
+    "Если не уверен или не знаешь — скажи прямо, без выдумок.\n"
+    "- Помни, что было раньше в этом диалоге, и опирайся на это: не переспрашивай то, что уже говорили.\n"
+    "- Если уместно, в конце предложи один конкретный следующий шаг или задай один встречный вопрос — но не всегда.\n"
+    "- Живость не отменяет точности: в решениях задач, формулах, датах, дедлайнах и вызовах инструментов "
+    "будь внимателен и аккуратен, тон — дружелюбный, содержание — строгое."
+)
+
+
 def build_system_instruction(scope: list, is_private: bool, current_topic: Optional[str] = None,
-                             last_files_names: Optional[list] = None) -> str:
+                             last_files_names: Optional[list] = None,
+                             account: Optional[dict] = None,
+                             user_name: Optional[str] = None) -> str:
     gblock = groups_block(scope, is_private)
     files_desc = ", ".join(f"{i}) {n}" for i, n in enumerate(last_files_names or [], 1)) or "нет"
-    if USER_SETTINGS.get("answer_mode") == "short":
+    
+    acc_settings = account or get_current_account_settings()
+    answer_mode = acc_settings.get("answer_mode")
+    if answer_mode == "short":
         mode = ("РЕЖИМ ОТВЕТА: «Краткий ответ (шпаргалка)». Давай только итоговые ответы и минимум "
-                "пояснений (1–2 строки на задание), без теории и длинных выкладок.")
+                "пояснений (1–2 строки на задание), без лишней теории.")
     else:
-        mode = ("РЕЖИМ ОТВЕТА: «Подробный разбор с теорией». Сначала краткая теория/формулы, затем решение "
-                "по шагам с пояснениями, в конце — выделенный итоговый ответ.")
+        mode = ("РЕЖИМ ОТВЕТА: «Подробный разбор». Сначала суть и ключевые формулы, затем пошаговый ход мысли "
+                "с ясными выкладками, в конце — четко выделенный итоговый ответ.")
+
+    user_prof = acc_settings.get('user_profile', '')
+    user_inst = acc_settings.get('custom_instructions', '')
+    user_readme = acc_settings.get('user_readme', '')
+    readme_block = f"\nДОСЬЕ ПОЛЬЗОВАТЕЛЯ:\n{user_readme}\n" if user_readme else ""
+    name_hint = f"Имя собеседника: {user_name}.\n" if user_name else ""
+
     base = (
-        "Ты персональный академический ассистент и координатор группы Telegram.\n"
+        "Ты — личный помощник по учёбе в Telegram. Не «сервис» и не справочник, а толковый друг-однокурсник, "
+        "который разбирается в предмете и общается по-человечески.\n"
         f"Сейчас: {now_local():%Y-%m-%d %H:%M} ({getattr(TZ, 'key', 'UTC')}).\n\n"
-        f"ИНФОРМАЦИЯ О ПОЛЬЗОВАТЕЛЕ:\n{USER_SETTINGS.get('user_profile', '')}\n\n"
-        f"ПЕРСОНАЛЬНЫЕ ИНСТРУКЦИИ:\n{USER_SETTINGS.get('custom_instructions', '')}\n\n"
+        f"{PERSONA_BLOCK}\n\n"
+        f"{name_hint}"
+        f"ИНФОРМАЦИЯ О ПОЛЬЗОВАТЕЛЕ:\n{user_prof}\n\n"
+        f"ПЕРСОНАЛЬНЫЕ ИНСТРУКЦИИ:\n{user_inst}\n"
+        f"{readme_block}\n"
         f"{mode}\n\n"
         f"{gblock}\n"
-        f"ТЕКУЩАЯ ТЕМА (где написано сообщение): {current_topic or 'не определена'}.\n"
-        f"ПОСЛЕДНИЕ ФАЙЛЫ/ФОТО, ПРИСЛАННЫЕ В ЭТОТ ЧАТ (от старых к новым): {files_desc}.\n"
+        f"ТЕКУЩАЯ ТЕМА: {current_topic or 'не определена'}.\n"
+        f"ПОСЛЕДНИЕ ФАЙЛЫ/ФОТО В ЧАТЕ: {files_desc}.\n"
         f"{tasks_block(scope)}\n\n"
-        "ПРАВИЛА ОФОРМЛЕНИЯ (Telegram):\n"
-        "- Только Markdown: **жирный**, `код`, блоки ```, списки через «-». Никаких HTML-тегов.\n"
-        "- Формулы пиши в LaTeX: внутри строки между $...$, отдельной строкой между $$...$$ — бот красиво "
-        "оформит их (символы, степени, индексы, дроби). Формулы НИКОГДА не клади в блоки кода и в `обратные "
-        "кавычки`: код — только для программ и команд.\n"
-        "- Итоговые ответы выделяй жирным, задания разделяй линией (---).\n"
+        "ПРАВИЛА ОФОРМЛЕНИЯ ДЛЯ TELEGRAM:\n"
+        "- Пиши структурированно, живо, понятно, без душных вводных штампов и бюрократии.\n"
+        "- Выделяй важные шаги и термины **жирным** шрифтом.\n"
+        "- Код и терминальные команды оформляй в блоки ```язык ... ``` (с указанием языка: python, cpp, bash и т.д.).\n"
+        "- Однострочный код и формулы в тексте — `в обратных кавычках`.\n"
+        "- Таблицы делай в стандартном Markdown (бот автоматически красиво отформатирует их в ровную моноширинную сетку).\n"
+        "- МАТЕМАТИКА: пиши формулы просто и читаемо. Внутри строк используй понятные символы ($x^2$, $v_0$) или Unicode (x², y₁, ±, ≤, ≥, ≠, √, ∫, ∑). Большие выносные уравнения обособляй между $$...$$ отдельной строкой.\n"
+        "- Итоговый ответ или ключевой вывод обязательно выделяй жирным шрифтом в конце разбора.\n"
         "- Если просят опубликовать объявление/напоминание в тему — вызывай send_group_topic_message "
         "(если назван срок, передай его в deadline в формате YYYY-MM-DD или YYYY-MM-DD HH:MM).\n"
         "- Если тема не названа, а текущая тема определена — публикуй в текущую.\n"
-        "- Если для напоминания не хватает данных (нет текста или непонятна тема) — НЕ отказывайся и не проси "
-        "«переформулировать», а задай один короткий уточняющий вопрос: что напомнить, в какую тему "
-        "(перечисли доступные) и до какого срока.\n"
-        "- Ты МОЖЕШЬ прикреплять файлы: передай attach_last_file=true (и attach_count — сколько последних "
-        "файлов/фото, по умолчанию 1), и бот отправит их в тему. Никогда не говори, что прикрепить файл невозможно; если в истории ты раньше "
-        "писал, что не умеешь прикреплять файлы, это устарело — теперь умеешь. Если файла нет "
-        "(см. выше) — попроси прислать его.\n"
-        "- Если напоминание уже опубликовано и нужно только добавить файл — поставь only_file=true, "
-        "а в message_text дай короткую подпись (например, название файла), не повторяя весь текст.\n"
-        "- Слова «поставь/создай/добавь напоминание», «напомни», «объяви», «опубликуй» — это просьба "
-        "вызвать send_group_topic_message. Названия групп могут быть сокращены или написаны кириллицей "
-        "(«унн», «хсе») — сопоставь с группой из списка. Ссылки и текст от пользователя вставляй как есть.\n"
-        "- ОФОРМЛЕНИЕ НАПОМИНАНИЙ: делай их яркими и живыми: заголовок с эмодзи, затем строки вида "
-        "«📅 Срок: …», «📚 Предмет: …», «🎯 Задание: …», ссылку отдельной строкой с «🔗», в конце короткая "
-        "мотивирующая фраза с эмодзи. Не выдумывай даты и факты — используй только то, что сообщил пользователь.\n"
-        "- Если пользователь пишет, что задание выполнено/сдано/готово («выполнил», «сдал», «готово» и т.п.), "
-        "вызови mark_tasks_done с номерами подходящих задач из списка активных (учитывай текущую тему и "
-        "формулировку). Если подходящих несколько и неясно какая — задай один уточняющий вопрос.\n"
-        "- Повторные напоминания: если просят «напоминай каждый день / до выполнения» — поставь remind_daily=true "
-        "(бот сам напомнит утром каждого дня до дедлайна, а в день дедлайна — утром и за 3 часа, по часам указанного "
-        "пояса). Для этого нужен deadline; если срока нет — спроси его. «Напоминай в главной/мне в лс/в теме X» — "
-        "это remind_target. «Предупреди за час / за 30 минут» — remind_before_minutes.\n"
-        "- Таймеры («через 3 часа», «сегодня в 18:00», «напомни мне об этом за 30 минут») — вызывай create_timer: "
-        "in_minutes или at (YYYY-MM-DD HH:MM, считай от текущего времени выше), remind_before_minutes для "
-        "предупреждений, where для адресата (по умолчанию — этот же чат/тема). Для обычных объявлений в тему "
-        "create_timer не используй.\n"
-        "- «Отмени таймер/напоминания», «задание выполнено» — mark_tasks_done: это же останавливает все будущие "
-        "повторные напоминания по задаче.\n"
+        "- Если для напоминания не хватает данных (нет текста или непонятна тема) — задай один короткий уточняющий вопрос: что напомнить, в какую тему и до какого срока.\n"
+        "- Ты МОЖЕШЬ прикреплять файлы: передай attach_last_file=true (и attach_count — сколько последних файлов/фото, по умолчанию 1), и бот отправит их в тему.\n"
+        "- Таймеры («через 3 часа», «сегодня в 18:00», «напомни мне об этом за 30 минут») — вызывай create_timer.\n"
+        "- Если задание выполнено/сдано — вызови mark_tasks_done.\n"
         "- ФАЙЛЫ: если просят ответ в формате Word/ворд, Excel/эксель, PDF/пдф, сделать презентацию или файл — "
-        "либо ответ слишком большой для одного сообщения Telegram — вызови create_file и положи ВЕСЬ ответ в content "
-        "(Markdown). Делай документ красивым и понятным: заголовки, короткие абзацы, списки, таблицы для сравнений, "
-        "блоки кода с пояснениями построчно. Для Excel — таблицы; для презентации — по одной мысли на слайд. "
-        "Не пересказывай содержимое файла в тексте сообщения: хватит подписи (caption)."
+        "вызови create_file и положи ВЕСЬ ответ в content (Markdown). Делай документ красивым: заголовки, списки, таблицы. В caption дай короткую подпись."
     )
     extras = []
     for hook in PLUGIN_PROMPT:
@@ -1422,25 +1678,38 @@ def build_post_tool(scope: list) -> genai_types.Tool:
             "required": ["task_ids"],
         },
     }]
+    if not scope:
+        decls = [decl for decl in decls if decl["name"] != "send_group_topic_message"]
     return genai_types.Tool(function_declarations=decls + PLUGIN_TOOLS)
 
 
 async def generate_reply(history: list, user_text: str, extra_parts: Optional[list], use_tools: bool,
                          current_topic: Optional[str] = None, last_files_names: Optional[list] = None,
-                         scope: Optional[list] = None, is_private: bool = False):
+                         scope: Optional[list] = None, is_private: bool = False,
+                         *, pool: Optional[KeyPool] = None, account: Optional[dict] = None,
+                         user_name: Optional[str] = None):
+    target_pool = pool or globals()["pool"]
+    pref_model = (account.get("preferred_model") if account else None) or GEMINI_MODEL
+    allow_fallback = account.get("model_fallback", True) if account else True
+
     config = genai_types.GenerateContentConfig(
-        system_instruction=build_system_instruction(scope or [], is_private, current_topic, last_files_names),
+        system_instruction=build_system_instruction(
+            scope or [], is_private, current_topic, last_files_names,
+            account=account, user_name=user_name,
+        ),
         tools=[build_post_tool(scope or [])] if use_tools else None,
-        temperature=0.2,
+        temperature=0.7,
     )
     file_mode = bool(FILE_REQ_RE.search(user_text or ""))
-    req_timeout = 35 if file_mode else 12  # 12 сек на обычный ответ — не ждём зависшие ключи!
+    if file_mode:
+        config.temperature = 0.3  # документы и таблицы — без творчества
+    req_timeout = 40 if file_mode else REQUEST_TIMEOUT_SEC
     last_err = None
 
-    for model_name in pool.get_model_order():
+    for model_name in target_pool.get_model_order(pref_model=pref_model, allow_fallback=allow_fallback):
         timeouts_on_model = 0
-        for _ in range(len(pool.keys)):
-            idx = pool.pick_for_model(model_name)
+        for _ in range(len(target_pool.keys)):
+            idx = target_pool.pick_for_model(model_name)
             if idx is None:
                 break  # на этой модели свободных ключей нет — мгновенно переходим к следующей модели
 
@@ -1448,12 +1717,12 @@ async def generate_reply(history: list, user_text: str, extra_parts: Optional[li
             t0 = time.monotonic()
             try:
                 resp = await asyncio.wait_for(
-                    pool.client(idx).aio.models.generate_content(
+                    target_pool.client(idx).aio.models.generate_content(
                         model=model_name, contents=contents, config=config
                     ),
                     timeout=req_timeout,
                 )
-                pool.record(idx, "ok", time.monotonic() - t0, model=model_name)
+                target_pool.record(idx, "ok", time.monotonic() - t0, model=model_name)
                 log.info(
                     "✅ %s ответила за %.1f c (ключ #%d, инструменты: %s)",
                     model_name, time.monotonic() - t0, idx + 1, "да" if use_tools else "нет",
@@ -1462,26 +1731,26 @@ async def generate_reply(history: list, user_text: str, extra_parts: Optional[li
             except Exception as e:
                 last_err = e
                 kind = classify_error(e)
-                pool.record(idx, kind)
+                target_pool.record(idx, kind)
                 elapsed = time.monotonic() - t0
                 log.warning(
                     "⚠️ %s error (%s, ключ #%d, %.1f c): %s",
                     model_name, kind, idx + 1, elapsed, str(e)[:180] or type(e).__name__,
                 )
                 if kind == "not_found":
-                    pool.dead_models.add(model_name)
+                    target_pool.mark_model_dead(model_name)
                     break  # модели нет в API — сразу к следующей
                 elif kind == "quota":
                     up_err = str(e).upper().replace("_", "").replace(" ", "")
                     is_daily = any(w in up_err for w in ("PERDAY", "RPD", "DAY"))
                     # При суточном лимите убираем ключ для этой модели на 30 мин, при минутном — на 75 сек
-                    pool.penalize(idx, 1800 if is_daily else 75, model=model_name)
+                    target_pool.penalize(idx, 1800 if is_daily else 75, model=model_name)
                 elif kind == "auth":
-                    pool.penalize(idx, 6 * 3600, auth_fail=True)
+                    target_pool.penalize(idx, 6 * 3600, auth_fail=True)
                 elif kind == "transient":
                     is_timeout = isinstance(e, asyncio.TimeoutError)
                     # Зависший ключ баним на 3 минуты, чтобы следующий запрос не ждал его снова
-                    pool.penalize(idx, 180 if is_timeout else 45, model=model_name)
+                    target_pool.penalize(idx, 180 if is_timeout else 45, model=model_name)
                     if is_timeout:
                         timeouts_on_model += 1
                         if timeouts_on_model >= 2:
@@ -1490,9 +1759,9 @@ async def generate_reply(history: list, user_text: str, extra_parts: Optional[li
                 else:
                     raise
 
-    wait_sec = pool.min_wait()
+    wait_sec = target_pool.min_wait(pref_model=pref_model)
     if wait_sec > 0:
-        raise RuntimeError(f"Все ключи сейчас на паузе из-за лимитов. Подожди ~{wait_sec} сек.")
+        raise RuntimeError(f"Все доступные ключи сейчас на паузе из-за лимитов Gemini. Подожди ~{wait_sec} сек.")
     raise RuntimeError(f"Не удалось получить ответ от Gemini ({type(last_err).__name__ if last_err else 'таймаут'}). Попробуй ещё раз.")
 
 
@@ -1513,17 +1782,7 @@ def resolve_group(scope: list, group_name: str):
 async def send_reminder_media(chat_id: int, thread_id: int) -> None:
     """Случайный стикер/GIF из коллекции активного аккаунта."""
     # Получаем настройки текущего аккаунта через ext_webapp, если он подключен
-    settings = USER_SETTINGS
-    try:
-        import ext_webapp
-        accs = USER_SETTINGS.get("accounts", {})
-        active_id = getattr(ext_webapp, "ACTIVE_ACCOUNT_ID", "")
-        if active_id in accs:
-            # Если у аккаунта есть свои настройки медиа, используем их, иначе общие
-            settings = accs[active_id]
-    except Exception:
-        pass
-
+    settings = get_current_account_settings()
     media = settings.get("reminder_media") or []
     if not media or not settings.get("media_enabled", True):
         return
@@ -1698,15 +1957,28 @@ async def ask_gemini(
     extra_parts: Optional[list] = None,
     force_tools: bool = False,
     remember_as: Optional[str] = None,
+    pool: Optional[KeyPool] = None,
+    account: Optional[dict] = None,
 ) -> None:
     key = mem_key(message)
     history = list(mem_items(key))
-    # Функция публикации доступна всегда (раньше включалась по ключевым словам и не срабатывала
-    # на «напоминание»); когда её звать — решает модель по системному промпту.
-    # Публиковать можно только из целевой группы или от админа в личке.
-    # В личке (админ) бот видит все подключённые группы; в группе — только её саму.
     is_private = message.chat.type == "private"
     _uid = message.from_user.id if message.from_user else None
+    _uname = (message.from_user.first_name if message.from_user else "") or "Пользователь"
+
+    # Подтягиваем персональный аккаунт и персональный пул ключей (BYOK)
+    acc = account
+    target_pool = pool
+    if acc is None and "ext_webapp" in sys.modules:
+        w = sys.modules["ext_webapp"]
+        acc = w.get_or_create_account({"id": _uid, "first_name": _uname})
+    if target_pool is None and acc is not None and "ext_webapp" in sys.modules:
+        w = sys.modules["ext_webapp"]
+        user_pool, is_custom = w.get_account_pool(acc)
+        target_pool = user_pool
+    if target_pool is None:
+        target_pool = globals()["pool"]
+
     if is_private:
         scope = enabled_groups() if is_primary_user(_uid) else []
     else:
@@ -1720,10 +1992,15 @@ async def ask_gemini(
 
     async with chat_action(message.chat.id, ChatAction.TYPING, message.message_thread_id):
         try:
-            response = await generate_reply(history, user_prompt, extra_parts, use_tools, current_topic,
-                                            [f["name"] for f in lfs], scope, is_private)
+            response = await generate_reply(
+                history, user_prompt, extra_parts, use_tools, current_topic,
+                [f["name"] for f in lfs], scope, is_private,
+                pool=target_pool, account=acc, user_name=_uname,
+            )
         except Exception as e:
-            await message.reply(f"⚠️ Ошибка при обработке запроса: {e}"[:TG_LIMIT], parse_mode=None)
+            log.exception("ask_gemini failed")
+            await message.reply("Что-то пошло не так на моей стороне 😕 Попробуй отправить ещё раз через минутку. "
+                                "Если повторится — напиши мне, посмотрим логи.", parse_mode=None)
             return
 
     texts: list = []
@@ -1740,7 +2017,18 @@ async def ask_gemini(
 
     reply_text = "\n".join(texts).strip()
     if reply_text:
-        await reply_md(message, reply_text)
+        kb = make_response_action_kb(message.message_id) if is_private else None
+        sent_msgs = await reply_md(message, reply_text, reply_markup=kb)
+        if is_private and sent_msgs:
+            last_msg = sent_msgs[-1]
+            RECENT_ANSWERS[last_msg.message_id] = {
+                "text": reply_text,
+                "user_id": _uid,
+                "ts": time.time(),
+            }
+            if len(RECENT_ANSWERS) > 100:
+                oldest = min(RECENT_ANSWERS.keys(), key=lambda k: RECENT_ANSWERS[k]["ts"])
+                RECENT_ANSWERS.pop(oldest, None)
 
     origin = (message.chat.id, None if is_private else (message.message_thread_id or None))
     for call in calls:
@@ -1788,7 +2076,10 @@ async def ask_gemini(
         if attach and not lfs:
             report += "\n⚠️ Файл не найден — пришли его в чат и повтори просьбу."
         if ok and not only_file:
-            task = add_task(cid, topic, thread_id, post, deadline, ", ".join(f["name"] for f in files))
+            task = add_task(
+                cid, topic, thread_id, post, deadline, ", ".join(f["name"] for f in files),
+                acc_id=acc.get("id") if acc else "", user_id=_uid,
+            )
             report += f"\nЗадача **#{task['id']}** сохранена в /tasks"
             if deadline:
                 report += f" (дедлайн: {deadline})"
@@ -1806,8 +2097,7 @@ async def ask_gemini(
         reply_text = reply_text or f"[опубликовано в «{topic}»]: {post[:300]}"
 
     if not reply_text and not calls:
-        await message.reply("Модель вернула пустой ответ (возможно, сработал фильтр безопасности). "
-                            "Попробуй переформулировать.", parse_mode=None)
+        await message.reply("Тут я промолчал — похоже, сработал фильтр. Попробуй сказать иначе, и я отвечу.", parse_mode=None)
         return
 
     # запоминаем реплику пользователя и ответ ассистента (обрезаем — экономим RAM)
@@ -1826,12 +2116,15 @@ FORMAT_ALIASES = {
     "docx": "docx", "doc": "docx", "word": "docx", "ворд": "docx",
     "xlsx": "xlsx", "xls": "xlsx", "excel": "xlsx", "эксель": "xlsx", "эксел": "xlsx",
     "pptx": "pptx", "ppt": "pptx", "powerpoint": "pptx", "presentation": "pptx", "презентация": "pptx",
+    "tex": "tex", "latex": "tex", "латех": "tex", "текс": "tex",
 }
 FORMAT_MIME = {
     "pdf": "application/pdf",
     "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "tex": "application/pdf",
+    "latex": "application/pdf",
 }
 C_NAVY, C_BLUE, C_LIGHT, C_TEXT, C_CODE_BG = "1F3A5F", "2F80ED", "EEF3FA", "222B38", "F3F4F6"
 
@@ -2187,6 +2480,7 @@ def _pdf_clean(text: str) -> str:
 
 
 def build_pdf(title: str, blocks: list) -> bytes:
+    """Генерирует PDF-документ в чистом академическом стиле Claude."""
     from xml.sax.saxutils import escape
     from reportlab.lib import colors
     from reportlab.lib.pagesizes import A4
@@ -2196,32 +2490,43 @@ def build_pdf(title: str, blocks: list) -> bytes:
                                     TableStyle)
     ensure_fonts()
     hx = colors.HexColor
-    navy, blue = hx("#" + C_NAVY), hx("#2457A6")
-    base = ParagraphStyle("base", fontName="DV", fontSize=10.5, leading=15.5, textColor=hx("#" + C_TEXT), spaceAfter=6)
-    h1 = ParagraphStyle("h1", parent=base, fontName="DV-B", fontSize=17, leading=22, textColor=navy,
+
+    c_title = hx("#111827")      # глубокий угольный для заголовков
+    c_sub = hx("#6B7280")        # сбалансированный серый для метаданных
+    c_h2 = hx("#1F2937")
+    c_h3 = hx("#374151")
+    c_body = hx("#1F2937")       # четкий основной текст
+    c_border = hx("#E5E7EB")     # деликатные разделители
+    c_code_bg = hx("#F8FAFC")    # легкий фон кода
+    c_code_border = hx("#E2E8F0")
+    c_quote_bg = hx("#F8FAFC")
+    c_tbl_head = hx("#F1F5F9")
+
+    base = ParagraphStyle("base", fontName="DV", fontSize=10.5, leading=16, textColor=c_body, spaceAfter=6)
+    h1 = ParagraphStyle("h1", parent=base, fontName="DV-B", fontSize=17, leading=22, textColor=c_title,
                         spaceBefore=14, spaceAfter=6, keepWithNext=1)
-    h2 = ParagraphStyle("h2", parent=base, fontName="DV-B", fontSize=13.5, leading=18, textColor=blue,
+    h2 = ParagraphStyle("h2", parent=base, fontName="DV-B", fontSize=13.5, leading=18, textColor=c_h2,
                         spaceBefore=10, spaceAfter=4, keepWithNext=1)
-    h3 = ParagraphStyle("h3", parent=base, fontName="DV-B", fontSize=11.5, leading=16, textColor=navy,
+    h3 = ParagraphStyle("h3", parent=base, fontName="DV-B", fontSize=11.5, leading=16, textColor=c_h3,
                         spaceBefore=6, spaceAfter=3, keepWithNext=1)
     li_st = ParagraphStyle("li", parent=base, spaceAfter=3)
-    quote = ParagraphStyle("quote", parent=base, fontName="DV-I", textColor=hx("#3B4A63"), backColor=hx("#EEF3FA"),
-                           borderPadding=6, leftIndent=12, rightIndent=6, spaceBefore=4, spaceAfter=10)
-    code_st = ParagraphStyle("code", fontName="DVMono", fontSize=8.4, leading=11.2, textColor=hx("#1B2330"),
-                             backColor=hx("#F3F4F6"), borderPadding=6, borderColor=hx("#D5DAE3"), borderWidth=0.5,
-                             leftIndent=8, rightIndent=8, spaceBefore=6, spaceAfter=12)
+    quote = ParagraphStyle("quote", parent=base, fontName="DV-I", textColor=hx("#334155"), backColor=c_quote_bg,
+                           borderPadding=8, leftIndent=12, rightIndent=6, spaceBefore=6, spaceAfter=10)
+    code_st = ParagraphStyle("code", fontName="DVMono", fontSize=8.4, leading=11.5, textColor=hx("#0F172A"),
+                             backColor=c_code_bg, borderPadding=8, borderColor=c_code_border, borderWidth=0.5,
+                             leftIndent=6, rightIndent=6, spaceBefore=6, spaceAfter=12)
     cell_st = ParagraphStyle("cell", parent=base, fontSize=9.2, leading=12.5, spaceAfter=0)
-    head_cell = ParagraphStyle("hcell", parent=cell_st, fontName="DV-B", textColor=colors.white)
+    head_cell = ParagraphStyle("hcell", parent=cell_st, fontName="DV-B", textColor=c_title)
 
     def math_markup(expr: str) -> str:
         parts = []
         for text, mode in tex_runs(expr):
             text = escape(_pdf_clean(text))
             parts.append(f"<super>{text}</super>" if mode == "sup" else f"<sub>{text}</sub>" if mode == "sub" else text)
-        return '<font color="#1F3A5F"><i>' + "".join(parts) + "</i></font>"
+        return '<font color="#1E293B"><i>' + "".join(parts) + "</i></font>"
 
-    math_st = ParagraphStyle("math", parent=base, fontSize=12.5, leading=18, alignment=1, backColor=hx("#F4F7FC"),
-                             borderPadding=8, spaceBefore=6, spaceAfter=14)
+    math_st = ParagraphStyle("math", parent=base, fontSize=12, leading=18, alignment=1, backColor=c_code_bg,
+                             borderPadding=8, spaceBefore=6, spaceAfter=12)
 
     def rl(text: str) -> str:
         out = []
@@ -2232,9 +2537,9 @@ def build_pdf(title: str, blocks: list) -> bytes:
             elif kind == "i":
                 out.append(f"<i>{t}</i>")
             elif kind == "c":
-                out.append(f'<font face="DVMono" color="#B3261E">{t}</font>')
+                out.append(f'<font face="DVMono" color="#0F172A">{t}</font>')
             elif kind == "a":
-                out.append(f'<a href="{escape(url)}" color="#2457A6"><u>{t}</u></a>')
+                out.append(f'<a href="{escape(url)}" color="#2563EB"><u>{t}</u></a>')
             elif kind == "m":
                 out.append(math_markup(t))
             else:
@@ -2245,18 +2550,15 @@ def build_pdf(title: str, blocks: list) -> bytes:
     doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=20 * mm, rightMargin=20 * mm, topMargin=18 * mm,
                             bottomMargin=18 * mm, title=plain_text(title), author="Gemini Bot")
     story: list = []
-    # шапка-баннер
-    ttl = ParagraphStyle("ttl", parent=base, fontName="DV-B", fontSize=21, leading=27, textColor=colors.white, spaceAfter=0)
-    sub = ParagraphStyle("sub", parent=base, fontSize=9, leading=12, textColor=hx("#C9D8F0"), spaceAfter=0)
-    banner = Table([[Paragraph(rl(title), ttl)], [Paragraph(f"Подготовлено: {now_local():%d.%m.%Y %H:%M}", sub)]],
-                   colWidths=[doc.width])
-    banner.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, -1), navy), ("LEFTPADDING", (0, 0), (-1, -1), 16),
-                                ("RIGHTPADDING", (0, 0), (-1, -1), 16), ("TOPPADDING", (0, 0), (0, 0), 16),
-                                ("BOTTOMPADDING", (0, 0), (0, 0), 4), ("TOPPADDING", (0, 1), (0, 1), 0),
-                                ("BOTTOMPADDING", (0, 1), (0, 1), 14)]))
-    story += [banner, Spacer(1, 10)]
 
-    skip_title = True  # первый заголовок H1, совпадающий с названием, не дублируем
+    # Элегантный заголовок в стиле Claude (без громоздких синих плашек)
+    ttl = ParagraphStyle("ttl", parent=base, fontName="DV-B", fontSize=21, leading=26, textColor=c_title, spaceAfter=3)
+    sub = ParagraphStyle("sub", parent=base, fontSize=9, leading=12, textColor=c_sub, spaceAfter=0)
+    story.append(Paragraph(rl(title), ttl))
+    story.append(Paragraph(f"Подготовлено ассистентом · {now_local():%d.%m.%Y %H:%M}", sub))
+    story.append(HRFlowable(width="100%", thickness=0.8, color=c_border, spaceBefore=8, spaceAfter=12))
+
+    skip_title = True
     for b in blocks:
         t = b["t"]
         if t == "h":
@@ -2266,7 +2568,7 @@ def build_pdf(title: str, blocks: list) -> bytes:
             skip_title = False
             story.append(Paragraph(rl(b["text"]), {1: h1, 2: h2, 3: h3}[b["lvl"]]))
             if b["lvl"] == 1:
-                story.append(HRFlowable(width="100%", thickness=0.8, color=hx("#C9D8F0"), spaceAfter=6))
+                story.append(HRFlowable(width="100%", thickness=0.6, color=c_border, spaceAfter=6))
         elif t == "p":
             story.append(Paragraph(rl(b["text"]), base))
         elif t == "li":
@@ -2280,7 +2582,7 @@ def build_pdf(title: str, blocks: list) -> bytes:
         elif t == "quote":
             story.append(Paragraph(rl(b["text"]), quote))
         elif t == "hr":
-            story.append(HRFlowable(width="100%", thickness=0.6, color=hx("#C9D8F0"), spaceBefore=6, spaceAfter=8))
+            story.append(HRFlowable(width="100%", thickness=0.6, color=c_border, spaceBefore=6, spaceAfter=8))
         elif t == "table":
             rows = b["rows"]
             ncol = len(rows[0])
@@ -2291,21 +2593,21 @@ def build_pdf(title: str, blocks: list) -> bytes:
             weights = [min(max(max(len(plain_text(r[c])) for r in rows), 6), 45) for c in range(ncol)]
             widths = [doc.width * w / sum(weights) for w in weights]
             tbl = Table(data, colWidths=widths, repeatRows=1)
-            style = [("BACKGROUND", (0, 0), (-1, 0), navy), ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                     ("GRID", (0, 0), (-1, -1), 0.4, hx("#C9D3E3")), ("LEFTPADDING", (0, 0), (-1, -1), 6),
-                     ("RIGHTPADDING", (0, 0), (-1, -1), 6), ("TOPPADDING", (0, 0), (-1, -1), 4),
-                     ("BOTTOMPADDING", (0, 0), (-1, -1), 4)]
+            style = [("BACKGROUND", (0, 0), (-1, 0), c_tbl_head), ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                     ("GRID", (0, 0), (-1, -1), 0.5, c_border), ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                     ("RIGHTPADDING", (0, 0), (-1, -1), 6), ("TOPPADDING", (0, 0), (-1, -1), 5),
+                     ("BOTTOMPADDING", (0, 0), (-1, -1), 5)]
             for r in range(1, len(rows)):
                 if r % 2 == 0:
-                    style.append(("BACKGROUND", (0, r), (-1, r), hx("#F4F7FC")))
+                    style.append(("BACKGROUND", (0, r), (-1, r), hx("#F8FAFC")))
             tbl.setStyle(TableStyle(style))
             story += [tbl, Spacer(1, 10)]
 
     def footer(canvas, d):
         canvas.saveState()
         canvas.setFont("DV", 8)
-        canvas.setFillColor(hx("#7A8699"))
-        canvas.setStrokeColor(hx("#D5DAE3"))
+        canvas.setFillColor(hx("#9CA3AF"))
+        canvas.setStrokeColor(c_border)
         canvas.line(20 * mm, 13 * mm, A4[0] - 20 * mm, 13 * mm)
         canvas.drawString(20 * mm, 9 * mm, _pdf_clean(plain_text(title))[:80])
         canvas.drawRightString(A4[0] - 20 * mm, 9 * mm, f"стр. {d.page}")
@@ -2313,6 +2615,238 @@ def build_pdf(title: str, blocks: list) -> bytes:
 
     doc.build(story, onFirstPage=footer, onLaterPages=footer)
     return buf.getvalue()
+
+
+LATEX_UNICODE_MAP = {
+    # Греческие строчные
+    "α": r"\ensuremath{\alpha}", "β": r"\ensuremath{\beta}", "γ": r"\ensuremath{\gamma}",
+    "δ": r"\ensuremath{\delta}", "ε": r"\ensuremath{\varepsilon}", "ϵ": r"\ensuremath{\epsilon}",
+    "ζ": r"\ensuremath{\zeta}", "η": r"\ensuremath{\eta}", "θ": r"\ensuremath{\theta}",
+    "ϑ": r"\ensuremath{\vartheta}", "ι": r"\ensuremath{\iota}", "κ": r"\ensuremath{\kappa}",
+    "λ": r"\ensuremath{\lambda}", "μ": r"\ensuremath{\mu}", "ν": r"\ensuremath{\nu}",
+    "ξ": r"\ensuremath{\xi}", "π": r"\ensuremath{\pi}", "ϖ": r"\ensuremath{\varpi}",
+    "ρ": r"\ensuremath{\rho}", "ϱ": r"\ensuremath{\varrho}", "σ": r"\ensuremath{\sigma}",
+    "ς": r"\ensuremath{\varsigma}", "τ": r"\ensuremath{\tau}", "υ": r"\ensuremath{\upsilon}",
+    "φ": r"\ensuremath{\varphi}", "ϕ": r"\ensuremath{\phi}", "χ": r"\ensuremath{\chi}",
+    "ψ": r"\ensuremath{\psi}", "ω": r"\ensuremath{\omega}",
+    # Греческие заглавные
+    "Γ": r"\ensuremath{\Gamma}", "Δ": r"\ensuremath{\Delta}", "Θ": r"\ensuremath{\Theta}",
+    "Λ": r"\ensuremath{\Lambda}", "Ξ": r"\ensuremath{\Xi}", "Π": r"\ensuremath{\Pi}",
+    "Σ": r"\ensuremath{\Sigma}", "Υ": r"\ensuremath{\Upsilon}", "Φ": r"\ensuremath{\Phi}",
+    "Ψ": r"\ensuremath{\Psi}", "Ω": r"\ensuremath{\Omega}",
+    # Математические операторы и кванторы
+    "∀": r"\ensuremath{\forall}", "∃": r"\ensuremath{\exists}", "∄": r"\ensuremath{\nexists}",
+    "∈": r"\ensuremath{\in}", "∉": r"\ensuremath{\notin}", "∋": r"\ensuremath{\ni}",
+    "⊂": r"\ensuremath{\subset}", "⊆": r"\ensuremath{\subseteq}", "⊄": r"\ensuremath{\not\subset}",
+    "⊃": r"\ensuremath{\supset}", "⊇": r"\ensuremath{\supseteq}",
+    "∪": r"\ensuremath{\cup}", "∩": r"\ensuremath{\cap}", "∖": r"\ensuremath{\setminus}",
+    "∑": r"\ensuremath{\sum}", "∏": r"\ensuremath{\prod}", "∫": r"\ensuremath{\int}",
+    "∬": r"\ensuremath{\iint}", "∭": r"\ensuremath{\iiint}", "∮": r"\ensuremath{\oint}",
+    "√": r"\ensuremath{\sqrt{}}", "∞": r"\ensuremath{\infty}",
+    "→": r"\ensuremath{\to}", "←": r"\ensuremath{\gets}", "↔": r"\ensuremath{\leftrightarrow}",
+    "⇒": r"\ensuremath{\Rightarrow}", "⇐": r"\ensuremath{\Leftarrow}", "⇔": r"\ensuremath{\Leftrightarrow}",
+    "≤": r"\ensuremath{\le}", "≥": r"\ensuremath{\ge}", "≠": r"\ensuremath{\neq}",
+    "≈": r"\ensuremath{\approx}", "≡": r"\ensuremath{\equiv}", "±": r"\ensuremath{\pm}",
+    "∓": r"\ensuremath{\mp}", "·": r"\ensuremath{\cdot}", "×": r"\ensuremath{\times}",
+    "÷": r"\ensuremath{\div}", "°": r"\ensuremath{^\circ}", "∂": r"\ensuremath{\partial}",
+    "∇": r"\ensuremath{\nabla}", "⊥": r"\ensuremath{\perp}", "∥": r"\ensuremath{\parallel}",
+    "∠": r"\ensuremath{\angle}", "△": r"\ensuremath{\triangle}", "∼": r"\ensuremath{\sim}",
+    "∝": r"\ensuremath{\propto}", "∅": r"\ensuremath{\emptyset}", "∧": r"\ensuremath{\land}",
+    "∨": r"\ensuremath{\lor}", "¬": r"\ensuremath{\neg}", "⊕": r"\ensuremath{\oplus}",
+    "⊗": r"\ensuremath{\otimes}",
+    "✓": r"\ensuremath{\checkmark}", "✔": r"\ensuremath{\checkmark}",
+    "✗": r"\ensuremath{\times}", "✘": r"\ensuremath{\times}",
+    # Числовые множества
+    "ℝ": r"\ensuremath{\mathbb{R}}", "ℂ": r"\ensuremath{\mathbb{C}}",
+    "ℕ": r"\ensuremath{\mathbb{N}}", "ℤ": r"\ensuremath{\mathbb{Z}}",
+    "ℚ": r"\ensuremath{\mathbb{Q}}",
+    # Юникод индексы и степени
+    "₀": r"\ensuremath{_0}", "₁": r"\ensuremath{_1}", "₂": r"\ensuremath{_2}",
+    "₃": r"\ensuremath{_3}", "₄": r"\ensuremath{_4}", "₅": r"\ensuremath{_5}",
+    "₆": r"\ensuremath{_6}", "₇": r"\ensuremath{_7}", "₈": r"\ensuremath{_8}",
+    "₉": r"\ensuremath{_9}", "₊": r"\ensuremath{_+}", "₋": r"\ensuremath{_-}",
+    "ᵢ": r"\ensuremath{_i}", "ⱼ": r"\ensuremath{_j}", "ₖ": r"\ensuremath{_k}",
+    "ₙ": r"\ensuremath{_n}", "ₓ": r"\ensuremath{_x}",
+    "⁰": r"\ensuremath{^0}", "¹": r"\ensuremath{^1}", "²": r"\ensuremath{^2}",
+    "³": r"\ensuremath{^3}", "⁴": r"\ensuremath{^4}", "⁵": r"\ensuremath{^5}",
+    "⁶": r"\ensuremath{^6}", "⁷": r"\ensuremath{^7}", "⁸": r"\ensuremath{^8}",
+    "⁹": r"\ensuremath{^9}", "⁺": r"\ensuremath{^+}", "⁻": r"\ensuremath{^-}",
+    "ⁿ": r"\ensuremath{^n}",
+    # Типографика
+    "—": "---", "–": "--", "«": "<<", "»": ">>", "“": "``", "”": "''",
+    "„": ",,", "…": r"\ldots{}", "•": r"\textbullet{}", "\u00a0": "~",
+    "−": "-", "№": r"No.~",
+}
+
+
+def clean_latex_prose(text: str) -> str:
+    """Заменяет спецсимволы, греческие буквы и типографику на LaTeX, вырезает эмодзи."""
+    for k, v in LATEX_UNICODE_MAP.items():
+        text = text.replace(k, v)
+    text = re.sub(r"[\U00010000-\U0010ffff]", "", text)
+    text = re.sub(r"[\u200d\u200c\u200e\u200f\ufe0f\ufe0e]", "", text)
+    # Оставляем ASCII, кириллицу (0x0400-0x052F) и Latin-1 (0x00A0-0x00FF), остальное отсекаем во избежание сбоев pdflatex
+    res = []
+    for ch in text:
+        code = ord(ch)
+        if code < 128 or (0x0400 <= code <= 0x052F) or (0x00A0 <= code <= 0x00FF):
+            res.append(ch)
+    return "".join(res)
+
+
+def build_latex(title: str, blocks: list) -> bytes:
+    """Генерирует чистый, компилируемый LaTeX-документ (.tex) с поддержкой кириллицы и математики."""
+    def tex_escape(s: str) -> str:
+        chars = {
+            "\\": r"\textbackslash{}",
+            "&": r"\&",
+            "%": r"\%",
+            "$": r"\$",
+            "#": r"\#",
+            "_": r"\_",
+            "{": r"\{",
+            "}": r"\}",
+            "~": r"\textasciitilde{}",
+            "^": r"\textasciicircum{}",
+        }
+        parts = re.split(r"(\$\$.*?\$\$|\$.*?\$|\\\(.*?\\\)|\\\[.*?\\\])", str(s or ""), flags=re.DOTALL)
+        res = []
+        for p in parts:
+            if not p:
+                continue
+            if (p.startswith("$") and p.endswith("$")) or (p.startswith(r"\(") and p.endswith(r"\)")) or (p.startswith(r"\[") and p.endswith(r"\]")):
+                res.append(clean_latex_prose(p))
+            else:
+                for k, v in chars.items():
+                    p = p.replace(k, v)
+                res.append(clean_latex_prose(p))
+        return "".join(res)
+
+    def format_inline_tex(text: str) -> str:
+        t = re.sub(r"\*\*(.+?)\*\*", r"\\textbf{\1}", text)
+        t = re.sub(r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)", r"\\textit{\1}", t)
+        t = re.sub(r"`([^`]+)`", r"\\texttt{\1}", t)
+        return t
+
+    out = [
+        r"\documentclass[11pt,a4paper]{article}",
+        r"\usepackage[utf8]{inputenc}",
+        r"\usepackage[T2A]{fontenc}",
+        r"\usepackage[english,russian]{babel}",
+        r"\usepackage{amsmath,amssymb,amsfonts}",
+        r"\usepackage{geometry}",
+        r"\geometry{left=25mm,right=25mm,top=25mm,bottom=25mm}",
+        r"\usepackage{hyperref}",
+        r"\hypersetup{colorlinks=true, linkcolor=blue, urlcolor=blue}",
+        r"\usepackage{booktabs}",
+        r"\usepackage{parskip}",
+        "",
+        f"\\title{{\\textbf{{{tex_escape(title)}}}}}",
+        r"\author{Gemini Bot \and Артём}",
+        f"\\date{{{now_local():%d.%m.%Y %H:%M}}}",
+        "",
+        r"\begin{document}",
+        r"\maketitle",
+        "",
+    ]
+
+    in_list = None
+    for b in blocks:
+        bt = b.get("t")
+        if bt != "li" and in_list:
+            out.append(f"\\end{{{in_list}}}")
+            in_list = None
+
+        if bt == "h":
+            lvl = b.get("lvl", 1)
+            t = format_inline_tex(tex_escape(b.get("text", "")))
+            if lvl == 1:
+                out.append(f"\\section*{{{t}}}")
+            elif lvl == 2:
+                out.append(f"\\subsection*{{{t}}}")
+            else:
+                out.append(f"\\subsubsection*{{{t}}}")
+        elif bt == "p":
+            t = format_inline_tex(tex_escape(b.get("text", "")))
+            out.append(t + "\n")
+        elif bt == "quote":
+            t = format_inline_tex(tex_escape(b.get("text", "")))
+            out.append(r"\begin{quote}" + "\n" + t + "\n" + r"\end{quote}")
+        elif bt == "code":
+            code_text = clean_latex_prose(b.get("text", "")).strip("\n")
+            out.append(r"\begin{verbatim}" + "\n" + code_text + "\n" + r"\end{verbatim}")
+        elif bt == "math":
+            m_text = clean_latex_prose(b.get("text", "")).strip()
+            out.append(r"\begin{equation*}" + "\n" + m_text + "\n" + r"\end{equation*}")
+        elif bt == "li":
+            is_ord = b.get("ordered", False)
+            target_list = "enumerate" if is_ord else "itemize"
+            if in_list != target_list:
+                if in_list:
+                    out.append(f"\\end{{{in_list}}}")
+                out.append(f"\\begin{{{target_list}}}")
+                in_list = target_list
+            t = format_inline_tex(tex_escape(b.get("text", "")))
+            out.append(f"  \\item {t}")
+        elif bt == "table":
+            rows = b.get("rows", [])
+            if rows:
+                cols = len(rows[0])
+                col_spec = "l" * cols
+                out.append(r"\begin{center}")
+                out.append(f"\\begin{{tabular}}{{{col_spec}}}")
+                out.append(r"\toprule")
+                for r_idx, row in enumerate(rows):
+                    escaped_cells = [format_inline_tex(tex_escape(str(c))) for c in row]
+                    out.append(" & ".join(escaped_cells) + r" \\")
+                    if r_idx == 0:
+                        out.append(r"\midrule")
+                out.append(r"\bottomrule")
+                out.append(r"\end{tabular}")
+                out.append(r"\end{center}")
+        elif bt == "hr":
+            out.append(r"\hrulefill")
+
+    if in_list:
+        out.append(f"\\end{{{in_list}}}")
+
+    out.append(r"\end{document}")
+    return "\n".join(out).encode("utf-8")
+
+
+def compile_latex(tex_bytes: bytes) -> Optional[bytes]:
+    """Компилирует LaTeX-код в PDF через pdflatex (MiKTeX) или xelatex.
+    Возвращает байты скомпилированного PDF или None при ошибке.
+    """
+    import shutil
+    import tempfile
+    import subprocess
+    compiler = shutil.which("pdflatex") or shutil.which("xelatex")
+    if not compiler:
+        log.warning("pdflatex/xelatex не найден в PATH")
+        return None
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            tex_file = os.path.join(td, "doc.tex")
+            with open(tex_file, "wb") as f:
+                f.write(tex_bytes)
+            cmd = [compiler, "-interaction=nonstopmode", "-halt-on-error", "--disable-installer", "doc.tex"]
+            res = subprocess.run(cmd, cwd=td, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30)
+            pdf_file = os.path.join(td, "doc.pdf")
+            if res.returncode == 0 and os.path.exists(pdf_file):
+                with open(pdf_file, "rb") as pf:
+                    return pf.read()
+            else:
+                log_file = os.path.join(td, "doc.log")
+                err_snippet = ""
+                if os.path.exists(log_file):
+                    with open(log_file, "r", encoding="latin-1", errors="replace") as lf:
+                        lines = [line.strip() for line in lf if "!" in line or "Error" in line]
+                        err_snippet = " | ".join(lines[:3])
+                log.warning("Компилятор %s завершился с кодом %s: %s", compiler, res.returncode, err_snippet)
+    except Exception as e:
+        log.warning("Ошибка компиляции LaTeX в PDF: %s", e)
+    return None
 
 
 def build_docx(title: str, blocks: list) -> bytes:
@@ -2806,9 +3340,17 @@ def build_pptx(title: str, blocks: list) -> bytes:
 def build_document(fmt: str, title: str, content: str) -> tuple:
     """Возвращает (байты, имя файла, mime). Выполняется в потоке — тяжёлые библиотеки грузятся лениво."""
     blocks = parse_markdown(content[:80000])
+    base = re.sub(r"\s+", "_", clean_filename(plain_text(title)))[:60].strip("._") or "document"
+    if fmt in ("tex", "latex"):
+        tex_bytes = build_latex(title, blocks)
+        pdf_data = compile_latex(tex_bytes)
+        if pdf_data:
+            return pdf_data, f"{base}_latex.pdf", "application/pdf"
+        log.info("pdflatex недоступен или выдал ошибку, фолбэк на ReportLab для LaTeX PDF")
+        pdf_fallback = build_pdf(title, blocks)
+        return pdf_fallback, f"{base}_latex.pdf", "application/pdf"
     builders = {"pdf": build_pdf, "docx": build_docx, "xlsx": build_xlsx, "pptx": build_pptx}
     data = builders[fmt](title, blocks)
-    base = re.sub(r"\s+", "_", clean_filename(plain_text(title)))[:60].strip("._") or "document"
     return data, f"{base}.{fmt}", FORMAT_MIME[fmt]
 
 
@@ -2862,7 +3404,8 @@ async def handle_create_file(message: types.Message, scope: list, is_private: bo
 # =====================================================================
 # 10. BOT, DISPATCHER, КЛАВИАТУРЫ
 # =====================================================================
-bot = Bot(token=TELEGRAM_BOT_TOKEN, session=AiohttpSession(timeout=120.0))
+_proxy_url = os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY") or os.environ.get("TELEGRAM_PROXY")
+bot = Bot(token=TELEGRAM_BOT_TOKEN, session=AiohttpSession(proxy=_proxy_url, timeout=120.0) if _proxy_url else AiohttpSession(timeout=120.0))
 dp = Dispatcher()
 
 
@@ -2896,7 +3439,7 @@ def get_reply_main_menu() -> ReplyKeyboardMarkup:
 
 
 def mode_title() -> str:
-    return "Подробный разбор с теорией" if USER_SETTINGS.get("answer_mode") != "short" else "Краткий ответ (шпаргалка)"
+    return "Подробный разбор с теорией" if get_current_account_settings().get("answer_mode") != "short" else "Краткий ответ (шпаргалка)"
 
 
 def settings_text() -> str:
@@ -2904,7 +3447,7 @@ def settings_text() -> str:
 
 
 def get_settings_keyboard() -> InlineKeyboardMarkup:
-    mode_btn = "📚 Режим: подробный разбор" if USER_SETTINGS.get("answer_mode") != "short" else "⚡ Режим: краткий ответ"
+    mode_btn = "📚 Режим: подробный разбор" if get_current_account_settings().get("answer_mode") != "short" else "⚡ Режим: краткий ответ"
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="👤 Обо мне (профиль)", callback_data="set_profile_btn"),
          InlineKeyboardButton(text="📜 Инструкции боту", callback_data="set_prompt_btn")],
@@ -2955,6 +3498,8 @@ GUEST_CB_PREFIXES = ("close_settings_btn", "view_all_settings_btn", "toggle_mode
 
 
 def _guest_cb_ok(c) -> bool:
+    if getattr(getattr(c.message, "chat", None), "type", None) == "private" and (c.data or "").startswith(("tt_d_", "tt_w_")):
+        return True
     return bool(GUEST_CHECK and GUEST_CHECK(c.from_user.id)
                 and (c.data or "").startswith(GUEST_CB_PREFIXES))
 
@@ -2971,15 +3516,16 @@ if ADMIN_IDS:
 # =====================================================================
 @dp.message(CommandStart(), F.chat.type == "private")
 async def cmd_start_private(message: types.Message):
-    if not is_allowed(message):
+    parts = (message.text or "").split(maxsplit=1)
+    invite = parts[1] if len(parts) > 1 else ""
+    url = webapp_url()
+    if re.fullmatch(r"tt_[A-Za-z0-9_-]{24}", invite) and url:
+        button = InlineKeyboardButton(text="Посмотреть приглашение", web_app=WebAppInfo(url=f"{url}?invite={invite[3:]}"))
+        await message.answer("Вам прислали расписание группы. Подписку можно подтвердить в ежедневнике.",
+                             reply_markup=InlineKeyboardMarkup(inline_keyboard=[[button]]))
         return
-    await message.answer(
-        f"👋 <b>Привет! Я твой академический ассистент.</b>\n\n"
-        f"Пул API-ключей: {len(pool.keys)} (ротация при лимитах автоматическая).\n"
-        f"Режим ответов: <b>{mode_title()}</b>\n"
-        "Управляй ботом кнопками снизу:",
-        reply_markup=get_reply_main_menu(), parse_mode=ParseMode.HTML,
-    )
+    await message.answer("Привет! Я тут, чтобы тебе было проще с учёбой. Загляни в ежедневник: там ближайшая пара, домашка и карточки. А если хочется просто поболтать или что-то разобрать — пиши мне прямо сюда.",
+                         reply_markup=get_reply_main_menu())
 
 
 @dp.message(F.text == "❌ Скрыть меню", F.chat.type == "private")
@@ -2989,8 +3535,7 @@ async def hide_menu(message: types.Message):
 
 @dp.message(Command("menu"), F.chat.type == "private")
 async def show_menu(message: types.Message):
-    if is_allowed(message):
-        await message.answer("🎛 Главное меню:", reply_markup=get_reply_main_menu())
+    await message.answer("🎛 Главное меню:", reply_markup=get_reply_main_menu())
 
 
 @dp.message(F.text == "⚙️ Настройки", F.chat.type == "private")
@@ -3005,17 +3550,9 @@ async def cmd_settings(message: types.Message):
 async def cmd_view_profile(message: types.Message):
     if not is_allowed(message):
         return
-    uid = message.from_user.id if message.from_user else None
-    
-    # Ищем настройки конкретного пользователя в accounts
-    acc_profile = USER_SETTINGS.get("user_profile", "Не задано")
-    acc_instructions = USER_SETTINGS.get("custom_instructions", "Не задано")
-    
-    for aid, acc in USER_SETTINGS.get("accounts", {}).items():
-        if int(acc.get("tg_id") or 0) == uid:
-            acc_profile = acc.get("user_profile") or acc_profile
-            acc_instructions = acc.get("custom_instructions") or acc_instructions
-            break
+    settings = get_current_account_settings()
+    acc_profile = settings.get("user_profile") or "Не задано"
+    acc_instructions = settings.get("custom_instructions") or "Не задано"
 
     await message.answer(
         "📋 <b>Текущие настройки ассистента:</b>\n\n"
@@ -3100,8 +3637,6 @@ async def clear_memory(message: types.Message):
 
 @dp.message(Command("app"), F.chat.type == "private")
 async def cmd_app(message: types.Message):
-    if not is_allowed(message):
-        return
     url = webapp_url()
     if not url:
         await message.answer("Мини-приложение пока не настроено: нужен публичный https-адрес сервиса "
@@ -3142,9 +3677,172 @@ async def cmd_help(message: types.Message):
     )
 
 
+@dp.message(Command("key", "setkey"))
+async def handle_key_command(message: types.Message, command: CommandObject):
+    if message.chat.type != "private":
+        await message.reply("🔑 Управление API-ключом доступно только в личных сообщениях с ботом.")
+        return
+    arg = (command.args or "").strip()
+    uid = message.from_user.id
+    uname = message.from_user.first_name or "Пользователь"
+
+    acc = None
+    if "ext_webapp" in sys.modules:
+        w = sys.modules["ext_webapp"]
+        acc = w.get_or_create_account({"id": uid, "first_name": uname})
+
+    if not arg:
+        current_k = acc.get("custom_api_key", "") if acc else ""
+        masked = (current_k[:6] + "••••••••" + current_k[-4:]) if len(current_k) > 12 else ("задан" if current_k else "не подключён")
+        status_line = f"Твой текущий ключ: <code>{masked}</code>" if current_k else "У тебя пока не подключён личный ключ."
+        if is_primary_user(uid) and not current_k:
+            status_line += "\n<i>(Как администратор, ты сейчас используешь общий пул сервера)</i>"
+
+        await message.answer(
+            "🔑 <b>Управление API-ключом Gemini (BYOK)</b>\n\n"
+            f"{status_line}\n\n"
+            "<b>Как привязать свой ключ:</b>\n"
+            "1. Зайди на <a href=\"https://aistudio.google.com/apikey\">Google AI Studio</a> и создай бесплатный ключ.\n"
+            "2. Отправь боту команду:\n"
+            "<code>/key AIzaSy...твой_ключ</code>\n\n"
+            "<b>Команды:</b>\n"
+            "• <code>/key AIzaSy...</code> — проверить и сохранить ключ\n"
+            "• <code>/key remove</code> — удалить ключ\n"
+            "• <code>/models</code> — выбрать модель ИИ",
+            parse_mode=ParseMode.HTML,
+            disable_web_page_preview=True,
+        )
+        return
+
+    if arg.lower() in ("remove", "delete", "clear", "сброс", "удалить"):
+        if acc:
+            acc["custom_api_key"] = ""
+            save_json(SETTINGS_FILE, USER_SETTINGS)
+            if "ext_webapp" in sys.modules:
+                sys.modules["ext_webapp"].USER_POOLS.pop(acc["id"], None)
+        await message.answer("🗑 Личный API-ключ удалён.")
+        return
+
+    async with chat_action(message.chat.id, ChatAction.TYPING):
+        test_key = arg
+        if len(test_key) < 20:
+            await message.answer("❌ Ключ слишком короткий. Проверь правильность копирования.")
+            return
+
+        try:
+            client = genai.Client(api_key=test_key, http_options=genai_types.HttpOptions(timeout=10000))
+            test_models = ["gemini-4-hydrogen", "gemini-3.5-flash-lite", "gemini-2.5-flash"]
+            last_err = None
+            verified = False
+            for m in test_models:
+                try:
+                    await asyncio.wait_for(client.aio.models.generate_content(model=m, contents="ping"), timeout=10)
+                    verified = True
+                    break
+                except Exception as ex:
+                    last_err = ex
+                    up = str(ex).upper()
+                    if any(w in up for w in ("429", "RESOURCE_EXHAUSTED", "QUOTA")):
+                        verified = True
+                        break
+                    if any(w in up for w in ("API_KEY_INVALID", "INVALID", "UNAUTHENTICATED", "401", "403")):
+                        break
+                    continue
+
+            if not verified:
+                raise last_err or RuntimeError("Не удалось проверить ключ")
+
+            if acc:
+                acc["custom_api_key"] = test_key
+                save_json(SETTINGS_FILE, USER_SETTINGS)
+                if "ext_webapp" in sys.modules:
+                    sys.modules["ext_webapp"].USER_POOLS.pop(acc["id"], None)
+
+            masked = test_key[:6] + "••••••••" + test_key[-4:]
+            await message.answer(
+                f"✅ <b>Ключ успешно проверен и сохранён!</b>\n\n"
+                f"Ключ: <code>{masked}</code>\n"
+                f"Теперь бот использует твой персональный ключ и твои квоты Google AI Studio.\n"
+                f"Выбрать предпочтительную модель: /models",
+                parse_mode=ParseMode.HTML,
+            )
+        except Exception as e:
+            await message.answer(f"❌ Ошибка проверки ключа: {e}\nУбедись, что скопировал ключ целиком из Google AI Studio.")
+
+
+@dp.message(Command("models", "model"))
+async def handle_models_command(message: types.Message):
+    uid = message.from_user.id if message.from_user else None
+    acc = None
+    if "ext_webapp" in sys.modules and uid:
+        acc = sys.modules["ext_webapp"].get_or_create_account({"id": uid, "first_name": message.from_user.first_name or ""})
+    current_m = (acc.get("preferred_model") if acc else None) or GEMINI_MODEL
+
+    rows = []
+    for m in AVAILABLE_MODELS:
+        prefix = "✅ " if m["id"] == current_m else ""
+        rows.append([InlineKeyboardButton(text=f"{prefix}{m['name']}", callback_data=f"set_model:{m['id']}")])
+
+    kb = InlineKeyboardMarkup(inline_keyboard=rows)
+    await message.answer(
+        "🤖 <b>Выбор модели Gemini</b>\n\n"
+        f"Текущая модель: <code>{esc(current_m)}</code>\n\n"
+        "Выбери модель для своих запросов:",
+        parse_mode=ParseMode.HTML,
+        reply_markup=kb,
+    )
+
+
 # =====================================================================
 # 12. CALLBACKS
 # =====================================================================
+@dp.callback_query(F.data.startswith("set_model:"))
+async def cb_set_model(call: types.CallbackQuery):
+    chosen = call.data.split(":", 1)[1]
+    uid = call.from_user.id if call.from_user else None
+    if "ext_webapp" in sys.modules and uid:
+        acc = sys.modules["ext_webapp"].get_or_create_account({"id": uid, "first_name": call.from_user.first_name or ""})
+        acc["preferred_model"] = chosen
+        save_json(SETTINGS_FILE, USER_SETTINGS)
+    await call.answer(f"Модель переключена на {chosen}!")
+
+    rows = []
+    for m in AVAILABLE_MODELS:
+        prefix = "✅ " if m["id"] == chosen else ""
+        rows.append([InlineKeyboardButton(text=f"{prefix}{m['name']}", callback_data=f"set_model:{m['id']}")])
+    await safe_edit(
+        call.message,
+        f"🤖 <b>Выбор модели Gemini</b>\n\nТекущая модель: <code>{esc(chosen)}</code>\n\nВыбери модель для своих запросов:",
+        InlineKeyboardMarkup(inline_keyboard=rows),
+    )
+
+
+@dp.callback_query(F.data.startswith("doc_pdf:") | F.data.startswith("doc_docx:") | F.data.startswith("doc_tex:"))
+async def cb_generate_doc(call: types.CallbackQuery):
+    action, _, msg_id_str = call.data.partition(":")
+    msg_id = int(msg_id_str) if msg_id_str.isdigit() else 0
+    ans_data = RECENT_ANSWERS.get(msg_id)
+    content = ans_data.get("text") if ans_data else (call.message.text or call.message.caption or "")
+    if not content:
+        await call.answer("Ответ устарел или не найден в памяти", show_alert=True)
+        return
+
+    fmt_map = {
+        "doc_pdf": ("pdf", "📄 PDF (Claude-style)"),
+        "doc_docx": ("docx", "📝 Word"),
+        "doc_tex": ("tex", "📐 LaTeX PDF"),
+    }
+    fmt, label = fmt_map.get(action, ("pdf", "📄 PDF"))
+    await call.answer(f"Генерирую {label}...")
+    title = "Ответ ассистента"
+    try:
+        async with chat_action(call.message.chat.id, ChatAction.UPLOAD_DOCUMENT):
+            data, filename, _ = await asyncio.to_thread(build_document, fmt, title, content)
+            doc = BufferedInputFile(data, filename=filename)
+            await call.message.reply_document(doc, caption=f"✨ Твой ответ в формате **{label}**!")
+    except Exception as e:
+        log.exception("cb_generate_doc error")
+        await call.message.reply(f"⚠️ Не удалось создать {label}: {e}")
 @dp.callback_query(F.data == "close_settings_btn")
 async def cb_close_settings(call: types.CallbackQuery):
     with suppress(Exception):
@@ -3165,8 +3863,8 @@ async def cb_view_all(call: types.CallbackQuery):
     await safe_edit(
         call.message,
         "📋 <b>Полная конфигурация:</b>\n\n"
-        f"👤 <b>О себе:</b>\n{esc(USER_SETTINGS.get('user_profile', 'Не задано'))}\n\n"
-        f"📜 <b>Инструкции:</b>\n{esc(USER_SETTINGS.get('custom_instructions', 'Не задано'))}\n\n"
+        f"👤 <b>О себе:</b>\n{esc(get_current_account_settings().get('user_profile', 'Не задано'))}\n\n"
+        f"📜 <b>Инструкции:</b>\n{esc(get_current_account_settings().get('custom_instructions', 'Не задано'))}\n\n"
         f"🎚 <b>Режим:</b> {mode_title()}\n\n"
         f"🏷 <b>Группы и темы:</b>\n{topics_list}\n\n"
         f"🔑 <b>Ключей Gemini:</b> {len(pool.keys)} · 🤖 <b>Модель:</b> <code>{esc(GEMINI_MODEL)}</code>\n"
@@ -3178,7 +3876,8 @@ async def cb_view_all(call: types.CallbackQuery):
 
 @dp.callback_query(F.data == "toggle_mode_btn")
 async def cb_toggle_mode(call: types.CallbackQuery):
-    USER_SETTINGS["answer_mode"] = "short" if USER_SETTINGS.get("answer_mode") != "short" else "detailed"
+    settings = get_current_account_settings()
+    settings["answer_mode"] = "short" if settings.get("answer_mode") != "short" else "detailed"
     save_json(SETTINGS_FILE, USER_SETTINGS)
     await safe_edit(call.message, settings_text(), get_settings_keyboard())
     await call.answer(f"Режим: {mode_title()}")
@@ -3314,7 +4013,7 @@ async def handle_profile_input(message: types.Message, state: FSMContext):
     if not message.text:
         await message.answer("Пришли, пожалуйста, текстом.")
         return
-    USER_SETTINGS["user_profile"] = message.text.strip()
+    get_current_account_settings()["user_profile"] = message.text.strip()
     save_json(SETTINGS_FILE, USER_SETTINGS)
     await state.clear()
     await message.answer("✅ <b>Информация сохранена!</b>", reply_markup=get_reply_main_menu(), parse_mode=ParseMode.HTML)
@@ -3332,7 +4031,7 @@ async def handle_instructions_input(message: types.Message, state: FSMContext):
     if not message.text:
         await message.answer("Пришли, пожалуйста, текстом.")
         return
-    USER_SETTINGS["custom_instructions"] = message.text.strip()
+    get_current_account_settings()["custom_instructions"] = message.text.strip()
     save_json(SETTINGS_FILE, USER_SETTINGS)
     await state.clear()
     await message.answer("✅ <b>Инструкции сохранены!</b>", reply_markup=get_reply_main_menu(), parse_mode=ParseMode.HTML)
@@ -3449,16 +4148,13 @@ async def cb_back_settings(call: types.CallbackQuery):
     await call.answer()
 
 def get_current_account_settings() -> dict:
-    """Возвращает настройки текущего аккаунта (включая медиа) или общие USER_SETTINGS."""
-    try:
-        import ext_webapp
-        accs = USER_SETTINGS.get("accounts", {})
-        active_id = getattr(ext_webapp, "ACTIVE_ACCOUNT_ID", "")
-        if active_id in accs:
-            return accs[active_id]
-    except Exception:
-        pass
-    return USER_SETTINGS
+    """Return the settings for the current event, or the owner's background settings."""
+    account = CURRENT_ACCOUNT.get()
+    if account is not None:
+        return account
+    accounts = USER_SETTINGS.get("accounts", {})
+    return next(iter(accounts.values()), USER_SETTINGS)
+
 
 def media_menu_text() -> str:
     settings = get_current_account_settings()
@@ -3691,7 +4387,7 @@ async def handle_voice(message: types.Message):
                          remember_as="[голосовое сообщение]")
     except Exception as e:
         log.exception("voice error")
-        await message.reply(f"Не удалось обработать голосовое: {e}", parse_mode=None)
+        await message.reply("Не разобрал голосовое 🎧 Запиши ещё раз или напиши текстом.", parse_mode=None)
 
 
 def load_plugins() -> None:
@@ -3772,8 +4468,17 @@ async def start_web_server() -> web.AppRunner:
             log.exception("web setup")
     runner = web.AppRunner(app)
     await runner.setup()
-    await web.TCPSite(runner, "0.0.0.0", PORT).start()
-    log.info("🌐 Health-check сервер на порту %d", PORT)
+    try:
+        await web.TCPSite(runner, "0.0.0.0", PORT).start()
+        log.info("🌐 Health-check сервер на порту %d", PORT)
+    except OSError as err:
+        if err.errno in (10048, 98):
+            alt_port = PORT + 1
+            log.warning("Порт %d занят другим процессом. Поднимаю сервер на порту %d...", PORT, alt_port)
+            await web.TCPSite(runner, "0.0.0.0", alt_port).start()
+            log.info("🌐 Health-check сервер на порту %d", alt_port)
+        else:
+            raise
     return runner
 
 
@@ -3792,7 +4497,7 @@ async def keep_alive() -> None:
 
 async def run_bot() -> None:
     global BOT_USERNAME, BOT_ID
-    await bot.delete_webhook(drop_pending_updates=True)
+    await bot.delete_webhook(drop_pending_updates=False)
     me = await bot.me()
     BOT_USERNAME, BOT_ID = (me.username or "").lower(), me.id
     await setup_bot_commands()
@@ -3825,8 +4530,8 @@ async def main() -> None:
     finally:
         ka.cancel()
         sched.cancel()
-        if GIST_ENABLED:
-            await gist_push()  # финальное сохранение перед остановкой
+        await asyncio.gather(ka, sched, return_exceptions=True)
+        await flush_gist()
         await bot.session.close()
         await runner.cleanup()
 

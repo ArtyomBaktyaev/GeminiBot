@@ -23,31 +23,40 @@ core = None
 FILE = "study.json"
 INTERVALS = {1: 0, 2: 1, 3: 3, 4: 7, 5: 16}  # через сколько дней вернётся карточка, попав в коробку N
 SESSION_SIZE = 10
-ST: dict = {}
-SESS: dict = {}  # chat_id -> {"queue": [id...], "seen": 0, "ok": 0, "again": set()}
 
 
 def default_state() -> dict:
     return {"cards": [], "next_card": 1, "quiz_log": [], "quizzes": {}, "polls": {}, "next_quiz": 1}
 
 
+ST: dict = default_state()
+SESS: dict = {}  # chat_id -> {"queue": [id...], "seen": 0, "ok": 0, "again": set()}
+
+
 def load() -> None:
     data = core.load_json(FILE, default_state())
     ST.clear()
     ST.update(default_state())
-    ST.update(data)
+    if isinstance(data, dict):
+        ST.update(data)
+
+
+def get_current_st() -> dict:
+    return core.profile_plugin_state("study", ST, default_state)
 
 
 def save() -> None:
     # ограничиваем рост файла
-    log = ST["quiz_log"]
+    state = get_current_st()
+    log = state.setdefault("quiz_log", [])
     del log[:-300]
-    qs = ST["quizzes"]
-    for k in sorted(qs, key=int)[:-30]:
-        for q in qs[k]["questions"]:
-            ST["polls"].pop(str(q.get("poll_id")), None)
-        del qs[k]
-    core.save_json(FILE, ST)
+    qs = state.setdefault("quizzes", {})
+    polls = state.setdefault("polls", {})
+    for k in sorted(qs, key=lambda x: int(x) if str(x).isdigit() else 0)[:-30]:
+        for q in (qs[k].get("questions") or []):
+            polls.pop(str(q.get("poll_id")), None)
+        qs.pop(k, None)
+    core.save_plugin_state(FILE, ST)
 
 
 def today_iso() -> str:
@@ -58,16 +67,19 @@ def today_iso() -> str:
 # Карточки
 # ======================================================================
 def due_cards(deck: Optional[str] = None) -> list:
+    state = get_current_st()
     t = today_iso()
-    out = [c for c in ST["cards"] if c["due"] <= t and (not deck or c["deck"] == deck)]
-    out.sort(key=lambda c: (c["due"], c["box"]))
+    cards = state.get("cards") or []
+    out = [c for c in cards if isinstance(c, dict) and c.get("due", "") <= t and (not deck or c.get("deck") == deck)]
+    out.sort(key=lambda c: (c.get("due", ""), c.get("box", 1)))
     return out
 
 
 def card_stats() -> dict:
-    cards = ST["cards"]
-    return {"total": len(cards), "due": len(due_cards()), "learned": sum(1 for c in cards if c["box"] >= 4),
-            "decks": sorted({c["deck"] for c in cards})}
+    state = get_current_st()
+    cards = state.get("cards") or []
+    return {"total": len(cards), "due": len(due_cards()), "learned": sum(1 for c in cards if isinstance(c, dict) and c.get("box", 0) >= 4),
+            "decks": sorted({c.get("deck", "english") for c in cards if isinstance(c, dict)})}
 
 
 def due_count() -> int:
@@ -75,27 +87,29 @@ def due_count() -> int:
 
 
 def add_cards(items: list, deck: str = "english") -> list:
+    state = get_current_st()
     added = []
-    have = {(c["deck"], c["front"].lower()) for c in ST["cards"]}
+    have = {(c["deck"], c["front"].lower()) for c in state["cards"]}
     for it in items or []:
         if not isinstance(it, dict):
             continue
         front, back = str(it.get("front") or "").strip(), str(it.get("back") or "").strip()
         if not front or not back or (deck, front.lower()) in have:
             continue
-        card = {"id": ST["next_card"], "deck": deck, "front": front[:120], "back": back[:300],
+        card = {"id": state["next_card"], "deck": deck, "front": front[:120], "back": back[:300],
                 "ph": str(it.get("transcription") or it.get("ph") or "").strip()[:60],
                 "ex": str(it.get("example") or it.get("ex") or "").strip()[:250],
                 "box": 1, "due": today_iso(), "seen": 0, "ok": 0, "created": _time.time()}
-        ST["next_card"] += 1
-        ST["cards"].append(card)
+        state["next_card"] += 1
+        state["cards"].append(card)
         have.add((deck, front.lower()))
         added.append(card)
     return added
 
 
 def review(card_id: int, known: bool) -> Optional[dict]:
-    for c in ST["cards"]:
+    state = get_current_st()
+    for c in state["cards"]:
         if c["id"] == card_id:
             c["seen"] += 1
             if known:
@@ -110,13 +124,15 @@ def review(card_id: int, known: bool) -> Optional[dict]:
 
 
 def delete_card(card_id: int) -> bool:
-    before = len(ST["cards"])
-    ST["cards"] = [c for c in ST["cards"] if c["id"] != card_id]
-    return len(ST["cards"]) != before
+    state = get_current_st()
+    before = len(state["cards"])
+    state["cards"] = [c for c in state["cards"] if c["id"] != card_id]
+    return len(state["cards"]) != before
 
 
 def get_card(card_id: int) -> Optional[dict]:
-    return next((c for c in ST["cards"] if c["id"] == card_id), None)
+    state = get_current_st()
+    return next((c for c in state["cards"] if c["id"] == card_id), None)
 
 
 def front_text(c: dict, left: int) -> str:
@@ -142,28 +158,31 @@ def cards_menu_text() -> str:
 
 
 def cards_menu_kb() -> InlineKeyboardMarkup:
+    state = get_current_st()
     n = due_count()
     rows = []
-    if ST["cards"]:
+    if state["cards"]:
         rows.append([InlineKeyboardButton(text=f"▶️ Учить ({min(n, SESSION_SIZE)})" if n else "🔁 Потренироваться ещё",
                                           callback_data="fc_s" if n else "fc_r")])
     return InlineKeyboardMarkup(inline_keyboard=rows) if rows else InlineKeyboardMarkup(inline_keyboard=[])
 
 
 async def cmd_cards(message):
+    state = get_current_st()
     if message.chat.type != "private" or not core.is_allowed(message) or not core.is_primary_user(message.from_user.id):
         return
-    await message.answer(cards_menu_text(), reply_markup=cards_menu_kb() if ST["cards"] else None,
+    await message.answer(cards_menu_text(), reply_markup=cards_menu_kb() if state["cards"] else None,
                          parse_mode=ParseMode.HTML)
 
 
 async def _next_card(call, chat_id: int) -> None:
+    state = get_current_st()
     sess = SESS.get(chat_id)
     if not sess or not sess["queue"]:
         seen, ok = (sess["seen"], sess["ok"]) if sess else (0, 0)
         SESS.pop(chat_id, None)
         text = (f"🏁 Сессия завершена: знал {ok} из {seen}.\n\n" if seen else "") + cards_menu_text()
-        await _edit(call, text, cards_menu_kb() if ST["cards"] else None)
+        await _edit(call, text, cards_menu_kb() if state["cards"] else None)
         return
     card = get_card(sess["queue"][0])
     if not card:
@@ -183,10 +202,11 @@ async def _edit(call, text, kb) -> None:
 
 
 async def cb_cards(call):
+    state = get_current_st()
     chat_id = call.message.chat.id
     data = call.data
     if data in ("fc_s", "fc_r"):
-        pool = due_cards() if data == "fc_s" else random.sample(ST["cards"], min(SESSION_SIZE, len(ST["cards"])))
+        pool = due_cards() if data == "fc_s" else random.sample(state["cards"], min(SESSION_SIZE, len(state["cards"])))
         queue = [c["id"] for c in pool[:SESSION_SIZE]]
         if not queue:
             await call.answer("Карточек для повторения нет", show_alert=True)
@@ -223,15 +243,16 @@ async def cb_cards(call):
 # Квизы
 # ======================================================================
 def quiz_stats() -> dict:
+    state = get_current_st()
     by: dict = {}
-    for r in ST["quiz_log"]:
+    for r in state["quiz_log"]:
         t = by.setdefault(r["topic"], {"topic": r["topic"], "total": 0, "correct": 0, "runs": 0})
         t["total"] += r["total"]
         t["correct"] += r["correct"]
         t["runs"] += 1
     topics = sorted(({**t, "pct": round(100 * t["correct"] / t["total"]) if t["total"] else 0} for t in by.values()),
                     key=lambda x: x["pct"])
-    return {"recent": ST["quiz_log"][-10:][::-1], "topics": topics, "runs": len(ST["quiz_log"])}
+    return {"recent": state["quiz_log"][-10:][::-1], "topics": topics, "runs": len(state["quiz_log"])}
 
 
 def clean_questions(items) -> list:
@@ -251,11 +272,12 @@ def clean_questions(items) -> list:
 
 
 async def send_quiz(chat_id: int, thread: Optional[int], topic: str, questions: list) -> int:
-    qid = ST["next_quiz"]
-    ST["next_quiz"] += 1
+    state = get_current_st()
+    qid = state["next_quiz"]
+    state["next_quiz"] += 1
     quiz = {"id": qid, "topic": topic[:60], "chat": chat_id, "thread": thread, "questions": [],
             "answers": {}, "done": []}
-    ST["quizzes"][str(qid)] = quiz
+    state["quizzes"][str(qid)] = quiz
     await core.bot.send_message(chat_id, f"🎯 <b>Квиз: {core.esc(topic)}</b> — {len(questions)} вопросов.\n"
                                          "Отвечай на опросы ниже; в конце покажу результат.",
                                 message_thread_id=thread, parse_mode=ParseMode.HTML)
@@ -264,14 +286,28 @@ async def send_quiz(chat_id: int, thread: Optional[int], topic: str, questions: 
                                        correct_option_id=q["correct"], explanation=q["expl"] or None,
                                        is_anonymous=False, message_thread_id=thread)
         quiz["questions"].append({**q, "poll_id": msg.poll.id})
-        ST["polls"][str(msg.poll.id)] = {"qid": qid, "i": i}
+        state["polls"][str(msg.poll.id)] = {"qid": qid, "i": i}
     save()
     return qid
 
 
 async def on_poll_answer(ans) -> None:
-    ref = ST["polls"].get(str(ans.poll_id))
-    quiz = ST["quizzes"].get(str(ref["qid"])) if ref else None
+    if not ans.user:
+        return
+    uid = ans.user.id
+    # Shared quizzes remain shared even if a participant has their own private cards.
+    guest = uid if str(ans.poll_id) not in ST["polls"] and str(uid) in core.GUESTS else None
+    token = core.CURRENT_GUEST.set(guest)
+    try:
+        await record_poll_answer(ans)
+    finally:
+        core.CURRENT_GUEST.reset(token)
+
+
+async def record_poll_answer(ans) -> None:
+    state = get_current_st()
+    ref = state["polls"].get(str(ans.poll_id))
+    quiz = state["quizzes"].get(str(ref["qid"])) if ref else None
     if not quiz:
         return
     uid = str(ans.user.id)
@@ -284,7 +320,7 @@ async def on_poll_answer(ans) -> None:
         return
     quiz["done"].append(uid)
     correct = sum(1 for v in rec["res"].values() if v)
-    ST["quiz_log"].append({"ts": _time.time(), "topic": quiz["topic"], "total": total, "correct": correct,
+    state["quiz_log"].append({"ts": _time.time(), "topic": quiz["topic"], "total": total, "correct": correct,
                            "who": rec["name"]})
     wrong = [quiz["questions"][int(i)] for i, ok in sorted(rec["res"].items(), key=lambda x: int(x[0])) if not ok]
     esc = core.esc
@@ -302,6 +338,7 @@ async def on_poll_answer(ans) -> None:
 
 
 async def cb_retry(call):
+    state = get_current_st()
     try:
         _, _, qid, uid = call.data.split("_")
     except ValueError:
@@ -310,7 +347,7 @@ async def cb_retry(call):
     if str(call.from_user.id) != uid:
         await call.answer("Это кнопка другого участника", show_alert=True)
         return
-    quiz = ST["quizzes"].get(qid)
+    quiz = state["quizzes"].get(qid)
     rec = quiz["answers"].get(uid) if quiz else None
     if not rec:
         await call.answer("Квиз уже недоступен", show_alert=True)
@@ -419,8 +456,9 @@ async def api_study(request, user):
 
 
 async def api_cards(request, user):
+    state = get_current_st()
     deck = request.query.get("deck") or None
-    items = due_cards(deck) if request.query.get("due") else sorted(ST["cards"], key=lambda c: c["id"], reverse=True)
+    items = due_cards(deck) if request.query.get("due") else sorted(state["cards"], key=lambda c: c["id"], reverse=True)
     return {"cards": items[:300], "stats": card_stats()}
 
 
