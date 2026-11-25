@@ -938,6 +938,26 @@ input[type=date],input[type=time]{min-width:0;padding:9px 10px;font-size:0.92rem
 [data-theme="journal"] .day-feature .btn{background:#ebf4eb;color:#164f44}
 #nav button{flex:1}.daily button,.day-share button{min-height:44px}
 [hidden]{display:none!important}
+/* Guided tour — anchored to actual controls, independent of modal stack. */
+.tour-layer{position:fixed;inset:0;z-index:2147483000;isolation:isolate;overscroll-behavior:contain;touch-action:pan-y}
+.tour-shade{position:absolute;inset:0;background:rgba(5,12,19,.68)}
+.tour-spot{position:absolute;box-sizing:border-box;border:2px solid var(--accent);border-radius:14px;box-shadow:0 0 0 9999px rgba(5,12,19,.68),0 0 0 5px var(--accent-soft),0 0 24px var(--accent-soft);pointer-events:none;transition:top .18s,left .18s,width .18s,height .18s}
+.tour-bubble{position:absolute;box-sizing:border-box;width:min(340px,calc(100vw - 24px));max-height:calc(100dvh - 24px);padding:16px;border:1px solid var(--line-2);border-radius:20px;background:var(--surface);color:var(--text);box-shadow:0 16px 48px rgba(0,0,0,.38);touch-action:pan-y;font-size:14px;line-height:1.45;outline:none}
+.tour-bubble[data-side="below"]::before,.tour-bubble[data-side="above"]::before{content:"";position:absolute;left:var(--tour-arrow,50%);width:12px;height:12px;background:var(--surface);border:1px solid var(--line-2);transform:translateX(-50%) rotate(45deg)}
+.tour-bubble[data-side="below"]::before{top:-7px;border-right:0;border-bottom:0}
+.tour-bubble[data-side="above"]::before{bottom:-7px;border-left:0;border-top:0}
+.tour-top,.tour-meter{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:12px;font-weight:700}
+.tour-section{color:var(--accent);letter-spacing:.04em;text-transform:uppercase}
+.tour-counter{white-space:nowrap;color:var(--text-2);font-variant-numeric:tabular-nums}
+.tour-skip{background:none;border:0;color:var(--text-2);padding:6px 4px;min-height:34px;cursor:pointer;font:inherit}
+.tour-meter{margin:5px 0 13px}.tour-progress{flex:1;height:4px;border-radius:99px;background:var(--surface-3);overflow:hidden}
+.tour-progress i{display:block;height:100%;border-radius:inherit;background:var(--accent);transition:width .2s}
+.tour-title{font-size:18px;line-height:1.2;font-weight:800;margin:0 0 7px;color:var(--text)}
+.tour-copy{margin:0;color:var(--text-2);font-size:14px;line-height:1.45;overflow-wrap:anywhere}
+.tour-actions{display:flex;gap:8px;margin-top:15px;align-items:center}.tour-actions .btn{min-height:44px;flex:1}
+.tour-bubble button:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+@media(max-height:430px){.tour-bubble{padding:12px}.tour-copy{font-size:13px}.tour-actions{margin-top:8px}.tour-meter{margin:3px 0 7px}}
+
 </style>
 </head>
 <body>
@@ -967,7 +987,7 @@ const pick = (t) => { try { tg && tg.HapticFeedback && tg.HapticFeedback.notific
 
 function syncBackProtection() {
   try {
-    const hasOverlay = Boolean(document.querySelector(".overlay"));
+    const hasOverlay = Boolean(document.querySelector(".overlay, .tour-layer"));
     if (tg && tg.BackButton) {
       if (hasOverlay) tg.BackButton.show();
       else tg.BackButton.hide();
@@ -985,6 +1005,7 @@ if (tg) {
   try {
     if (tg.BackButton) {
       tg.BackButton.onClick(() => {
+        if (activeGuideClose) { activeGuideClose(); return; }
         const overlays = document.querySelectorAll(".overlay");
         if (overlays.length > 0) {
           const topOv = overlays[overlays.length - 1];
@@ -1110,6 +1131,22 @@ function _enableManualInput(el, origType) {
   });
 }
 
+// Missing metadata is not content. Do not strip valid null literals from Markdown/code.
+function uiLabel(value, fallback="") {
+  return value == null || (typeof value === "string" && /^(?:null|undefined)$/i.test(value.trim())) ? fallback : String(value);
+}
+function normalizeUiMetadata(data) {
+  const fields = new Set(["room", "teacher", "kind", "publisher", "topic", "deadline", "deadline_iso", "avatar", "name", "subject", "parity", "title", "model", "start", "end", "file"]);
+  function walk(v) {
+    if (Array.isArray(v)) { v.forEach(walk); return; }
+    if (!v || typeof v !== "object") return;
+    for (const [k,x] of Object.entries(v)) {
+      if (fields.has(k) && (x === null || (typeof x === "string" && /^(?:null|undefined)$/i.test(x.trim())))) v[k] = "";
+      else if (x && typeof x === "object") walk(x);
+    }
+  }
+  walk(data); return data;
+}
 function h(tag, props, ...kids) {
   const el = document.createElement(tag);
   for (const [k, v] of Object.entries(props || {})) {
@@ -1126,9 +1163,7 @@ function h(tag, props, ...kids) {
   for (const kid of kids.flat(Infinity)) {
     if (kid == null || kid === false) continue;
     if (typeof kid === "string") {
-      const clean = kid.replace(/^(null|undefined)(?=$|[\s·:,])|([\s·:,])(null|undefined)$/gi, "");
-      if (!clean.trim() && kid.trim()) continue;
-      el.append(document.createTextNode(clean));
+      el.append(document.createTextNode(kid));
       continue;
     }
     el.append(kid.nodeType ? kid : document.createTextNode(String(kid)));
@@ -1222,7 +1257,8 @@ async function api(path, opt) {
     });
     let d;
     try { d = await r.json(); } catch (e) { d = { error: "Ошибка ответа сервера" }; }
-    if (!r.ok || d.error) throw new Error(d.error || "HTTP " + r.status);
+    if (!r.ok || !d || d.error) throw new Error(d?.error || "HTTP " + r.status);
+    if (method === "GET" && /^\/api\/(?:home(?:\?|$)|timetable(?:\/|\?)|tasks(?:\/|\?|$)|me(?:\?|$))/.test(path)) normalizeUiMetadata(d);
     if (method === "GET") API_CACHE.set(cacheKey, { ts: Date.now(), data: d });
     return d;
   } finally {
@@ -1350,7 +1386,7 @@ function fmtRemainingTime(t) {
 }
 
 function getLessonMeta(l) {
-  return {description:l.description || "", homework:l.homework || "", notes:l.notes || "", files:l.files || []};
+  return {description:l.description ?? "", homework:l.homework ?? "", notes:l.notes ?? "", files:Array.isArray(l.files) ? l.files : []};
 }
 
 function fmtBytes(bytes) {
@@ -1717,6 +1753,7 @@ function drawNav() {
     icSpan.innerHTML = NAV_SVGS[id] || "⚡";
     return h("button", {
       type: "button",
+      "data-tour-nav": id,
       class: (S.tab === id || (id === "study" && ["growth","chat"].includes(S.tab))) ? "on" : "",
       onclick: (e) => {
         e.preventDefault();
@@ -2446,30 +2483,161 @@ function sampleDay() {
     h("div", {class:"sub"}, "Это пример. Ваше расписание заполняется отдельно.")));
 }
 
-function openGuide() {
-  const steps = [
-    ["Сегодня", "Здесь ближайшая пара, дедлайны и карточки к повторению. Нажми на пару, чтобы записать домашнее задание и заметки."],
-    ["Расписание", "Добавь первую пару или открой ссылку от одногруппника. Изменения общей сетки увидят подписчики, а материалы к занятиям останутся личными."],
-    ["Задачи", "Добавь дело со сроком. Кнопка «Готово» отмечает его выполненным."],
-    ["Учёба", "Создай карточки по предмету и повторяй их. Чат и дополнительные инструменты доступны здесь, если настроен ИИ."]
-  ];
-  let index = 0;
-  sheet("Как пользоваться", close => {
-    const content = h("div", {class:"stack"});
-    const draw = () => content.replaceChildren(
-      h("div", {class:"sub"}, (index+1)+" из "+steps.length),
-      h("h2", {}, steps[index][0]),
-      h("p", {}, steps[index][1]),
-      dailyButton(index === steps.length-1 ? "Готово" : "Дальше", () => {
-        if (index === steps.length-1) { close(); return; }
-        index++; draw();
-      }, "block"),
-      index ? dailyButton("Назад", () => { index--; draw(); }) : null
-    );
-    draw();
-    return content;
-  });
+let activeGuideClose = null;
+let guideSeenInSession = false;
+function guideSeen() {
+  try { return guideSeenInSession || localStorage.getItem("planner_guide_seen_v2") === "1"; }
+  catch (_) { return guideSeenInSession; }
 }
+function openGuide() {
+  if (activeGuideClose) return;
+  const q = s => document.querySelector(s);
+  const nav = id => q('[data-tour-nav="'+id+'"]');
+  const btn = (...labels) => Array.from(document.querySelectorAll('#view button')).find(el => labels.includes(el.textContent.trim()));
+  // Each target is a real element; optional controls are skipped if absent.
+  const sections = [
+    {tab:'home', steps:[
+      [()=>nav('home'),'Сегодня','Твой учебный день','В одном месте — ближайшая пара, задачи и карточки к повторению.'],
+      [()=>q('#view .day-feature'),'Сегодня','Ближайшая пара','Посмотри время и аудиторию, открой материалы или добавь первое занятие.'],
+      [()=>btn('Материалы пары','Открыть экзамен','Добавить пару','Посмотреть неделю'),'Сегодня','Подробнее о занятии','Здесь можно перейти к материалам ближайшей пары или к своему расписанию.'],
+      [()=>btn('+ Задача'),'Сегодня','Быстрая задача','Запиши дело и срок прямо с главной страницы.'],
+      [()=>btn('Открыть фокус-таймер'),'Сегодня','Фокус-таймер','Выбери предмет и продолжительность учебной сессии. Сохраняй время фокуса и пауз.'],
+      [()=>btn('Мой профиль'),'Сегодня','Твой профиль','Имя, аватар, оформление и профили. Здесь же можно снова запустить эту экскурсию.']
+    ]},
+    {tab:'tt',steps:[
+      [()=>nav('tt'),'Расписание','Твоя неделя','Здесь находятся пары, экзамены и материалы занятий.'],
+      [()=>q('#view .week-nav'),'Расписание','Переключай недели','Стрелки показывают предыдущую и следующую учебную неделю.'],
+      [()=>q('#view .days'),'Расписание','Выбирай день','Нажми на нужный день и увидишь его занятия.'],
+      [()=>q('#view .fab'),'Расписание','Добавь занятие','Кнопка плюс открывает форму новой пары или экзамена в выбранный день.'],
+      [()=>q('#view .lesson'),'Расписание','Материалы пары','Открой занятие, чтобы посмотреть конспекты, домашнее задание и прикреплённые файлы.'],
+      [()=>q('#view .day-share button'),'Расписание','Общее расписание','Поделись расписанием с группой или подключись к расписанию одногруппника.'],
+      [()=>q('#view .page-head .row button:first-child'),'Расписание','Режим сессии','Переключает выбранную неделю на экзамены и коллоквиумы вместо обычных пар.'],
+      [()=>q('#view button[title="Настройки"]'),'Расписание','Настройки','Управляй параметрами расписания и уведомлений.']
+    ]},
+    {tab:'tasks',steps:[
+      [()=>nav('tasks'),'Задачи','Твой список дел','Задачи, дедлайны, таймеры и напоминания разложены по группам и темам.'],
+      [()=>btn('➕ Добавить'),'Задачи','Создай задачу','Заполни текст, тему и при необходимости срок. Экскурсия ничего не создаёт автоматически.'],
+      [()=>q('#view input[type="search"]'),'Задачи','Найди нужное дело','Ищи задачи по группе, теме или тексту.']
+    ]},
+    {tab:'study',sub:'cards',steps:[
+      [()=>nav('study'),'Учёба','Учебные инструменты','Карточки, квизы, чат и личный прогресс.'],
+      [()=>q('#view .seg button:first-child'),'Учёба','Карточки','Повторяй материал по предметам и темам.'],
+      [()=>btn('Создать карточку','➕ Добавить / ИИ-генерация'),'Учёба','Создай карточку','Запиши вопрос и ответ вручную или используй ИИ-генерацию, если она доступна.'],
+      [()=>btn('🔀 Микс всех тем'),'Учёба','Повторение','Запусти тренировку по всем карточкам сразу.']
+    ]},
+    {tab:'study',sub:'quiz',steps:[
+      [()=>q('#view .seg button:nth-child(2)'),'Учёба','Квизы','Проверь знания с помощью вопросов по выбранной теме.'],
+      [()=>btn('🚀 Начать квиз'),'Учёба','Запуск квиза','Введи тему и количество вопросов, затем начни проверку.'],
+      [()=>btn('Рост и цели'),'Учёба','Рост и цели','Здесь находятся привычки, дневник, цели и статистика прогресса.']
+    ]},
+    ...(S.me?.has_ai ? [{tab:'study',steps:[[()=>btn('Чат'),'ИИ','ИИ-ассистент','Открой чат для вопросов, разбора файлов и учебных материалов.']]},
+      {tab:'chat',sub:'chat',steps:[
+        [()=>q('#view .model-pill'),'ИИ','Выбор модели','Выбери модель Gemini, которая подходит твоей задаче.'],
+        [()=>q('#view .attach-btn'),'ИИ','Прикрепи файл','Добавляй фотографии, документы и другие материалы для разбора.'],
+        [()=>q('#view .chatbar'),'ИИ','Задай вопрос','Напиши сообщение и отправь его кнопкой со стрелкой.'],
+        [()=>q('#view .seg button:nth-child(2)'),'ИИ','История','Возвращайся к предыдущим вопросам и ответам.'],
+        [()=>q('#view .seg button:nth-child(3)'),'ИИ','Настройки чата','Настрой поведение ассистента и параметры диалога.']
+      ]}] : []),
+    {tab:'growth',sub:'hub',steps:[
+      [()=>q('#view .seg button:first-child'),'Рост','Личный прогресс','Привычки и учебные цели — выбирай комфортный темп.'],
+      [()=>q('#view .seg button:nth-child(2)'),'Рост','ИИ-прокачка','Дополнительные инструменты для работы с материалами и учебными планами.'],
+      [()=>q('#view .seg button:nth-child(3)'),'Рост','Совместная учёба','Группы, лидерборд и учебные дуэли, если захочешь заниматься вместе с друзьями.']
+    ]},
+    {tab:'home',steps:[[()=>nav('home'),'Готово','Всё готово!','Теперь можешь пользоваться ежедневником. Экскурсия всегда доступна в «Мой профиль → Как пользоваться».']]}
+  ];
+  const steps = sections.flatMap(({tab,sub,steps})=>steps.map(([target,section,title,copy])=>({tab,sub,target,section,title,copy})));
+  let idx=0, busy=false, closed=false, anchor=null, frame=0, token=0;
+  const prevFocus=document.activeElement;
+  const layer=h('div',{class:'tour-layer'});
+  const shade=h('div',{class:'tour-shade'});
+  const spot=h('div',{class:'tour-spot',hidden:true});
+  const bubble=h('div',{class:'tour-bubble',role:'dialog','aria-modal':'true','aria-labelledby':'tour-title',tabindex:'-1'});
+  const counter=h('span',{class:'tour-counter'}), section=h('span',{class:'tour-section'});
+  const skip=h('button',{type:'button',class:'tour-skip',onclick:finish},'Пропустить');
+  const fill=h('i'), title=h('h2',{id:'tour-title',class:'tour-title'}), copy=h('p',{class:'tour-copy','aria-live':'polite'});
+  const back=h('button',{type:'button',class:'btn ghost',onclick:()=>show(-1)},'Назад');
+  const next=h('button',{type:'button',class:'btn',onclick:()=>show(1)},'Далее');
+  bubble.append(h('div',{class:'tour-top'},section,skip),h('div',{class:'tour-meter'},h('div',{class:'tour-progress'},fill),counter),title,copy,h('div',{class:'tour-actions'},back,next));
+  layer.append(shade,spot,bubble);document.body.append(layer);
+  const inertState=[q('#app'),q('#nav')].filter(Boolean).map(el=>[el,el.inert]);
+  inertState.forEach(([el])=>{el.inert=true;});
+  activeGuideClose=finish;syncBackProtection();
+  // Prevent background touches; buttons in the bubble remain interactive.
+  layer.addEventListener('wheel',e=>{if(!bubble.contains(e.target))e.preventDefault();},{passive:false});
+  layer.addEventListener('touchmove',e=>{if(!bubble.contains(e.target))e.preventDefault();},{passive:false});
+  function finish(){
+    if(closed)return;
+    closed=true;token++;cancelAnimationFrame(frame);
+    window.removeEventListener('resize',schedule);window.removeEventListener('scroll',schedule,true);
+    window.visualViewport?.removeEventListener('resize',schedule);window.visualViewport?.removeEventListener('scroll',schedule);
+    document.removeEventListener('keydown',onKey,true);
+    inertState.forEach(([el,was])=>{el.inert=was;});layer.remove();activeGuideClose=null;syncBackProtection();
+    guideSeenInSession=true;
+    try{localStorage.setItem('planner_guide_seen_v2','1');}catch(_){}
+    if(prevFocus?.isConnected)prevFocus.focus({preventScroll:true});
+  }
+  function onKey(e){
+    if(e.key==='Escape'){e.preventDefault();finish();return;}
+    if(e.key==='Tab'){
+      const items=[skip,back,next].filter(el=>!el.disabled),i=items.indexOf(document.activeElement);
+      if(i===-1||(e.shiftKey&&i===0)||(!e.shiftKey&&i===items.length-1)){e.preventDefault();items[e.shiftKey?items.length-1:0]?.focus();}
+    }
+  }
+  function place(){
+    if(closed)return;
+    const vv=window.visualViewport,W=vv?.width||window.innerWidth,H=vv?.height||window.innerHeight;
+    const L=vv?.offsetLeft||0,T=vv?.offsetTop||0,R=L+W,B=T+H,pad=12;
+    const bw=Math.min(340,W-2*pad);bubble.style.width=bw+'px';bubble.style.maxHeight=Math.max(100,H-2*pad)+'px';bubble.style.overflowY='';bubble.dataset.side='center';
+    const r=anchor?.isConnected?anchor.getBoundingClientRect():null;
+    if(!r||!r.width||!r.height||r.bottom<=T||r.top>=B||r.right<=L||r.left>=R){
+      spot.hidden=true;shade.hidden=false;bubble.style.left=(L+(W-bw)/2)+'px';bubble.style.top=Math.max(T+pad,T+(H-bubble.offsetHeight)/2)+'px';
+    } else {
+      const x=Math.max(L,r.left-4),y=Math.max(T,r.top-4),right=Math.min(R,r.right+4),bottom=Math.min(B,r.bottom+4);
+      Object.assign(spot.style,{left:x+'px',top:y+'px',width:(right-x)+'px',height:(bottom-y)+'px'});spot.hidden=false;shade.hidden=true;
+      const bh=bubble.offsetHeight,mid=(x+right)/2,left=Math.max(L+pad,Math.min(R-pad-bw,mid-bw/2));
+      const below=B-bottom,above=y-T;let top,side;
+      if(below>=bh+22){top=bottom+10;side='below';}
+      else if(above>=bh+22){top=y-bh-10;side='above';}
+      else{top=Math.max(T+pad,Math.min(B-bh-pad,above>below?y-bh-10:bottom+10));side='center';}
+      bubble.dataset.side=side;bubble.style.left=left+'px';bubble.style.top=top+'px';bubble.style.setProperty('--tour-arrow',Math.max(20,Math.min(bw-20,mid-left))+'px');
+    }
+    if(bubble.scrollHeight>bubble.clientHeight){bubble.dataset.side='center';bubble.style.overflowY='auto';}
+  }
+  function schedule(){cancelAnimationFrame(frame);frame=requestAnimationFrame(place);}
+  window.addEventListener('resize',schedule);window.addEventListener('scroll',schedule,true);
+  window.visualViewport?.addEventListener('resize',schedule);window.visualViewport?.addEventListener('scroll',schedule);
+  document.addEventListener('keydown',onKey,true);
+  async function show(direction){
+    if(closed||busy)return;
+    let at=idx+direction;if(at>=steps.length){finish();return;}if(at<0)return;
+    const own=++token;busy=true;anchor=null;back.disabled=true;next.disabled=true;
+    title.textContent='Открываем раздел…';copy.textContent='';schedule();
+    try{
+      while(at>=0&&at<steps.length){
+        const step=steps[at],subKey=step.tab==='study'?'studySub':step.tab==='growth'?'growthSub':step.tab==='chat'?'chatSub':null;
+        if(S.tab!==step.tab||(subKey&&step.sub&&S[subKey]!==step.sub)){
+          S.tab=step.tab;if(subKey&&step.sub)S[subKey]=step.sub;drawNav();window.scrollTo(0,0);await render();
+        }
+        if(closed||own!==token)return;
+        anchor=step.target();
+        if(anchor&&anchor.getBoundingClientRect().width&&anchor.getBoundingClientRect().height){
+          idx=at;
+          if(!anchor.closest('#nav')){
+            const r=anchor.getBoundingClientRect();if(r.top<50||r.bottom>window.innerHeight-110)anchor.scrollIntoView({block:'center',behavior:'instant'});
+          }
+          section.textContent=step.section;counter.textContent=(idx+1)+' / '+steps.length;fill.style.width=((idx+1)/steps.length*100)+'%';
+          title.textContent=step.title;copy.textContent=step.copy;next.textContent=idx===steps.length-1?'Завершить':'Далее';back.disabled=idx===0;next.disabled=false;
+          hap();schedule();bubble.focus({preventScroll:true});return;
+        }
+        at+=direction<0?-1:1;
+      }
+      if(direction<0){idx=0;busy=false;return show(0);}finish();
+    }catch(e){if(!closed){title.textContent='Раздел временно недоступен';copy.textContent='Можно пропустить этот шаг или вернуться к экскурсии позже.';idx=at;back.disabled=idx===0;next.disabled=false;next.textContent='Далее';schedule();}}
+    finally{busy=false;}
+  }
+  show(0);
+}
+
 
 async function viewHome() {
   const d = await api("/api/home");
@@ -2540,7 +2708,7 @@ async function viewTT() {
   ));
 
   const shared = w.sharing?.following;
-  root.append(h("div",{class:"day-share"}, shared ? h("small",{}, "Общее расписание · "+w.sharing.publisher) : null,
+  root.append(h("div",{class:"day-share"}, shared ? h("small",{}, ["Общее расписание", uiLabel(w.sharing.publisher)].filter(Boolean).join(" · ")) : null,
     dailyButton(shared ? "Управление подпиской" : "Поделиться расписанием", () => sharingSheet(w.sharing))));
   root.append(h("div", { class:"week-nav" },
     h("button", { onclick: () => { S.ttDate = addDays(w.monday, -7); render(); }, "aria-label":"Назад" }, "‹"),
@@ -3054,7 +3222,7 @@ async function viewTasks() {
             h("div", { class:"card tight row between", style:{marginBottom:0} },
               h("div", { class:"grow" },
                 h("div", { style:{fontWeight:600, fontSize:"0.9rem", textDecoration:"line-through", opacity:0.8} }, dt.text),
-                h("div", { class:"sub" }, "🏷 " + dt.topic + (dt.deadline ? " · было до " + dt.deadline : ""))
+                h("div", { class:"sub" }, [uiLabel(dt.topic) && "🏷 " + dt.topic, dt.deadline && "было до " + dt.deadline].filter(Boolean).join(" · "))
               ),
               h("button", {
                 class:"btn ghost small",
@@ -3739,7 +3907,7 @@ async function viewChat() {
       renderAvatar(acc.avatar, "sm", openProfileEditor),
       h("div", {},
         h("h1", {}, "ИИ-Ассистент"),
-        h("div", { class:"sub" }, acc.name + " · " + shortModelName(S.me && S.me.model))
+        h("div", { class:"sub" }, uiLabel(acc.name, "Профиль") || "Профиль", " · ", shortModelName(S.me && S.me.model))
       )
     ),
     h("div", { class:"row", style:{gap:"6px"} },
@@ -4978,9 +5146,9 @@ async function viewGrowth() {
       h("div", { class:"g-hero-grid" },
         h("div", {},
           h("div", { class:"g-kicker" },
-            st.risk ? "⚠️ СЕРИЯ ПОД УГРОЗОЙ" : `● СТАДИЯ ${comp.stage}/6 · ${comp.title}`),
+            st.risk ? "⚠️ СЕРИЯ ПОД УГРОЗОЙ" : `● СТАДИЯ ${comp.stage ?? 1}/6 · ${uiLabel(comp.title, "Семя Импульса")}`),
           h("div", { class:"g-big-streak" },
-            String(st.streak),
+            String(st.streak ?? 0),
             h("small", {}, st.done ? "дн. · квест закрыт 🔥" : "дн. подряд")
           ),
           h("div", { class:"sub", style:{marginTop:"4px"} },
@@ -4992,8 +5160,8 @@ async function viewGrowth() {
               class:"chip green",
               style:{cursor:"pointer"},
               onclick: () => openLevelModal(st)
-            }, `⚡ Ур. ${st.level} (${st.xp} XP) ℹ️`),
-            h("span", { class:"chip cyan" }, `❄️ Заморозок: ${st.freeze}`),
+            }, `⚡ Ур. ${st.level ?? 1} (${st.xp ?? 0} XP) ℹ️`),
+            h("span", { class:"chip cyan" }, `❄️ Заморозок: ${st.freeze ?? 0}`),
             h("button", {
               class:"chip purple",
               onclick: () => generateStoryCardModal(st)
@@ -5016,10 +5184,10 @@ async function viewGrowth() {
       ),
       h("div", { class:"g-xp-strip", style:{cursor:"pointer"}, onclick: () => openLevelModal(st) },
         h("div", { class:"row between", style:{fontSize:"0.76rem", fontWeight:700} },
-          h("span", {}, `Прогресс до уровня ${st.level + 1} (нажми — история XP и деревья)`),
-          h("span", { class:"mono" }, `${st.xp_in_level} / 100 XP`)
+          h("span", {}, `Прогресс до уровня ${(st.level ?? 1) + 1} (нажми — история XP и деревья)`),
+          h("span", { class:"mono" }, `${st.xp_in_level ?? 0} / 100 XP`)
         ),
-        h("div", { class:"g-xp-bar" }, h("i", { style:{width: st.xp_in_level + "%"} }))
+        h("div", { class:"g-xp-bar" }, h("i", { style:{width: (st.xp_in_level ?? 0) + "%"} }))
       )
     )
   );
@@ -5589,9 +5757,9 @@ async function renderGrowthSocialPane(st) {
           renderAvatar(r.avatar || "🧑‍💻", "sm"),
           h("div", { class:"grow" },
             h("div", { style:{fontWeight:800, fontSize:"0.92rem"} }, r.name),
-            h("div", { class:"sub" }, `Уровень ${r.level || 1} · 🔥 ${r.streak} дн.`)
+            h("div", { class:"sub" }, `Уровень ${r.level || 1} · 🔥 ${r.streak ?? 0} дн.`)
           ),
-          h("span", { class:"chip green mono" }, `${r.xp} XP`)
+          h("span", { class:"chip green mono" }, `${r.xp ?? 0} XP`)
         )
       )
     )
@@ -5639,8 +5807,7 @@ async function boot() {
     if (invite && !S.inviteShown) {
       S.inviteShown=true;
       await showInvite(invite);
-    } else if (!localStorage.getItem("planner_guide_seen_v1")) {
-      localStorage.setItem("planner_guide_seen_v1", "1");
+    } else if (!startParam && !requestedTab && !guideSeen()) {
       openGuide();
     }
   } catch (e) {
@@ -5655,7 +5822,7 @@ async function boot() {
 }
 
 document.addEventListener("visibilitychange", () => {
-  if (!document.hidden && S.me && ["home","tt"].includes(S.tab) && !document.querySelector(".overlay")) {
+  if (!document.hidden && S.me && ["home","tt"].includes(S.tab) && !document.querySelector(".overlay, .tour-layer")) {
     API_CACHE.clear(); render();
   }
 });
