@@ -1006,6 +1006,7 @@ async def api_ask(request, user):
 
     return {
         "answer": answer,
+        "export_text": raw_answer,
         "model": used_model,
         "files": generated_files,
         "attached_files": uploaded_meta,

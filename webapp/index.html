@@ -1522,7 +1522,7 @@ async function exportMessageDoc(text, fmt) {
     toast("Нет текста для экспорта", "err");
     return;
   }
-  const fmtNames = { pdf: "PDF (Claude)", docx: "Word", tex: "LaTeX PDF" };
+  const fmtNames = { pdf: "PDF", docx: "Word", tex: "LaTeX (.tex)" };
   const label = fmtNames[fmt] || fmt.toUpperCase();
   toast(`Генерация ${label}… ⏳`, "info");
   try {
@@ -4021,9 +4021,9 @@ function chatDialogPane() {
         !m.loading && !isMe && m.text ? reactionPicker(m, drawMessages) : null,
         !m.loading ? h("div", { class:"meta-row" },
           m.model ? h("span", {}, "⚡ " + shortModelName(m.model)) : null,
-          !isMe && m.text ? h("button", { class:"act-btn", onclick: () => exportMessageDoc(m.text, "pdf") }, "📄 PDF") : null,
-          !isMe && m.text ? h("button", { class:"act-btn", onclick: () => exportMessageDoc(m.text, "docx") }, "📝 Word") : null,
-          !isMe && m.text ? h("button", { class:"act-btn", onclick: () => exportMessageDoc(m.text, "tex") }, "📐 LaTeX PDF") : null,
+          !isMe && m.text ? h("button", { class:"act-btn", onclick: () => exportMessageDoc(m.exportText || m.text, "pdf") }, "📄 PDF") : null,
+          !isMe && m.text ? h("button", { class:"act-btn", onclick: () => exportMessageDoc(m.exportText || m.text, "docx") }, "📝 Word") : null,
+          !isMe && m.text ? h("button", { class:"act-btn", onclick: () => exportMessageDoc(m.exportText || m.text, "tex") }, "📐 LaTeX (.tex)") : null,
           h("button", { class:"act-btn", onclick: () => {
             navigator.clipboard.writeText(m.text || "");
             toast("Скопировано 📋", "ok");
@@ -4132,6 +4132,7 @@ function chatDialogPane() {
       });
       botEntry.loading = false;
       botEntry.text = res.answer || "";
+      botEntry.exportText = res.export_text || botEntry.text;
       botEntry.model = res.model;
       botEntry.files = res.files || [];
       botEntry.ts = res.ts;

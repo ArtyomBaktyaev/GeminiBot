@@ -1,0 +1,10 @@
+*
+!Dockerfile
+!requirements.txt
+!*.py
+!fonts/
+!fonts/**
+!webapp/
+!webapp/**
+!study_print/
+!study_print/**
