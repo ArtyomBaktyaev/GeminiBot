@@ -162,7 +162,7 @@ LAYOUT_JS = r"""() => {
     }
     for(const expr of document.querySelectorAll('.study-math')) {
         expr.style.zoom='';
-        const box=expr.closest('.math-expr,td,th,p,.list-row,.step-item,h2,h3,.chapter');
+        const box=expr.closest('.math-expr,td,th,p,.list-row,.step-item,h2,h3,.legend,.point-key,figcaption,.chapter');
         if(!box) continue;
         const style=getComputedStyle(box);
         const width=box.clientWidth-parseFloat(style.paddingLeft)-parseFloat(style.paddingRight);
@@ -176,12 +176,23 @@ def print_fitted(page, target, pdf_reader):
     def render():
         page.evaluate(LAYOUT_JS)
         return page.pdf(prefer_css_page_size=True, print_background=True, outline=True)
+    page.evaluate("() => delete document.body.dataset.density")
     data=render()
     if target:
+        best_count=len(pdf_reader(BytesIO(data)).pages)
+        best_density=current_density=None
         for density in ('compact','dense'):
-            if len(pdf_reader(BytesIO(data)).pages)<=target[1]:
+            if best_count<=target[1]:
                 break
             page.evaluate('(density) => document.body.dataset.density=density',density)
+            current_density=density
+            candidate=render()
+            count=len(pdf_reader(BytesIO(candidate)).pages)
+            if count<best_count:
+                data,best_count,best_density=candidate,count,density
+        # Never compress when it saves no page; restore the most spacious winning layout.
+        if current_density!=best_density:
+            page.evaluate("(d) => {if(d)document.body.dataset.density=d;else delete document.body.dataset.density;}",best_density)
             data=render()
     # Resolve contents after density is final; repeat if page locations change.
     for _ in range(3):

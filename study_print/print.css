@@ -65,10 +65,10 @@ math { font-family: "Cambria Math", "STIX Two Math", "DejaVu Math TeX Gyre", mat
 figure.editorial-figure { flex: 1; min-width: 0; }
 .figures { display: flex; gap: 8px; align-items: stretch; break-inside: avoid; }
 figure.editorial-figure > svg { height: auto; max-height: 58mm; }
-figure text { font: 10px Arial, sans-serif; fill: #42554E; }
+figure.editorial-figure > svg text { font: 10px Arial, sans-serif; fill: #42554E; }
 .legend { display: flex; flex-wrap: wrap; gap: 8px; font: 9pt var(--font-sans); }
 .legend span { display: inline-flex; align-items: center; gap: 3px; }
-figure .legend svg { width: 17px; height: 5px; }
+figure .legend > span > svg { width: 17px; height: 5px; }
 .diagram-root,.branches li { font-size: 9.5pt; padding: 4px 8px; }
 .diagram-root { background: var(--accent-emerald); color: white; font-weight: 700; }
 .branches { list-style: none; margin: 8px 0 8px 14px; padding-left: 10px; border-left: 1pt solid #6CA591; }
@@ -127,3 +127,38 @@ body[data-density="dense"] .solution-group > * + * { margin-top: 5px; }
 .point-key { gap: 3px 9px; }
 .editorial-table th .study-math mjx-container { color: inherit; }
 .study-formula-location { text-decoration:none; }
+
+/* Typography v6: same editorial design, more breathing room. */
+:root { --font-sans: "Study Inter", Inter, "DejaVu Sans", Arial, sans-serif; --font-heading: "Study Manrope", Manrope, "Study Inter", Inter, "DejaVu Sans", Arial, sans-serif; }
+body { font-family: var(--font-sans); font-size: 11pt; line-height: 1.49; font-optical-sizing: auto; }
+h1,h2,h3,.section-opener h2,.cover-hero h1,.short-title h1 { font-family: var(--font-heading); font-weight: 700; letter-spacing: -.018em; }
+.chapter { font-size: 11pt; line-height: 1.49; }
+.chapter p { font-size: 11pt; line-height: 1.49; margin-bottom: 0; }
+.chapter > * + * { margin-top: 13px; }
+.chapter > h3 { margin-top: 19px; margin-bottom: 8px; }
+.chapter > h3 + * { margin-top: 8px; }
+.chapter p + p, .proof-block p + p, .solution-group p + p { margin-top: 8px; }
+.chapter .def-block,.chapter .theorem-block,.chapter .example-block,.chapter .callout-important,.chapter .callout-conclusion,.chapter .callout-remember { padding-top: 10px; padding-bottom: 10px; line-height: 1.46; }
+.chapter .proof-block { line-height: 1.46; }
+.chapter .math-display { margin-top: 7px; margin-bottom: 7px; padding-top: 6px; padding-bottom: 6px; }
+.chapter .list-row { line-height: 1.46; }
+.list-row + .list-row { margin-top: 5px; }
+.editorial-table td { padding-top: 6px; padding-bottom: 6px; line-height: 1.4; }
+.editorial-table th .study-math, .editorial-table th .study-math mjx-container { color: inherit !important; }
+.editorial-table th .study-math mjx-container svg { color: inherit !important; }
+.editorial-table th { color: #fff; }
+figure.editorial-figure > svg text { font-family: var(--font-sans); }
+figure.editorial-figure > svg text.axis-var { font-family: Georgia, "DejaVu Serif", serif; font-style: italic; font-size: 12px; }
+.legend { gap: 5px 12px; align-items: center; font-size: 9pt; }
+.legend > span { min-width: 0; max-width: 100%; gap: 5px; }
+.legend > span > svg { flex: 0 0 17px; }
+.legend .study-math, .point-key .study-math, figcaption .study-math { display: inline-block; vertical-align: middle; }
+.point-key { gap: 5px 10px; font-size: 8.7pt; line-height: 1.4; }
+figcaption { line-height: 1.4; }
+body[data-density="compact"] .chapter { font-size: 10.8pt; line-height: 1.46; }
+body[data-density="compact"] .chapter p { font-size: 10.8pt; line-height: 1.46; }
+body[data-density="compact"] .chapter > * + * { margin-top: 11px; }
+body[data-density="dense"] .chapter { font-size: 10.5pt; line-height: 1.42; }
+body[data-density="dense"] .chapter p { font-size: 10.5pt; line-height: 1.42; }
+body[data-density="dense"] .chapter > * + * { margin-top: 9px; }
+body[data-density] .chapter + .chapter { break-before: page !important; margin-top: 0 !important; }

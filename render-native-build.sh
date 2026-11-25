@@ -4,6 +4,7 @@ cd "$(dirname "$0")"
 
 pip install -r requirements.txt
 python install_study_mathjax.py
+python install_study_fonts.py
 
 PLAYWRIGHT_BROWSERS_PATH=0 python -m playwright install --only-shell chromium
 

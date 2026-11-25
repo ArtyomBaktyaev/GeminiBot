@@ -12,6 +12,6 @@ COPY --chown=study:study *.py ./
 COPY --chown=study:study fonts/ fonts/
 COPY --chown=study:study webapp/ webapp/
 COPY --chown=study:study study_print/ study_print/
-RUN python install_study_mathjax.py
+RUN python install_study_mathjax.py && python install_study_fonts.py
 USER study
 CMD ["python", "bot.py"]

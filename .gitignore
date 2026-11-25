@@ -23,3 +23,6 @@ topics.json
 # Built MathJax assets
 study_print/mathjax-svg.js
 study_print/mathjax-LICENSE.txt
+
+# Downloaded OFL print fonts and licenses
+study_print/typefaces/

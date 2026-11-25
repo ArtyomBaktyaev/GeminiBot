@@ -10,8 +10,8 @@ from pypdf.generic import (NameObject, DictionaryObject, ArrayObject, DecodedStr
 PREFIX = 'https://study.invalid/math-source/'
 
 
-def add_formula_text(data, formulas, prefix=PREFIX):
-    if not formulas:
+def add_formula_text(data, formulas, prefix=PREFIX, reading_order=None):
+    if not formulas and not reading_order:
         return data
     reader = PdfReader(BytesIO(data))
     writer = PdfWriter(clone_from=reader)
@@ -62,6 +62,8 @@ def add_formula_text(data, formulas, prefix=PREFIX):
         refs.append(writer._add_object(stream));page[NameObject('/Contents')]=refs
     # Preserve exact full source, including Unicode, for readers without ActualText support.
     writer.add_attachment('formula-source.txt', ('\n\n'.join(formulas.values())).encode('utf-8'))
+    if reading_order:
+        writer.add_attachment('document-source.md', reading_order.encode('utf-8'))
     output=BytesIO();writer.write(output);return output.getvalue()
 
 

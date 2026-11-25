@@ -24,6 +24,7 @@ from study_markdown import inline_tokens, parse_markdown
 from study_figures import plot, diagram, label
 from study_layout import math_slot, mathjax_prepare, page_target, print_fitted
 from study_polish import document_kind, clean_summary
+from study_typography import rich_figure_label, print_font_css, ordered_source
 from study_math_text import mark_formula_locations, add_formula_text
 
 ASSETS = Path(__file__).with_name("study_print")
@@ -225,7 +226,8 @@ def document_html(title, blocks):
             try:
                 data = json.loads(txt)
                 drawing = (plot if lang == "plot" else diagram)(data)
-                caption = label(data["title"])
+                label(data["title"])  # validate before rendering
+                caption = rich_figure_label(data["title"])
             except (KeyError, TypeError, ValueError, ArithmeticError, RecursionError):
                 flush_figures()
                 sections.append(code_block(b))
@@ -359,7 +361,7 @@ def document_html(title, blocks):
            + '<p>Выберите раздел или подраздел, чтобы перейти к нему. Справа указан номер страницы в этом издании.</p>'
            + '<div><div class="toc-title">Разделы и подразделы</div><ul class="toc-list">' + "".join(toc) + '</ul></div>'
            + '<h3><span class="sub-num">§</span>Условные обозначения и навигация по блокам</h3>' + guide)
-    css = "\n".join((ASSETS / f).read_text(encoding="utf8") for f in ("template.css", "print.css"))
+    css = print_font_css() + "\n" + "\n".join((ASSETS / f).read_text(encoding="utf8") for f in ("template.css", "print.css"))
     font = ASSETS.parent / "fonts" / "DejaVuSans.ttf"
     if font.is_file() and any("math-greek-capital" in part for part in sections):
         encoded = base64.b64encode(font.read_bytes()).decode("ascii")
@@ -415,7 +417,7 @@ def render_pdf(title, blocks):
             prefix, formulas = mark_formula_locations(page)
             data = print_fitted(page, page_target(blocks), PdfReader)
             try:
-                return add_formula_text(data, formulas, prefix)
+                return add_formula_text(data, formulas, prefix, ordered_source(title, blocks))
             except Exception:
                 import logging
                 logging.getLogger(__name__).exception("Unable to add searchable formula source; preserving visual PDF")

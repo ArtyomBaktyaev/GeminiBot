@@ -22,7 +22,7 @@ def plot(data):
     original = data
     data = expand_plot(data)
     from study_graph_marks import nice_ticks, markers
-    from study_polish import coord
+    from study_typography import series_label, point_label
     xs = numbers(data["x"])
     series = data["series"]
     if not isinstance(series, list) or not 1 <= len(series) <= 5:
@@ -60,7 +60,7 @@ def plot(data):
         parts.append(f'<path d="M38 {y(0):.2f}H292" stroke="#68756F" stroke-width=".8"/>')
     if lo <= 0 <= hi:
         parts.append(f'<path d="M{x(0):.2f} 12V122" stroke="#68756F" stroke-width=".8"/>')
-    parts.append('<text x="308" y="127" text-anchor="end">x</text><text x="15" y="12">y</text>')
+    parts.append('<text class="axis-var" x="308" y="127" text-anchor="end">x</text><text class="axis-var" x="15" y="12">y</text>')
     colors = ("#18221F", "#245E51", "#52997E", "#68756F", "#327E8A")
     dashes = ("none", "6 3", "2 2", "8 2 2 2", "3 5")
     keys = []
@@ -68,6 +68,7 @@ def plot(data):
         points = " ".join(f"{x(a):.2f},{y(b):.2f}" for a, b in zip(xs, ys))
         parts.append(f'<polyline points="{points}" fill="none" stroke="{colors[i]}" '
                      f'stroke-dasharray="{dashes[i]}" stroke-width="1.8"/>')
+        name = series_label(original["series"][i]["name"], original["series"][i].get("expr"))
         keys.append(f'<span><svg viewBox="0 0 20 5"><path d="M0 2h20" stroke="{colors[i]}" '
                     f'stroke-width="2" stroke-dasharray="{dashes[i]}"/></svg>{name}</span>')
     point_keys = []
@@ -77,7 +78,7 @@ def plot(data):
         px,py=x(a),y(b)
         parts.append(f'<circle cx="{px:.2f}" cy="{py:.2f}" r="3.4" fill="#245E51" stroke="#FAFAF7" stroke-width="1.1"/>'
                      f'<text x="{max(42,min(286,px+7)):.2f}" y="{max(10,py-6):.2f}" fill="#245E51" font-weight="bold">{i}</text>')
-        point_keys.append(f'<span><b>{i}.</b> {escape(name)} ({coord(a)}; {coord(b)})</span>')
+        point_keys.append(f'<span><b>{i}.</b> {point_label(name,a,b)}</span>')
     parts.append('</svg><div class="legend">' + "".join(keys) + '</div>')
     if point_keys:
         parts.append('<div class="point-key">' + ''.join(point_keys) + '</div>')
