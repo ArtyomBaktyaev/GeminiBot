@@ -685,7 +685,9 @@ def make_response_action_kb(msg_id: int) -> InlineKeyboardMarkup:
         [
             InlineKeyboardButton(text="📄 PDF", callback_data=f"doc_pdf:{msg_id}"),
             InlineKeyboardButton(text="📝 Word", callback_data=f"doc_docx:{msg_id}"),
+        ], [
             InlineKeyboardButton(text="📐 LaTeX (.tex)", callback_data=f"doc_tex:{msg_id}"),
+            InlineKeyboardButton(text="Собрать TeX → PDF", callback_data=f"doc_texpdf:{msg_id}"),
         ]
     ]
     if url:
@@ -3002,6 +3004,9 @@ def build_document(fmt: str, title: str, content: str) -> tuple:
     """Возвращает (байты, имя файла, mime). Выполняется в потоке — тяжёлые библиотеки грузятся лениво."""
     blocks = parse_markdown(content[:80000])
     base = re.sub(r"\s+", "_", clean_filename(plain_text(title)))[:60].strip("._") or "document"
+    if fmt == "texpdf":
+        from tex_export import compile_tex
+        return compile_tex(build_latex(title, blocks)), f"{base}_LaTeX.pdf", "application/pdf"
     if fmt in ("tex", "latex"):
         return build_latex(title, blocks), f"{base}.tex", FORMAT_MIME["tex"]
     builders = {"pdf": build_pdf, "docx": build_docx, "xlsx": build_xlsx, "pptx": build_pptx}
@@ -3472,7 +3477,7 @@ async def cb_set_model(call: types.CallbackQuery):
     )
 
 
-@dp.callback_query(F.data.startswith("doc_pdf:") | F.data.startswith("doc_docx:") | F.data.startswith("doc_tex:"))
+@dp.callback_query(F.data.startswith("doc_pdf:") | F.data.startswith("doc_docx:") | F.data.startswith("doc_tex:") | F.data.startswith("doc_texpdf:"))
 async def cb_generate_doc(call: types.CallbackQuery):
     action = call.data.partition(":")[0]
     ans_data = RECENT_ANSWERS.get((call.message.chat.id, call.message.message_id))
@@ -3484,6 +3489,7 @@ async def cb_generate_doc(call: types.CallbackQuery):
     fmt_map = {
         "doc_pdf": ("pdf", "📄 PDF"),
         "doc_docx": ("docx", "📝 Word"),
+        "doc_texpdf": ("texpdf", "PDF из LaTeX"),
         "doc_tex": ("tex", "📐 LaTeX (.tex)"),
     }
     fmt, label = fmt_map.get(action, ("pdf", "📄 PDF"))
@@ -3493,7 +3499,7 @@ async def cb_generate_doc(call: types.CallbackQuery):
         async with chat_action(call.message.chat.id, ChatAction.UPLOAD_DOCUMENT):
             data, filename, _ = await asyncio.to_thread(build_document, fmt, title, content)
             doc = BufferedInputFile(data, filename=filename)
-            await call.message.reply_document(doc, caption=f"✨ Твой ответ в формате **{label}**!")
+            await call.message.reply_document(doc, caption=f"Твой ответ · {label}")
     except Exception as e:
         log.exception("cb_generate_doc error")
         await call.message.reply(f"⚠️ Не удалось создать {label}: {e}")

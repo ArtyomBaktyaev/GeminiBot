@@ -34,8 +34,8 @@ class Exports(unittest.TestCase):
             self.assertIn(rb"\frac{1}{2}", result)
         tool = next(t for t in bot.build_post_tool([]).function_declarations if t.name == "create_file")
         self.assertIn("tex", tool.parameters.properties["format"].enum)
-        keys = bot.make_response_action_kb(1).inline_keyboard[0]
-        self.assertEqual([k.text for k in keys], ["📄 PDF", "📝 Word", "📐 LaTeX (.tex)"])
+        keys = sum(bot.make_response_action_kb(1).inline_keyboard[:2], [])
+        self.assertEqual([k.text for k in keys], ["📄 PDF", "📝 Word", "📐 LaTeX (.tex)", "Собрать TeX → PDF"])
 
     def test_web_export(self):
         request = AsyncMock()
