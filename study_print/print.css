@@ -81,3 +81,35 @@ figure .legend svg { width: 17px; height: 5px; }
 .proof-block p { widows: 3; orphans: 3; }
 .proof-block .proof-step { margin: 5px 0; }
 .math-greek-capital { font-style: normal; }
+
+/* Continuous editorial layout: preserve the original palette and type system. */
+.chapter { page: auto; break-before: auto; }
+.chapter + .chapter { margin-top: 22px; }
+.proof-block,.def-block,.theorem-block,.example-block { break-inside: auto; }
+.keep-small { break-inside: avoid-page !important; }
+.keep-next { break-after: avoid-page; }
+.chapter p, .proof-block p { widows: 2; orphans: 2; }
+.study-math { display:inline-block; max-width:100%; vertical-align:middle; }
+.study-math mjx-assistive-mml { display:none !important; }
+.study-math mjx-container { margin:0 !important; color:var(--text-main); }
+.study-math mjx-container[jax="SVG"] > svg { max-width:none; overflow:visible; }
+.math-display .study-math { vertical-align:middle; }
+.editorial-table td,.editorial-table th { word-break:normal; overflow-wrap:break-word; }
+.point-key { font-size:8.5pt; color:var(--text-muted); display:flex; flex-wrap:wrap; gap:4px 12px; margin-top:5px; }
+.volume-note { margin:9px 0; padding:6px 9px; border-left:2pt solid var(--accent-emerald); font-size:9pt; color:var(--text-muted); }
+.volume-note[hidden] { display:none; }
+.short-title { border-bottom:1pt solid var(--accent-emerald); padding-bottom:8px; margin-bottom:12px; }
+body[data-density="compact"] .chapter > * + * { margin-top:10px; }
+body[data-density="compact"] .chapter p { font-size:10.5pt; line-height:1.38; }
+body[data-density="compact"] .math-display { padding:4px 9px; margin:4px 0; }
+body[data-density="compact"] .editorial-table td { padding:4px 6px; }
+body[data-density="compact"] .chapter + .chapter { margin-top:15px; }
+body[data-density="compact"] figure.editorial-figure > svg { max-height:50mm; }
+body[data-density="dense"] .chapter > * + * { margin-top:7px; }
+body[data-density="dense"] .chapter p { font-size:10pt; line-height:1.32; }
+body[data-density="dense"] .chapter { font-size:10pt; line-height:1.32; }
+body[data-density="dense"] .math-display { padding:3px 8px; margin:3px 0; }
+body[data-density="dense"] .editorial-table td,body[data-density="dense"] .editorial-table th { padding:3px 5px; }
+body[data-density="dense"] .chapter + .chapter { margin-top:12px; }
+body[data-density="dense"] figure.editorial-figure > svg { max-height:43mm; }
+body[data-density="dense"] .proof-block .proof-step { margin:3px 0; }

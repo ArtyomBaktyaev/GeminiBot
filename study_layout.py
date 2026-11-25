@@ -1,0 +1,181 @@
+"""Safe, local MathJax and bounded PDF layout adjustments."""
+import json
+import os
+from pathlib import Path
+import re
+from html import escape
+from io import BytesIO
+
+PAGE_RE = re.compile(r"(?<!\d)(\d{1,2})(?:\s*[-–—]\s*(\d{1,2}))?\s*(?:страниц\w*|стр\.(?!\w)|pages?\b)", re.I)
+
+
+def requested_page_range(text):
+    # Do not mistake the numbered page-by-page outline for the total volume.
+    matches = list(PAGE_RE.finditer(text or ""))
+    if not matches:
+        return None
+    m = matches[0]
+    a, b = int(m[1]), int(m[2] or m[1])
+    if not 1 <= a <= b <= 30:
+        return None
+    # Common explicit allowance for one extra page, e.g. 5 pages, sixth allowed.
+    if a == b and (re.search(r"(?:допустим\w*|можно|разрешен\w*)\s+(?:ещ[её]\s+)?(?:одна\s+страниц\w*|шестая\s+страниц\w*)", text or "", re.I) and a == 5):
+        b = 6
+    return (a, b)
+
+
+def stamp_page_target(content, request):
+    target = requested_page_range(request)
+    if not target:
+        return content
+    m = re.match(r"\A\s*```study\s*\n(.*?)\n```\s*", content, re.S | re.I)
+    meta = {}
+    if m:
+        try:
+            candidate = json.loads(m[1])
+            if isinstance(candidate, dict):
+                meta = candidate
+                content = content[m.end():]
+        except ValueError:
+            pass
+    meta["target_pages"] = list(target)
+    return "```study\n" + json.dumps(meta, ensure_ascii=False) + "\n```\n\n" + content
+
+
+def page_target(blocks):
+    if not blocks or blocks[0].get("lang") != "study":
+        return None
+    try:
+        v = json.loads(blocks[0]["text"]).get("target_pages")
+        if isinstance(v, list) and len(v) == 2 and all(type(n) is int for n in v) and 1 <= v[0] <= v[1] <= 30:
+            return tuple(v)
+    except (ValueError, TypeError, AttributeError):
+        pass
+    return None
+
+
+def page_budget_hint(request):
+    target = requested_page_range(request)
+    if not target:
+        return ""
+    a, b = target
+    n = max(1, b - (2 if b > 2 else 0))
+    return (f"\nБЮДЖЕТ PDF: {a}–{b} страниц ВСЕГО, включая титул и содержание. "
+            f"Ориентир для основного текста — до {n*320} слов, меньше при многочисленных формулах и графиках. "
+            "Сохраняй все запрошенные элементы, убери вводную воду, повторные формулировки и лишние формулы. "
+            "Не повторяй название и аннотацию в основном тексте. Формулы с нескольких связанных строк объединяй в aligned. "
+            "Не создавай отдельные главы только ради страниц. Не обещай точное число страниц до вёрстки.")
+
+
+def volume_issues(request, words, blocks):
+    target = requested_page_range(request)
+    if not target:
+        return []
+    a,b = target
+    body = max(1,b-(2 if b>2 else 0))
+    visual = sum(b.get("t") == "math" or b.get("lang") in ("plot", "diagram") for b in blocks)
+    # Soft content budget; actual page count is measured separately.
+    cap = max(220, body * 380 - min(body * 130, visual * 7))
+    if words > cap * 1.2:
+        return [f"Превышен бюджет объёма: {words} слов при ориентире {cap}. Сожми повторы и пояснения, сохрани все необходимые доказательства, задачи и графики"]
+    return []
+
+
+def math_slot(tex, display, fallback):
+    return (f'<span class="study-math" data-tex="{escape(tex, quote=True)}" '
+            f'data-display="{int(bool(display))}">{fallback}</span>')
+
+
+def mathjax_prepare(page, address):
+    asset = Path(os.environ.get("STUDY_MATHJAX_JS") or Path(__file__).with_name("study_print") / "mathjax-svg.js")
+    if not asset.is_file():
+        raise RuntimeError("MathJax не установлен: запусти python install_study_mathjax.py")
+    url = address.rsplit("/",1)[0] + "/mathjax-svg.js"
+    page.route(url, lambda route: route.fulfill(content_type="application/javascript", body=asset.read_bytes()))
+    page.evaluate("""() => {
+      window.MathJax = {
+        startup: {typeset:false},
+        tex: {packages:['base','ams','boldsymbol','mathtools','textmacros'], maxBuffer:10000, maxMacros:500},
+        svg: {fontCache:'none'}, options: {enableMenu:false}
+      };
+    }""")
+    page.add_script_tag(url=url)
+    page.wait_for_function("typeof MathJax.tex2svg === 'function'", timeout=15000)
+    return page.evaluate(r"""async () => {
+      await MathJax.startup.promise;
+      let errors = 0;
+      for(const el of document.querySelectorAll('.study-math')) {
+        const tex = el.dataset.tex || '';
+        // No HTML, network resources, macro definitions, or executable commands in TeX.
+        if(tex.length>3500 || /\\(?:require|href|url|html\w*|include\w*|input|def|gdef|edef|xdef|newcommand|renewcommand|csname|class|style|unicode|bbox)\b/i.test(tex)) {
+          errors++; continue;
+        }
+        try {
+          const svg = MathJax.tex2svg(tex,{display:el.dataset.display==='1'});
+          if(svg.querySelector('[data-mml-node="merror"], [data-mjx-error]')) throw Error('TeX');
+          for (const hidden of svg.querySelectorAll("mjx-assistive-mml")) hidden.remove();
+          svg.setAttribute("aria-label", tex);
+          el.replaceChildren(svg);
+        } catch(e) { errors++; }
+      }
+      return errors;
+    }""")
+
+
+LAYOUT_JS = r"""() => {
+    for(const node of document.querySelectorAll('.chapter p, .proof-block p, .list-row')) {
+        const next=node.nextElementSibling;
+        if(next && next.classList.contains('math-display') && /[:：]\s*$/.test(node.textContent.trim())) node.classList.add('keep-next');
+    }
+    for(const node of document.querySelectorAll('.proof-block,.def-block,.theorem-block,.example-block,table.editorial-table')) {
+        const h=node.getBoundingClientRect().height;
+        node.classList.toggle('keep-small',h>0 && h<300);
+    }
+    for(const expr of document.querySelectorAll('.study-math')) {
+        expr.style.zoom='';
+        const box=expr.closest('.math-expr,td,th,p,.list-row,.step-item,h2,h3,.chapter');
+        if(!box) continue;
+        const style=getComputedStyle(box);
+        const width=box.clientWidth-parseFloat(style.paddingLeft)-parseFloat(style.paddingRight);
+        const actual=expr.getBoundingClientRect().width;
+        if(width>0 && actual>width) expr.style.zoom=Math.max(.35,width/actual);
+    }
+}"""
+
+
+def print_fitted(page, target, pdf_reader):
+    def render():
+        page.evaluate(LAYOUT_JS)
+        return page.pdf(prefer_css_page_size=True, print_background=True, outline=True)
+    data=render()
+    if target:
+        for density in ('compact','dense'):
+            if len(pdf_reader(BytesIO(data)).pages)<=target[1]:
+                break
+            page.evaluate('(density) => document.body.dataset.density=density',density)
+            data=render()
+    # Resolve contents after density is final; repeat if page locations change.
+    for _ in range(3):
+        draft=pdf_reader(BytesIO(data))
+        pages={k.lstrip('/'):str(draft.get_destination_page_number(v)+1).zfill(2) for k,v in draft.named_destinations.items()}
+        changed=page.locator('.toc-page').evaluate_all("""(nodes,pages)=>{
+          let changed=false;
+          for(const n of nodes){const number=pages[n.dataset.target]; if(!number) throw Error('Не найдена страница раздела '+n.dataset.target); if(n.textContent!==number){n.textContent=number;changed=true;}}
+          return changed;
+        }""", pages)
+        if not changed: break
+        data=render()
+    count=len(pdf_reader(BytesIO(data)).pages)
+    if target and not target[0]<=count<=target[1]:
+        page.evaluate("""({a,b})=>{
+          const el=document.querySelector('.volume-note');
+          if(el){el.hidden=false;el.textContent=(el.textContent ? el.textContent+' ' : '')+`Запрошено ${a===b?a:a+'–'+b} стр. Точный объём не достигнут без потери материала или ухудшения читаемости. Фактическое количество указано в колонтитуле.`;}
+        }""", {'a':target[0],'b':target[1]})
+        data=render()
+        # Note may change a page location; update the TOC again.
+        for _ in range(2):
+            d=pdf_reader(BytesIO(data)); p={k.lstrip('/'):str(d.get_destination_page_number(v)+1).zfill(2) for k,v in d.named_destinations.items()}
+            changed=page.locator('.toc-page').evaluate_all('(nodes,pages)=>{let c=false;for(const n of nodes){if(pages[n.dataset.target]&&n.textContent!==pages[n.dataset.target]){n.textContent=pages[n.dataset.target];c=true;}}return c;}',p)
+            if not changed: break
+            data=render()
+    return data

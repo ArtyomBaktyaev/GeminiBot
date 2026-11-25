@@ -19,7 +19,9 @@ def numbers(values):
 
 def plot(data):
     from study_plot_expr import expand_plot
+    original = data
     data = expand_plot(data)
+    from study_graph_marks import nice_ticks, markers
     xs = numbers(data["x"])
     series = data["series"]
     if not isinstance(series, list) or not 1 <= len(series) <= 5:
@@ -48,15 +50,16 @@ def plot(data):
         pos = y(val)
         parts.append(f'<path d="M38 {pos:.2f}h254" stroke="#CFDCD5" stroke-dasharray="2 2"/>'
                      f'<text x="34" y="{pos+3:.2f}" text-anchor="end">{val:.2g}</text>')
-    for i in range(4):
-        val = lo + (hi - lo) * i / 3
-        parts.append(f'<text x="{x(val):.2f}" y="139" text-anchor="middle">{val:.3g}</text>')
+    for val in nice_ticks(lo, hi):
+        pos = x(val)
+        parts.append(f'<path d="M{pos:.2f} 12V122" stroke="#CFDCD5" stroke-dasharray="2 2"/>'
+                     f'<text x="{pos:.2f}" y="139" text-anchor="middle">{val:.4g}</text>')
     parts.append('<path d="M38 12V122H292" fill="none" stroke="#68756F"/>')
     if low <= 0 <= high:
         parts.append(f'<path d="M38 {y(0):.2f}H292" stroke="#68756F" stroke-width=".8"/>')
     if lo <= 0 <= hi:
         parts.append(f'<path d="M{x(0):.2f} 12V122" stroke="#68756F" stroke-width=".8"/>')
-    parts.append('<text x="301" y="139" text-anchor="end">x</text><text x="15" y="12">y</text>')
+    parts.append('<text x="308" y="127" text-anchor="end">x</text><text x="15" y="12">y</text>')
     colors = ("#18221F", "#245E51", "#52997E", "#68756F", "#327E8A")
     dashes = ("none", "6 3", "2 2", "8 2 2 2", "3 5")
     keys = []
@@ -66,7 +69,19 @@ def plot(data):
                      f'stroke-dasharray="{dashes[i]}" stroke-width="1.8"/>')
         keys.append(f'<span><svg viewBox="0 0 20 5"><path d="M0 2h20" stroke="{colors[i]}" '
                     f'stroke-width="2" stroke-dasharray="{dashes[i]}"/></svg>{name}</span>')
+    point_keys = []
+    for i,(a,b,name) in enumerate(markers(original,xs,curves[0][1]),1):
+        if not (lo <= a <= hi and low <= b <= high):
+            continue
+        px,py=x(a),y(b)
+        parts.append(f'<circle cx="{px:.2f}" cy="{py:.2f}" r="3.4" fill="#245E51" stroke="#FAFAF7" stroke-width="1.1"/>'
+                     f'<text x="{max(42,min(286,px+7)):.2f}" y="{max(10,py-6):.2f}" fill="#245E51" font-weight="bold">{i}</text>')
+        a=0 if abs(a)<1e-8 else a
+        b=0 if abs(b)<1e-8 else b
+        point_keys.append(f'<span><b>{i}.</b> {escape(name)} ({a:.4g}; {b:.4g})</span>')
     parts.append('</svg><div class="legend">' + "".join(keys) + '</div>')
+    if point_keys:
+        parts.append('<div class="point-key">' + ''.join(point_keys) + '</div>')
     return "".join(parts)
 
 

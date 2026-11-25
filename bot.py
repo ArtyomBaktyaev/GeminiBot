@@ -1262,14 +1262,14 @@ def render_tasks_root(scope_chat: Optional[int] = None, user_id: Optional[int] =
     is_main = is_primary_user(user_id)
     if scope_chat is not None:
         return render_tasks_topics(scope_chat, False)
-    
+
     # Обычным пользователям показываем только личные задачи (cid > 0), главному — все
     cids = [cid for cid, _ in enabled_groups() if can_see_chat(user_id, cid)]
     for t in active_tasks():
         c = t.get("chat_id", TARGET_CHAT_ID)
         if c not in cids and can_see_chat(user_id, c):
             cids.append(c)
-            
+
     rows = []
     for cid in cids:
         if not can_see_chat(user_id, cid):
@@ -1545,7 +1545,7 @@ def build_system_instruction(scope: list, is_private: bool, current_topic: Optio
                              user_name: Optional[str] = None) -> str:
     gblock = groups_block(scope, is_private)
     files_desc = ", ".join(f"{i}) {n}" for i, n in enumerate(last_files_names or [], 1)) or "нет"
-    
+
     acc_settings = account or get_current_account_settings()
     answer_mode = acc_settings.get("answer_mode")
     if answer_mode == "short":
@@ -1693,6 +1693,7 @@ def build_post_tool(scope: list) -> genai_types.Tool:
 async def improve_pdf_response(resp, user_text, contents, client, model_name, config):
     """At most one extra completion. Preserve the draft if the repair fails."""
     from study_quality import document_issues, response_text, attach_warning
+    from study_layout import stamp_page_target
     candidate = resp.candidates[0] if resp.candidates else None
     parts = getattr(getattr(candidate, "content", None), "parts", None) or []
     repair_budget = 1
@@ -1709,9 +1710,12 @@ async def improve_pdf_response(resp, user_text, contents, client, model_name, co
         if "MAX_TOKENS" in reason:
             issues.append("Первоначальная генерация достигла лимита токенов")
         if not issues:
+            args["content"] = stamp_page_target(original, user_text)
+            call.args = args
             continue
         if not repair_budget:
             attach_warning(args, issues)
+            args["content"] = stamp_page_target(str(args.get("content") or ""), user_text)
             call.args = args
             continue
         repair_budget -= 1
@@ -1730,12 +1734,14 @@ async def improve_pdf_response(resp, user_text, contents, client, model_name, co
                 new_issues = document_issues(user_text, new)
                 if "MAX_TOKENS" in str(getattr(repaired.candidates[0], "finish_reason", "")):
                     new_issues.append("Повторная генерация достигла лимита токенов")
-                if len(new_issues) < len(issues) or (len(new_issues) == len(issues) and len(new) > len(original)):
+                if len(new_issues) < len(issues) or (len(new_issues) == len(issues) and (
+                    len(new) < len(original) if any("Превышен бюджет" in v for v in issues) else len(new) > len(original))):
                     args["content"] = new
                     issues = new_issues
         except Exception:
             log.warning("Не удалось дополнить PDF; сохраняем черновик", exc_info=True)
         attach_warning(args, issues)
+        args["content"] = stamp_page_target(str(args.get("content") or ""), user_text)
         call.args = args
     return resp
 
@@ -1746,6 +1752,7 @@ async def generate_reply(history: list, user_text: str, extra_parts: Optional[li
                          *, pool: Optional[KeyPool] = None, account: Optional[dict] = None,
                          user_name: Optional[str] = None):
     from study_quality import pdf_request, PDF_INSTRUCTIONS
+    from study_layout import page_budget_hint
     file_mode = bool(FILE_REQ_RE.search(user_text or "")) or pdf_request(user_text)
     target_pool = pool or globals()["pool"]
     pref_model = (account.get("preferred_model") if account else None) or GEMINI_MODEL
@@ -1763,7 +1770,7 @@ async def generate_reply(history: list, user_text: str, extra_parts: Optional[li
         config.temperature = 0.3
         config.max_output_tokens = 16384
         if pdf_request(user_text):
-            config.system_instruction = str(config.system_instruction) + "\n" + PDF_INSTRUCTIONS
+            config.system_instruction = str(config.system_instruction) + "\n" + PDF_INSTRUCTIONS + page_budget_hint(user_text)
     req_timeout = 90 if file_mode else REQUEST_TIMEOUT_SEC
     last_err = None
 
@@ -3577,7 +3584,7 @@ async def cb_view_all(call: types.CallbackQuery):
     uid = call.from_user.id if call.from_user else None
     topics_list = topics_overview_html(uid)
     active = sum(1 for t in TASKS["items"] if not t.get("done"))
-    
+
     # Фильтруем группы для отображения в полной конфигурации
     is_main = not ADMIN_IDS or (uid in ADMIN_IDS)
     groups_count = len([(cid, g) for cid, g in enabled_groups() if can_see_chat(uid, cid)])
@@ -3773,10 +3780,10 @@ def _topic_by_hash(cid: int, h: str) -> Optional[str]:
 async def cb_manage_topics(call: types.CallbackQuery):
     uid = call.from_user.id if call.from_user else None
     is_main = not ADMIN_IDS or (uid in ADMIN_IDS)
-    
+
     # Обычным пользователям не показываем чужие учебные группы (с отрицательным ID)
     groups = [(cid, g) for cid, g in enabled_groups() if can_see_chat(uid, cid)]
-    
+
     rows = [[InlineKeyboardButton(text=f"📂 {(g.get('title') or str(cid))[:40]}", callback_data=f"mg_{cid}")]
             for cid, g in groups]
     rows.append([InlineKeyboardButton(text="⬅️ Назад в меню", callback_data="back_to_main_settings")])
@@ -3944,10 +3951,10 @@ async def media_received(message: types.Message):
         item = {"kind": "sticker", "file_id": message.sticker.file_id, "uid": message.sticker.file_unique_id}
     else:
         item = {"kind": "animation", "file_id": message.animation.file_id, "uid": message.animation.file_unique_id}
-    
+
     settings = get_current_account_settings()
     media = settings.setdefault("reminder_media", [])
-    
+
     if any(m.get("uid") == item["uid"] for m in media):
         await message.reply("Это уже в коллекции.")
         return

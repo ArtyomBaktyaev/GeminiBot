@@ -3,6 +3,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 pip install -r requirements.txt
+python install_study_mathjax.py
 
 PLAYWRIGHT_BROWSERS_PATH=0 python -m playwright install --only-shell chromium
 

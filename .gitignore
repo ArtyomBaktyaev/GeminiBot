@@ -19,3 +19,7 @@ schedule.json
 study.json
 timetable.json
 topics.json
+
+# Built MathJax assets
+study_print/mathjax-svg.js
+study_print/mathjax-LICENSE.txt

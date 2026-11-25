@@ -22,6 +22,7 @@ from pypdf import PdfReader
 
 from study_markdown import inline_tokens, parse_markdown
 from study_figures import plot, diagram, label
+from study_layout import math_slot, mathjax_prepare, page_target, print_fitted
 
 ASSETS = Path(__file__).with_name("study_print")
 SLOT = BoundedSemaphore(1)
@@ -30,7 +31,7 @@ MATH_ATTRS = set("display mathvariant stretchy fence separator accent accentunde
 
 
 @lru_cache(maxsize=256)
-def formula(tex, display=False):
+def _legacy_formula(tex, display=False):
     # Rebuild converter output as presentational MathML only.
     if len(tex) <= 2200 and not re.search(r"\\(?:def|gdef|newcommand|renewcommand|href|url|style|class|html|include|input|require|unicode)\b", tex):
         try:
@@ -55,10 +56,14 @@ def formula(tex, display=False):
     return '<code class="math-source">' + escape(tex) + '</code>'
 
 
+def formula(tex, display=False):
+    return math_slot(tex, display, _legacy_formula(tex, display))
+
+
 def inline(text):
     chunks = []
     for kind, value, url in inline_tokens(text):
-        safe = escape(value)
+        safe = escape(re.sub(r"(?<!\\)\*{2,}", "", value) if kind == "t" else value)
         if kind == "m":
             safe = formula(value)
         elif kind in ("b", "i", "c"):
@@ -82,11 +87,21 @@ def editorial_table(rows, render):
     if max(map(len, rows)) > 8:
         return "".join(editorial_table([["Поле", "Значение"], *zip(rows[0], row)], render)
                        for row in rows[1:]) or editorial_table([["Поле"], *[[x] for x in rows[0]]], render)
+    # Short, wide sign/comparison tables become readable vertical records.
+    if 6 <= len(rows[0]) <= 8 and 2 <= len(rows) <= 6:
+        rows = [list(row) for row in zip(*rows)]
     showcase = len(rows) == 2 and len(rows[0]) <= 3 and all(c.startswith("$") and c.endswith("$") for c in rows[1])
     style = "formula-showcase" if showcase else "editorial-table"
     header = "".join(f"<th>{render(c)}</th>" for c in rows[0])
     body = "".join("<tr>" + "".join(f"<td>{render(c)}</td>" for c in row) + "</tr>" for row in rows[1:])
-    return f'<table class="{style}"><thead><tr>{header}</tr></thead><tbody>{body}</tbody></table>'
+    widths = []
+    if not showcase and len(rows[0]) > 1:
+        n = len(rows[0])
+        weights = [max(7, min(48, max(len(str(row[i])) for row in rows if i < len(row)))) ** .65 for i in range(n)]
+        floor = min(12, 65/n)
+        widths = [floor + (100-n*floor)*w/sum(weights) for w in weights]
+    cols = '<colgroup>' + ''.join(f'<col style="width:{w:.2f}%">' for w in widths) + '</colgroup>' if widths else ''
+    return f'<table class="{style}">{cols}<thead><tr>{header}</tr></thead><tbody>{body}</tbody></table>'
 
 
 def code_block(block):
@@ -148,6 +163,7 @@ def opener(num, title, kicker, anchor=""):
 def document_html(title, blocks):
     rich = inline
 
+    target = page_target(blocks)
     title = readable_title(title)
     blocks = [dict(b) for b in blocks]
     for b in blocks:
@@ -220,7 +236,7 @@ def document_html(title, blocks):
             anchor = f"sec-{len(entries)+1}"
             entries.append((num, txt, anchor, top))
             if top:
-                sections.append(("" if major == 1 else "</section>") + f'<section class="chapter" style="page:chapter{major}">'
+                sections.append(("" if major == 1 else "</section>") + f'<section class="chapter" >'
                                 + opener(num, rich(txt), "Раздел " + num, anchor))
             else:
                 sections.append(f'<h3 id="{anchor}"><span class="sub-num">{num}</span><span>{rich(txt)}</span></h3>')
@@ -239,6 +255,20 @@ def document_html(title, blocks):
                 equation += 1
                 sections.append(display_math(blocks[i]["text"], major, equation))
                 i += 1
+            if name.lower() == "теорема":
+                while i < len(blocks):
+                    item = blocks[i]
+                    if item["t"] == "li":
+                        marker = str(item["num"]) + "." if item["ordered"] else "•"
+                        sections.append(f'<p class="theorem-step"><b>{marker}</b> {rich(item["text"])}</p>')
+                    elif item["t"] == "math":
+                        equation += 1
+                        sections.append(display_math(item["text"], major, equation))
+                    elif item["t"] == "p" and re.match(r"^(?:Тогда|Следовательно|Существует|Иными словами)", item["text"], re.I):
+                        sections.append(f'<p>{rich(item["text"])}</p>')
+                    else:
+                        break
+                    i += 1
             if name.lower() == "пример":
                 while i < len(blocks) and blocks[i]["t"] == "li" and blocks[i]["ordered"]:
                     step = blocks[i]
@@ -321,14 +351,15 @@ def document_html(title, blocks):
     if font.is_file() and any("math-greek-capital" in part for part in sections):
         encoded = base64.b64encode(font.read_bytes()).decode("ascii")
         css += "\n@font-face{font-family:StudyGreek;src:url(data:font/ttf;base64," + encoded + ") format('truetype');} math .math-greek-capital{font-family:StudyGreek,sans-serif!important;}"
-    for num, name, _, _ in chapters:
-        # Encode all characters of the heading, including quotes and '<', inside the CSS string.
-        value = "".join("\\" + format(ord(ch), "x") + " " for ch in name[:48].upper())
-        css += f'\n@page chapter{int(num)} {{ @top-right {{ content: "{num} · {value}"; }} }}'
+    notice = '<p class="volume-note" hidden></p>'
+    cover_section = f'<section class="cover">{cover}{notice}</section>'
+    nav_section = f'<section class="navigation">{nav}</section>'
+    if target and target[1] <= 2:
+        cover_section = f'<header class="short-title"><h1>{rich(title)}</h1><p>{rich(summary)}</p>{notice}</header>'
+        nav_section = ''
     return (f'<!doctype html><html lang="ru"><head><meta charset="utf-8"><title>{escape(title)}</title>'
-            '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; style-src \'unsafe-inline\'; font-src data:">'
-            f'<style>{css}</style></head><body><section class="cover">{cover}</section>'
-            f'<section class="navigation">{nav}</section>{"".join(sections)}</body></html>')
+            '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'self\'; style-src \'unsafe-inline\'; font-src data:">'
+            f'<style>{css}</style></head><body>{cover_section}{nav_section}{"".join(sections)}</body></html>')
 
 
 def display_math(tex, section, number):
@@ -364,32 +395,11 @@ def render_pdf(title, blocks):
             page.route(address, lambda route: route.fulfill(content_type="text/html; charset=utf-8", body=html))
             page.goto(address, wait_until="load", timeout=15000)
             page.evaluate("() => document.fonts.ready")
-            # MathML is atomic in Chromium. Fit long expressions to the actual
-            # column (including table cells) before measuring destinations.
-            page.evaluate("""() => {
-                for (const expr of document.querySelectorAll('math')) {
-                    const box = expr.closest('.math-expr, td, th, p, li, section');
-                    if (!box) continue;
-                    const style = getComputedStyle(box);
-                    const width = box.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
-                    const actual = Math.max(expr.scrollWidth, expr.getBoundingClientRect().width);
-                    if (width > 0 && actual > width) expr.style.zoom = width / actual;
-                }
-            }""")
-            def print_pages():
-                return page.pdf(prefer_css_page_size=True, print_background=True, outline=True)
-            # Page numbers come from the actual link destinations in the first PDF.
-            draft = PdfReader(BytesIO(print_pages()))
-            pages = {k.lstrip("/"): str(draft.get_destination_page_number(v) + 1).zfill(2)
-                     for k, v in draft.named_destinations.items()}
-            page.locator(".toc-page").evaluate_all("""(nodes, pages) => {
-                for (const n of nodes) {
-                    const number = pages[n.dataset.target];
-                    if (!number) throw Error("Не найдена страница раздела " + n.dataset.target);
-                    n.textContent = number;
-                }
-            }""", pages)
-            return print_pages()
+            errors = mathjax_prepare(page, address)
+            if errors:
+                # Preserve formulas we cannot render instead of quietly deleting them.
+                page.evaluate("""(n)=>{const note=document.querySelector('.volume-note');if(note){note.hidden=false;note.textContent=`${n} формул не удалось обработать MathJax. Для них сохранён исходник или резервная вёрстка.`;}}""", errors)
+            return print_fitted(page, page_target(blocks), PdfReader)
         finally:
             browser.close()
 
