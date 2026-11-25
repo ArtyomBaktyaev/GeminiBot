@@ -2480,7 +2480,7 @@ def _pdf_clean(text: str) -> str:
 
 
 def build_pdf(title: str, blocks: list) -> bytes:
-    """Генерирует PDF-документ в чистом академическом стиле Claude."""
+    """Gemini editorial v2: readable, print-friendly A4 study documents."""
     from xml.sax.saxutils import escape
     from reportlab.lib import colors
     from reportlab.lib.pagesizes import A4
@@ -2491,42 +2491,78 @@ def build_pdf(title: str, blocks: list) -> bytes:
     ensure_fonts()
     hx = colors.HexColor
 
-    c_title = hx("#111827")      # глубокий угольный для заголовков
-    c_sub = hx("#6B7280")        # сбалансированный серый для метаданных
-    c_h2 = hx("#1F2937")
-    c_h3 = hx("#374151")
-    c_body = hx("#1F2937")       # четкий основной текст
-    c_border = hx("#E5E7EB")     # деликатные разделители
-    c_code_bg = hx("#F8FAFC")    # легкий фон кода
-    c_code_border = hx("#E2E8F0")
-    c_quote_bg = hx("#F8FAFC")
-    c_tbl_head = hx("#F1F5F9")
+    c_title = hx("#153F35")
+    c_sub = hx("#5B7068")
+    c_h2 = hx("#245E51")
+    c_h3 = hx("#304A41")
+    c_body = hx("#20302A")
+    c_border = hx("#D6E2DC")
+    c_code_bg = hx("#F3F7F5")
+    c_code_border = hx("#D6E2DC")
+    c_quote_bg = hx("#EFF6F1")
+    c_tbl_head = hx("#245E51")
+    accent = hx("#438A70")
 
-    base = ParagraphStyle("base", fontName="DV", fontSize=10.5, leading=16, textColor=c_body, spaceAfter=6)
-    h1 = ParagraphStyle("h1", parent=base, fontName="DV-B", fontSize=17, leading=22, textColor=c_title,
-                        spaceBefore=14, spaceAfter=6, keepWithNext=1)
-    h2 = ParagraphStyle("h2", parent=base, fontName="DV-B", fontSize=13.5, leading=18, textColor=c_h2,
-                        spaceBefore=10, spaceAfter=4, keepWithNext=1)
-    h3 = ParagraphStyle("h3", parent=base, fontName="DV-B", fontSize=11.5, leading=16, textColor=c_h3,
-                        spaceBefore=6, spaceAfter=3, keepWithNext=1)
-    li_st = ParagraphStyle("li", parent=base, spaceAfter=3)
-    quote = ParagraphStyle("quote", parent=base, fontName="DV-I", textColor=hx("#334155"), backColor=c_quote_bg,
-                           borderPadding=8, leftIndent=12, rightIndent=6, spaceBefore=6, spaceAfter=10)
-    code_st = ParagraphStyle("code", fontName="DVMono", fontSize=8.4, leading=11.5, textColor=hx("#0F172A"),
-                             backColor=c_code_bg, borderPadding=8, borderColor=c_code_border, borderWidth=0.5,
-                             leftIndent=6, rightIndent=6, spaceBefore=6, spaceAfter=12)
-    cell_st = ParagraphStyle("cell", parent=base, fontSize=9.2, leading=12.5, spaceAfter=0)
-    head_cell = ParagraphStyle("hcell", parent=cell_st, fontName="DV-B", textColor=c_title)
+    base = ParagraphStyle("base", fontName="DV", fontSize=11, leading=16.8,
+                          textColor=c_body, spaceAfter=7, allowWidows=0, allowOrphans=0)
+    h1 = ParagraphStyle("h1", parent=base, fontName="DV-B", fontSize=17, leading=22,
+                        textColor=c_title, spaceBefore=17, spaceAfter=8, keepWithNext=1)
+    h2 = ParagraphStyle("h2", parent=base, fontName="DV-B", fontSize=14, leading=19,
+                        textColor=c_h2, spaceBefore=13, spaceAfter=6, keepWithNext=1)
+    h3 = ParagraphStyle("h3", parent=base, fontName="DV-B", fontSize=11.5, leading=16,
+                        textColor=c_h3, spaceBefore=9, spaceAfter=4, keepWithNext=1)
+    li_st = ParagraphStyle("li", parent=base, spaceAfter=4, bulletColor=accent)
+    quote = ParagraphStyle("quote", parent=base, fontName="DV-I", textColor=c_h3,
+                           backColor=c_quote_bg, borderColor=c_border, borderWidth=.6,
+                           borderPadding=9, leftIndent=8, rightIndent=8, spaceBefore=21, spaceAfter=16)
+    code_st = ParagraphStyle("code", fontName="DVMono", fontSize=8.5, leading=12,
+                             textColor=c_body, backColor=c_code_bg, borderPadding=8,
+                             borderColor=c_code_border, borderWidth=.6, leftIndent=8,
+                             rightIndent=8, spaceBefore=6, spaceAfter=12)
+    class CodePanel(Preformatted):
+        padding = 9
+
+        def wrap(self, availWidth, availHeight):
+            self.width = availWidth
+            self.height = self.style.leading * len(self.lines) + 2 * self.padding
+            return self.width, self.height
+
+        def split(self, availWidth, availHeight):
+            count = int((availHeight - 2 * self.padding) // self.style.leading)
+            if count < 1:
+                return []
+            if count >= len(self.lines):
+                return [self]
+            return [CodePanel("\n".join(self.lines[:count]), self.style),
+                    CodePanel("\n".join(self.lines[count:]), self.style)]
+
+        def draw(self):
+            c = self.canv
+            c.saveState()
+            c.setFillColor(c_code_bg)
+            c.setStrokeColor(c_code_border)
+            c.setLineWidth(.55)
+            c.roundRect(0, 0, self.width, self.height, 6, stroke=1, fill=1)
+            c.setFillColor(c_body)
+            tx = c.beginText(self.padding, self.height - self.padding - self.style.fontSize)
+            tx.setFont(self.style.fontName, self.style.fontSize, self.style.leading)
+            for line in self.lines:
+                tx.textLine(line)
+            c.drawText(tx)
+            c.restoreState()
+
+    cell_st = ParagraphStyle("cell", parent=base, fontSize=9.3, leading=13.2, spaceAfter=0)
+    head_cell = ParagraphStyle("hcell", parent=cell_st, fontName="DV-B", textColor=colors.white)
 
     def math_markup(expr: str) -> str:
         parts = []
         for text, mode in tex_runs(expr):
             text = escape(_pdf_clean(text))
             parts.append(f"<super>{text}</super>" if mode == "sup" else f"<sub>{text}</sub>" if mode == "sub" else text)
-        return '<font color="#1E293B"><i>' + "".join(parts) + "</i></font>"
+        return '<font color="#245E51"><i>' + "".join(parts) + "</i></font>"
 
     math_st = ParagraphStyle("math", parent=base, fontSize=12, leading=18, alignment=1, backColor=c_code_bg,
-                             borderPadding=8, spaceBefore=6, spaceAfter=12)
+                             borderPadding=6, leftIndent=8, rightIndent=8, spaceBefore=12, spaceAfter=19)
 
     def rl(text: str) -> str:
         out = []
@@ -2537,9 +2573,9 @@ def build_pdf(title: str, blocks: list) -> bytes:
             elif kind == "i":
                 out.append(f"<i>{t}</i>")
             elif kind == "c":
-                out.append(f'<font face="DVMono" color="#0F172A">{t}</font>')
+                out.append(f'<font face="DVMono" color="#20302A">{t}</font>')
             elif kind == "a":
-                out.append(f'<a href="{escape(url)}" color="#2563EB"><u>{t}</u></a>')
+                out.append(f'<a href="{escape(url)}" color="#245E51"><u>{t}</u></a>')
             elif kind == "m":
                 out.append(math_markup(t))
             else:
@@ -2547,16 +2583,20 @@ def build_pdf(title: str, blocks: list) -> bytes:
         return "".join(out)
 
     buf = io.BytesIO()
-    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=20 * mm, rightMargin=20 * mm, topMargin=18 * mm,
-                            bottomMargin=18 * mm, title=plain_text(title), author="Gemini Bot")
+    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=20 * mm, rightMargin=20 * mm, topMargin=24 * mm,
+                            bottomMargin=21 * mm, title=plain_text(title), author="Gemini Bot")
     story: list = []
 
-    # Элегантный заголовок в стиле Claude (без громоздких синих плашек)
-    ttl = ParagraphStyle("ttl", parent=base, fontName="DV-B", fontSize=21, leading=26, textColor=c_title, spaceAfter=3)
-    sub = ParagraphStyle("sub", parent=base, fontSize=9, leading=12, textColor=c_sub, spaceAfter=0)
-    story.append(Paragraph(rl(title), ttl))
-    story.append(Paragraph(f"Подготовлено ассистентом · {now_local():%d.%m.%Y %H:%M}", sub))
-    story.append(HRFlowable(width="100%", thickness=0.8, color=c_border, spaceBefore=8, spaceAfter=12))
+    # Compact editorial title block: no wasteful cover page.
+    ttl = ParagraphStyle("ttl", parent=base, fontName="DV-B", fontSize=25, leading=31,
+                         textColor=c_title, spaceAfter=9)
+    sub = ParagraphStyle("sub", parent=base, fontSize=9, leading=13, textColor=c_sub, spaceAfter=0)
+    kicker = ParagraphStyle("kicker", parent=sub, fontName="DV-B", fontSize=9,
+                            textColor=c_h2, spaceAfter=9, keepWithNext=1)
+    story.append(Paragraph("УЧЕБНЫЕ МАТЕРИАЛЫ", kicker))
+    story.append(Paragraph(rl(title) or "Документ", ttl))
+    story.append(Paragraph(f"Gemini · {now_local():%d.%m.%Y}", sub))
+    story.append(HRFlowable(width="100%", thickness=1.3, color=accent, spaceBefore=12, spaceAfter=16))
 
     skip_title = True
     for b in blocks:
@@ -2576,7 +2616,7 @@ def build_pdf(title: str, blocks: list) -> bytes:
             st = ParagraphStyle("li_l", parent=li_st, leftIndent=16 + 14 * b["lvl"], bulletIndent=4 + 14 * b["lvl"])
             story.append(Paragraph(rl(b["text"]), st, bulletText=bullet))
         elif t == "code":
-            story.append(Preformatted(wrap_code(_pdf_clean(b["text"])), code_st))
+            story.append(CodePanel(wrap_code(_pdf_clean(b["text"]), width=82), code_st))
         elif t == "math":
             story.append(Paragraph(rl("$" + b["text"].replace("\n", " ") + "$"), math_st))
         elif t == "quote":
@@ -2585,32 +2625,53 @@ def build_pdf(title: str, blocks: list) -> bytes:
             story.append(HRFlowable(width="100%", thickness=0.6, color=c_border, spaceBefore=6, spaceAfter=8))
         elif t == "table":
             rows = b["rows"]
+            if not rows or not rows[0]:
+                continue
             ncol = len(rows[0])
+            rows = [(list(r) + [""] * ncol)[:ncol] for r in rows]
             cs, hs = (cell_st, head_cell) if ncol <= 6 else (
                 ParagraphStyle("cs8", parent=cell_st, fontSize=8, leading=10.5),
                 ParagraphStyle("hs8", parent=head_cell, fontSize=8, leading=10.5))
             data = [[Paragraph(rl(c), hs if r == 0 else cs) for c in row] for r, row in enumerate(rows)]
             weights = [min(max(max(len(plain_text(r[c])) for r in rows), 6), 45) for c in range(ncol)]
-            widths = [doc.width * w / sum(weights) for w in weights]
-            tbl = Table(data, colWidths=widths, repeatRows=1)
+            widths = [(doc.width - 12) * w / sum(weights) for w in weights]
+            tbl = Table(data, colWidths=widths, repeatRows=1, hAlign="LEFT", splitInRow=1)
             style = [("BACKGROUND", (0, 0), (-1, 0), c_tbl_head), ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                     ("GRID", (0, 0), (-1, -1), 0.5, c_border), ("LEFTPADDING", (0, 0), (-1, -1), 6),
-                     ("RIGHTPADDING", (0, 0), (-1, -1), 6), ("TOPPADDING", (0, 0), (-1, -1), 5),
-                     ("BOTTOMPADDING", (0, 0), (-1, -1), 5)]
+                     ("LINEBELOW", (0, 0), (-1, -1), 0.45, c_border), ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                     ("RIGHTPADDING", (0, 0), (-1, -1), 6), ("TOPPADDING", (0, 0), (-1, -1), 7),
+                     ("BOTTOMPADDING", (0, 0), (-1, -1), 7)]
             for r in range(1, len(rows)):
                 if r % 2 == 0:
-                    style.append(("BACKGROUND", (0, r), (-1, r), hx("#F8FAFC")))
+                    style.append(("BACKGROUND", (0, r), (-1, r), hx("#F3F7F5")))
             tbl.setStyle(TableStyle(style))
             story += [tbl, Spacer(1, 10)]
 
     def footer(canvas, d):
         canvas.saveState()
+        w, height = A4
+        x = 20 * mm
+        # Quiet running header, with a small brand accent rather than a banner.
+        canvas.setFillColor(accent)
+        canvas.roundRect(x, height - 15 * mm, 3.5 * mm, 3.5 * mm, 1.2 * mm, fill=1, stroke=0)
+        canvas.setFillColor(c_title)
+        canvas.setFont("DV-B", 9)
+        canvas.drawString(x + 6 * mm, height - 14.1 * mm, "GEMINI / STUDY")
+        canvas.setFillColor(c_sub)
         canvas.setFont("DV", 8)
-        canvas.setFillColor(hx("#9CA3AF"))
+        canvas.drawRightString(w - x, height - 14.1 * mm, "Учебный документ")
         canvas.setStrokeColor(c_border)
-        canvas.line(20 * mm, 13 * mm, A4[0] - 20 * mm, 13 * mm)
-        canvas.drawString(20 * mm, 9 * mm, _pdf_clean(plain_text(title))[:80])
-        canvas.drawRightString(A4[0] - 20 * mm, 9 * mm, f"стр. {d.page}")
+        canvas.setLineWidth(.55)
+        canvas.line(x, height - 18 * mm, w - x, height - 18 * mm)
+        canvas.line(x, 15 * mm, w - x, 15 * mm)
+        label = _pdf_clean(plain_text(title)).replace("\n", " ")
+        while label and canvas.stringWidth(label + "…", "DV", 8) > w - 2 * x - 35 * mm:
+            label = label[:-1]
+        if label != _pdf_clean(plain_text(title)).replace("\n", " "):
+            label += "…"
+        canvas.drawString(x, 10.5 * mm, label)
+        canvas.setFillColor(c_h2)
+        canvas.setFont("DV-B", 8)
+        canvas.drawRightString(w - x, 10.5 * mm, f"СТР. {d.page:02d}")
         canvas.restoreState()
 
     doc.build(story, onFirstPage=footer, onLaterPages=footer)

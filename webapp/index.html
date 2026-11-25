@@ -1147,6 +1147,16 @@ function normalizeUiMetadata(data) {
   }
   walk(data); return data;
 }
+// DOM APIs stringify null/undefined; omit only absent children, not user text.
+function presentUiChildren(children) {
+  return children.flat(Infinity).filter(child => child != null && child !== false);
+}
+function appendUi(parent, ...children) {
+  parent.append(...presentUiChildren(children));
+}
+function replaceUi(parent, ...children) {
+  parent.replaceChildren(...presentUiChildren(children));
+}
 function h(tag, props, ...kids) {
   const el = document.createElement(tag);
   for (const [k, v] of Object.entries(props || {})) {
@@ -1163,10 +1173,10 @@ function h(tag, props, ...kids) {
   for (const kid of kids.flat(Infinity)) {
     if (kid == null || kid === false) continue;
     if (typeof kid === "string") {
-      el.append(document.createTextNode(kid));
+      appendUi(el, document.createTextNode(kid));
       continue;
     }
-    el.append(kid.nodeType ? kid : document.createTextNode(String(kid)));
+    appendUi(el, kid.nodeType ? kid : document.createTextNode(String(kid)));
   }
   return el;
 }
@@ -1633,7 +1643,7 @@ function renderMd(src) {
     if (i % 2) {
       const nlPos = part.indexOf(NL);
       const codeBody = nlPos !== -1 ? part.slice(nlPos + 1) : part;
-      root.append(h("pre", {}, h("code", {}, codeBody)));
+      appendUi(root, h("pre", {}, h("code", {}, codeBody)));
       return;
     }
     const dispMath = [];
@@ -1653,27 +1663,27 @@ function renderMd(src) {
       const dmMatch = trimmed.match(/^\x00DISPMATH_(\d+)\x00$/);
       if (dmMatch) {
         list = null;
-        root.append(h("div", { class:"math-display-block" }, dispMath[parseInt(dmMatch[1], 10)]));
+        appendUi(root, h("div", { class:"math-display-block" }, dispMath[parseInt(dmMatch[1], 10)]));
         continue;
       }
 
       if (/^(?:-{3,}|\*{3,}|_{3,})$/.test(trimmed)) {
         list = null;
-        root.append(h("hr"));
+        appendUi(root, h("hr"));
         continue;
       }
       if (trimmed.startsWith("- ") || trimmed.startsWith("* ") || trimmed.startsWith("• ")) {
-        if (!list) { list = h("ul"); root.append(list); }
-        list.append(h("li", {}, ...renderInlineMd(trimmed.slice(2))));
+        if (!list) { list = h("ul"); appendUi(root, list); }
+        appendUi(list, h("li", {}, ...renderInlineMd(trimmed.slice(2))));
       } else if (/^\d+[.)]\s+/.test(trimmed)) {
-        if (!list || list.tagName !== "OL") { list = h("ol"); root.append(list); }
-        list.append(h("li", {}, ...renderInlineMd(trimmed.replace(/^\d+[.)]\s+/, ""))));
+        if (!list || list.tagName !== "OL") { list = h("ol"); appendUi(root, list); }
+        appendUi(list, h("li", {}, ...renderInlineMd(trimmed.replace(/^\d+[.)]\s+/, ""))));
       } else if (trimmed.startsWith("#")) {
         list = null;
-        root.append(h("h4", {}, ...renderInlineMd(trimmed.replace(/^#+\s*/, ""))));
+        appendUi(root, h("h4", {}, ...renderInlineMd(trimmed.replace(/^#+\s*/, ""))));
       } else {
         list = null;
-        root.append(h("p", {}, ...renderInlineMd(line)));
+        appendUi(root, h("p", {}, ...renderInlineMd(line)));
       }
     }
   });
@@ -1748,7 +1758,7 @@ function switchTab(id) {
 function drawNav() {
   const nav = document.getElementById("nav");
   if (!nav) return;
-  nav.replaceChildren(...TABS.map(([id, label]) => {
+  replaceUi(nav, ...TABS.map(([id, label]) => {
     const icSpan = h("span", { class: "ic" });
     icSpan.innerHTML = NAV_SVGS[id] || "⚡";
     return h("button", {
@@ -1769,19 +1779,19 @@ async function render() {
   if (S.timerInterval) { clearInterval(S.timerInterval); S.timerInterval = null; }
   const view = document.getElementById("view");
   const nav = document.getElementById("nav");
-  view.replaceChildren(...skeleton(3));
+  replaceUi(view, ...skeleton(3));
   const tab = S.tab, stamp = ++S.renderSerial;
   try {
     if (nav) nav.style.display = "flex";
     const node = await VIEWS[tab]();
     if (tab === S.tab && stamp === S.renderSerial) {
-      view.replaceChildren(node);
+      replaceUi(view, node);
       renderWithKatex(view);
     }
   } catch (e) {
     if (stamp !== S.renderSerial) return;
     if (nav) nav.style.display = "flex";
-    view.replaceChildren(h("div", { class:"card" },
+    replaceUi(view, h("div", { class:"card" },
       h("h3", {}, "Не получилось загрузить"),
       h("p", { class:"sub", style:{marginTop:"6px"} }, e.message),
       h("button", { class:"btn ghost block", style:{marginTop:"12px"}, onclick: render }, "Повторить")));
@@ -1827,7 +1837,7 @@ async function openProfileEditor() {
     });
 
     const drawAvatar = () => {
-      avatarWrap.replaceChildren(
+      replaceUi(avatarWrap,
         renderAvatar(curAvatar, "lg"),
         h("div", { class:"grow" },
           h("div", { style:{fontWeight:700, fontSize:"0.95rem"} }, "Аватар профиля"),
@@ -1836,7 +1846,7 @@ async function openProfileEditor() {
             "📷 Загрузить фото с устройства", photoInput)
         )
       );
-      emojiGrid.replaceChildren(...AVATAR_EMOJIS.map(em =>
+      replaceUi(emojiGrid, ...AVATAR_EMOJIS.map(em =>
         h("button", {
           type:"button",
           class: "emoji-pick" + (curAvatar === em ? " active" : ""),
@@ -1937,7 +1947,7 @@ function openAppearanceSheet() {
     });
 
     const drawThemes = () => {
-      themeWrap.replaceChildren(...THEMES_LIST.map(t =>
+      replaceUi(themeWrap, ...THEMES_LIST.map(t =>
         h("div", {
           class: "theme-tile" + (prefs.theme === t.id ? " active" : ""),
           onclick: () => { hap(); prefs.theme = t.id; applyUiPrefs(prefs); drawThemes(); }
@@ -2013,7 +2023,7 @@ async function openAccountSwitcher() {
     const emojiRow = h("div", { class:"emoji-grid" });
 
     const drawEmojiRow = () => {
-      emojiRow.replaceChildren(...AVATAR_EMOJIS.slice(0, 6).map(em =>
+      replaceUi(emojiRow, ...AVATAR_EMOJIS.slice(0, 6).map(em =>
         h("button", {
           type:"button",
           class:"emoji-pick" + (newAvatar === em ? " active" : ""),
@@ -2024,7 +2034,7 @@ async function openAccountSwitcher() {
     drawEmojiRow();
 
     const drawAccounts = () => {
-      listWrap.replaceChildren(...accounts.map(a =>
+      replaceUi(listWrap, ...accounts.map(a =>
         h("div", {
           class: "model-option" + (a.id === activeId ? " active" : ""),
           onclick: async () => {
@@ -2127,7 +2137,7 @@ async function openModelPicker() {
     });
 
     const drawOptions = () => {
-      listWrap.replaceChildren(...models.map(m =>
+      replaceUi(listWrap, ...models.map(m =>
         h("div", {
           class: "model-option" + (currentModel === m.id ? " active" : ""),
           onclick: () => { hap(); currentModel = m.id; drawOptions(); }
@@ -2315,7 +2325,7 @@ function openFocusModal(gStateInitial) {
       const totalWeekMin = Math.round(sessions.reduce((a, s) => a + (s.focused_sec || 0), 0) / 60);
       const totalWeekPauses = sessions.reduce((a, s) => a + ((s.pauses && s.pauses.length) || 0), 0);
 
-      wrap.replaceChildren(
+      replaceUi(wrap,
         // Главный циферблат
         h("div", { class:"card center", style:{marginBottom:0} },
           h("span", { class:"chip green" }, `🎯 ${S.focusSubj} (${S.focusPlannedMin} мин) · +15 XP`),
@@ -2557,8 +2567,8 @@ function openGuide() {
   const fill=h('i'), title=h('h2',{id:'tour-title',class:'tour-title'}), copy=h('p',{class:'tour-copy','aria-live':'polite'});
   const back=h('button',{type:'button',class:'btn ghost',onclick:()=>show(-1)},'Назад');
   const next=h('button',{type:'button',class:'btn',onclick:()=>show(1)},'Далее');
-  bubble.append(h('div',{class:'tour-top'},section,skip),h('div',{class:'tour-meter'},h('div',{class:'tour-progress'},fill),counter),title,copy,h('div',{class:'tour-actions'},back,next));
-  layer.append(shade,spot,bubble);document.body.append(layer);
+  appendUi(bubble, h('div',{class:'tour-top'},section,skip),h('div',{class:'tour-meter'},h('div',{class:'tour-progress'},fill),counter),title,copy,h('div',{class:'tour-actions'},back,next));
+  appendUi(layer, shade,spot,bubble);document.body.append(layer);
   const inertState=[q('#app'),q('#nav')].filter(Boolean).map(el=>[el,el.inert]);
   inertState.forEach(([el])=>{el.inert=true;});
   activeGuideClose=finish;syncBackProtection();
@@ -2650,30 +2660,30 @@ async function viewHome() {
     h("header", {class:"day-head"}, h("div", {}, h("small", {}, day.title), h("h1", {}, "Сегодня")),
       dailyButton("Мой профиль", dailyProfile)));
   if (next) {
-    root.append(h("section", {class:"day-feature"},
+    appendUi(root, h("section", {class:"day-feature"},
       h("small", {}, next.start <= now ? "Сейчас идёт" : "Ближайшая пара"),
       h("div", {class:"day-time"}, h("strong", {}, next.start), h("span", {}, " — "+next.end)),
       h("h2", {}, next.subject), h("p", {}, [next.kind, next.room && "ауд. "+next.room, next.teacher].filter(Boolean).join(" · ")),
       dailyButton(next.session_exam ? "Открыть экзамен" : "Материалы пары", () => next.session_exam ? sessionExamActions(next) : lessonActions(next, day))));
   } else if (!d.has_schedule && !d.sharing?.following && !lessons.length) {
-    root.append(h("section", {class:"day-feature"}, h("h2", {}, "Добавьте первую пару"),
+    appendUi(root, h("section", {class:"day-feature"}, h("h2", {}, "Добавьте первую пару"),
       h("p", {}, "Если одногруппник уже ведёт расписание, откройте его ссылку в Telegram."),
       dailyButton("Добавить пару", () => lessonForm(null, day.date)),
       dailyButton("Посмотреть пример дня", sampleDay)));
   } else {
-    root.append(h("section", {class:"day-feature"}, h("h2", {}, lessons.length ? "Пары на сегодня закончились" : "Сегодня пар нет"),
+    appendUi(root, h("section", {class:"day-feature"}, h("h2", {}, lessons.length ? "Пары на сегодня закончились" : "Сегодня пар нет"),
       dailyButton("Посмотреть неделю", () => { S.ttDate=day.date; switchTab("tt"); })));
   }
-  root.append(h("div",{class:"day-head"},h("h2",{},"Ближайшие дедлайны"),dailyButton("+ Задача", () => taskCreateForm())));
+  appendUi(root, h("div",{class:"day-head"},h("h2",{},"Ближайшие дедлайны"),dailyButton("+ Задача", () => taskCreateForm())));
   const tasks = (d.tasks || []).slice(0,3);
-  tasks.forEach(t => root.append(h("div",{class:"day-line"},
+  tasks.forEach(t => appendUi(root, h("div",{class:"day-line"},
     dailyButton("Готово", async () => { const r = await api("/api/tasks/"+t.id+"/done",{method:"POST"});
       if (!r.ok) throw new Error("Задача уже изменилась"); await render(); }),
     h("div",{},h("b",{},t.text || "Задача"),h("small",{},(t.overdue ? "Просрочено · " : "") + fmtDeadline(t))))));
-  if (!tasks.length) root.append(h("p",{class:"sub"},"Задач со сроком пока нет."));
-  if (d.cards_due) root.append(dailyButton("Повторить карточки · "+d.cards_due, () => session(), "block"));
-  if (lessons.length > 1) root.append(dailyButton("Все занятия на сегодня · "+lessons.length, () => { S.ttDate=day.date; switchTab("tt"); }, "ghost block"));
-  root.append(dailyButton("Открыть фокус-таймер", () => openFocusModal(null), "ghost block"));
+  if (!tasks.length) appendUi(root, h("p",{class:"sub"},"Задач со сроком пока нет."));
+  if (d.cards_due) appendUi(root, dailyButton("Повторить карточки · "+d.cards_due, () => session(), "block"));
+  if (lessons.length > 1) appendUi(root, dailyButton("Все занятия на сегодня · "+lessons.length, () => { S.ttDate=day.date; switchTab("tt"); }, "ghost block"));
+  appendUi(root, dailyButton("Открыть фокус-таймер", () => openFocusModal(null), "ghost block"));
   return root;
 }
 
@@ -2687,7 +2697,7 @@ async function viewTT() {
   const isSess = Boolean(w.is_session_week);
   const root = h("div", {});
 
-  root.append(h("div", { class:"page-head" },
+  appendUi(root, h("div", { class:"page-head" },
     h("div", {},
       h("h1", {}, isSess ? "🎓 Сессия" : "Пары"),
       h("div", { class:"sub" }, isSess ? "Сессионная неделя (обычные пары скрыты)" : (w.parity ? PARITY[w.parity] : "Расписание и материалы"))),
@@ -2708,16 +2718,16 @@ async function viewTT() {
   ));
 
   const shared = w.sharing?.following;
-  root.append(h("div",{class:"day-share"}, shared ? h("small",{}, ["Общее расписание", uiLabel(w.sharing.publisher)].filter(Boolean).join(" · ")) : null,
+  appendUi(root, h("div",{class:"day-share"}, shared ? h("small",{}, ["Общее расписание", uiLabel(w.sharing.publisher)].filter(Boolean).join(" · ")) : null,
     dailyButton(shared ? "Управление подпиской" : "Поделиться расписанием", () => sharingSheet(w.sharing))));
-  root.append(h("div", { class:"week-nav" },
+  appendUi(root, h("div", { class:"week-nav" },
     h("button", { onclick: () => { S.ttDate = addDays(w.monday, -7); render(); }, "aria-label":"Назад" }, "‹"),
     h("div", { class:"label" }, fmtShort(w.monday) + " – " + fmtShort(addDays(w.monday, 6))),
     h("button", { onclick: () => { S.ttDate = addDays(w.monday, 7); render(); }, "aria-label":"Вперёд" }, "›")
   ));
 
   if (isSess) {
-    root.append(
+    appendUi(root,
       h("div", {
         class:"top-plank",
         style:{background:"linear-gradient(135deg,rgba(168,85,247,0.22),var(--surface-2))", borderColor:"rgba(168,85,247,0.45)"}
@@ -2737,7 +2747,7 @@ async function viewTT() {
     );
   }
 
-  root.append(h("div", { class:"days" }, w.days.map((d, i) =>
+  appendUi(root, h("div", { class:"days" }, w.days.map((d, i) =>
     h("div", {
       class: "day" + (d.date === S.ttDate ? " on" : "") + (d.date === S.today ? " today" : ""),
       onclick: () => { hap(); S.ttDate = d.date; render(); }
@@ -2749,7 +2759,7 @@ async function viewTT() {
   const now = day.date === S.today ? new Date().toTimeString().slice(0, 5) : null;
 
   if (!day.lessons.length) {
-    root.append(empty(
+    appendUi(root, empty(
       isSess ? "🎓" : "🎉",
       isSess ? "В этот день экзаменов нет" : "Пар нет",
       isSess ? "Нажми кнопку ниже, чтобы назначить экзамен, коллоквиум, зачёт, тест или защиту лабы на этот день" : "Свободный день — отличный повод отдохнуть",
@@ -2768,16 +2778,16 @@ async function viewTT() {
       } else {
         el.addEventListener("click", () => lessonActions(l, day));
       }
-      root.append(el);
+      appendUi(root, el);
     });
   }
 
   if (!isSess && day.cancelled && day.cancelled.length) {
-    root.append(h("div", { class:"card sub" },
+    appendUi(root, h("div", { class:"card sub" },
       "❌ Отменено: " + day.cancelled.map(l => l.subject + " (" + l.start + ")").join(", ")));
   }
 
-  if (isSess || !shared) root.append(h("button", {
+  if (isSess || !shared) appendUi(root, h("button", {
     class:"fab",
     onclick: () => isSess ? sessionExamForm(null, day.date) : lessonForm(null, day.date),
     title: isSess ? "Назначить экзамен" : "Добавить пару"
@@ -2926,12 +2936,12 @@ function sharingSheet(info) {
       await shareAction("revoke"); close(); await render();
     });
     revoke.hidden = !info.published;
-    box.append(h("p",{},"По ссылке одногруппники увидят предметы, преподавателей, аудитории и переносы. Домашние задания, файлы и оценки останутся личными."),
+    appendUi(box, h("p",{},"По ссылке одногруппники увидят предметы, преподавателей, аудитории и переносы. Домашние задания, файлы и оценки останутся личными."),
       dailyButton("Получить ссылку", async () => {
         const {url} = await shareAction("publish");
         const input = h("input",{value:url,readonly:true,"aria-label":"Ссылка-приглашение",onclick:e=>e.target.select()});
         const shareUrl = "https://t.me/share/url?url="+encodeURIComponent(url)+"&text="+encodeURIComponent("Наше расписание пар");
-        box.replaceChildren(input, dailyButton("Выбрать чат в Telegram", () => {
+        replaceUi(box, input, dailyButton("Выбрать чат в Telegram", () => {
           if (tg?.openTelegramLink) tg.openTelegramLink(shareUrl);
           else window.open(shareUrl,"_blank","noopener");
         }), revoke);
@@ -2966,7 +2976,7 @@ async function lessonActions(l, day) {
       const description=h("input", {value:meta.description || "",placeholder:"Тема занятия"});
       let files=[...(meta.files || [])];
       const list=h("div",{class:"stack"});
-      const draw=()=>list.replaceChildren(...files.map(f=>h("div",{class:"row"},
+      const draw=()=>replaceUi(list, ...files.map(f=>h("div",{class:"row"},
         dailyButton(f.name,()=>previewFileModal(f)),dailyButton("Убрать",()=>{files=files.filter(item=>item!==f);draw();}))));
       draw();
       const upload=h("input",{type:"file",multiple:true,onchange:async e=>{
@@ -3120,7 +3130,7 @@ async function taskCreateForm(availGroups) {
     const updateTopics = () => {
       const g = availGroups[+groupSel.value] || availGroups[0];
       const topics = g.topics || [{ name: "общая", thread: 0 }];
-      topicSel.replaceChildren(...topics.map(tp =>
+      replaceUi(topicSel, ...topics.map(tp =>
         h("option", { value: JSON.stringify(tp) }, tp.name)
       ));
       pubRow.style.display = g.chat_id < 0 ? "flex" : "none";
@@ -3198,7 +3208,7 @@ async function viewTasks() {
   const root = h("div", {});
 
   const total = d.total || 0;
-  root.append(h("div", { class:"page-head" },
+  appendUi(root, h("div", { class:"page-head" },
     h("div", {},
       h("h1", {}, "Задачи"),
       h("div", { class:"sub" }, total ? total + " активных задач по группам и темам" : "Всё под контролем")),
@@ -3206,7 +3216,7 @@ async function viewTasks() {
   ));
 
   if (d.done_tasks && d.done_tasks.length) {
-    root.append(
+    appendUi(root,
       h("details", { class:"group-acc", style:{marginTop:"14px"} },
         h("summary", {},
           h("div", { class:"group-icon" }, "✅"),
@@ -3241,9 +3251,9 @@ async function viewTasks() {
   }
 
   if (!total) {
-    root.append(empty("🎈", "Активных задач нет", "Всё сделано! Можешь добавить новую задачу или таймер.",
+    appendUi(root, empty("🎈", "Активных задач нет", "Всё сделано! Можешь добавить новую задачу или таймер.",
       h("button", { class:"btn", onclick: () => taskCreateForm(availGroups) }, "➕ Создать задачу")));
-    root.append(h("button", { class:"fab", onclick: () => taskCreateForm(availGroups), title:"Добавить задачу" }, "+"));
+    appendUi(root, h("button", { class:"fab", onclick: () => taskCreateForm(availGroups), title:"Добавить задачу" }, "+"));
     return root;
   }
 
@@ -3255,7 +3265,7 @@ async function viewTasks() {
     else countRegular++;
   })));
 
-  root.append(h("div", { class:"top-plank" },
+  appendUi(root, h("div", { class:"top-plank" },
     h("div", { class:"plank-left" },
       h("div", { class:"plank-ic" }, "🗂"),
       h("div", { class:"grow" },
@@ -3268,24 +3278,24 @@ async function viewTasks() {
   ));
 
   const topBurningSlot = h("div", {});
-  root.append(topBurningSlot);
+  appendUi(root, topBurningSlot);
 
   const search = h("input", { type:"search", placeholder:"Поиск по группе, теме или тексту…",
     value: S.tasksQuery,
     oninput: (e) => { S.tasksQuery = e.target.value.toLowerCase(); applyFilters(); } });
-  root.append(h("div", { class:"search-wrap" },
+  appendUi(root, h("div", { class:"search-wrap" },
     h("span", { class:"icon" }, "🔍"), search));
 
   const filters = [["all","Все сроки"],["urgent","🔥 Срочные"],["week","📅 Эта неделя"],["no-date","Без срока"]];
   const filterRow = h("div", { class:"chips", style:{ marginBottom:"8px", marginTop:"-4px" } });
   filters.forEach(([id, label]) => {
-    filterRow.append(h("button", {
+    appendUi(filterRow, h("button", {
       class: "chip " + (S.tasksFilter === id ? "" : "gray"),
       onclick: () => { S.tasksFilter = id; drawTasksFilter(); applyFilters(); },
       "data-filter": id
     }, label));
   });
-  root.append(filterRow);
+  appendUi(root, filterRow);
 
   const kindFilters = [
     ["all", "Все типы"],
@@ -3295,13 +3305,13 @@ async function viewTasks() {
   ];
   const kindRow = h("div", { class:"chips", style:{ marginBottom:"14px" } });
   kindFilters.forEach(([id, label]) => {
-    kindRow.append(h("button", {
+    appendUi(kindRow, h("button", {
       class: "chip " + (S.tasksKindFilter === id ? "" : "gray"),
       onclick: () => { S.tasksKindFilter = id; drawTasksFilter(); applyFilters(); },
       "data-kind": id
     }, label));
   });
-  root.append(kindRow);
+  appendUi(root, kindRow);
 
   function drawTasksFilter() {
     filterRow.querySelectorAll("button").forEach(b => {
@@ -3313,7 +3323,7 @@ async function viewTasks() {
   }
 
   const listWrap = h("div", {});
-  root.append(listWrap);
+  appendUi(root, listWrap);
 
   function renderBurningBanner() {
     const activeBurning = [];
@@ -3321,12 +3331,12 @@ async function viewTasks() {
       if (isBurning30Min(t)) activeBurning.push(t);
     })));
     if (!activeBurning.length) {
-      topBurningSlot.replaceChildren();
+      replaceUi(topBurningSlot, );
       return;
     }
     activeBurning.sort((a, b) => getTaskTimestamp(a) - getTaskTimestamp(b));
     const nearest = activeBurning[0];
-    topBurningSlot.replaceChildren(
+    replaceUi(topBurningSlot,
       h("div", { class:"burning-banner" },
         h("div", { class:"grow" },
           h("div", { class:"burn-title" }, "🔥 Горят дедлайны! (< 30 мин)"),
@@ -3343,7 +3353,7 @@ async function viewTasks() {
     const kindFilter = S.tasksKindFilter;
     const now = new Date();
     const weekEnd = new Date(now.getTime() + 7 * 86400 * 1000);
-    listWrap.replaceChildren();
+    replaceUi(listWrap, );
     let shown = 0;
 
     const groupedMap = new Map();
@@ -3471,12 +3481,12 @@ async function viewTasks() {
         h("div", { class:"group-body" }, ...topicNodes)
       );
 
-      listWrap.append(groupDet);
+      appendUi(listWrap, groupDet);
       groupIndex++;
     }
 
     if (!shown) {
-      listWrap.append(empty("🔍", "Ничего не найдено", "Попробуй изменить запрос или фильтр"));
+      appendUi(listWrap, empty("🔍", "Ничего не найдено", "Попробуй изменить запрос или фильтр"));
     }
   }
 
@@ -3493,7 +3503,7 @@ async function viewTasks() {
     });
   }, 1000);
 
-  root.append(h("button", { class:"fab", onclick: () => taskCreateForm(availGroups), title:"Добавить задачу" }, "+"));
+  appendUi(root, h("button", { class:"fab", onclick: () => taskCreateForm(availGroups), title:"Добавить задачу" }, "+"));
   return root;
 }
 
@@ -3504,9 +3514,9 @@ async function viewStudy() {
   const root = h("div", {},
     h("h1", { style:{marginBottom:"14px"} }, "Учёба"),
     seg([["cards","🃏 Карточки"],["quiz","🎯 Квизы"]], S.studySub, (id) => { S.studySub = id; render(); }));
-  root.append(h("div",{class:"study-links"},
+  appendUi(root, h("div",{class:"study-links"},
     S.me.has_ai ? dailyButton("Чат", () => switchTab("chat")) : null, dailyButton("Рост и цели", () => switchTab("growth"))));
-  root.append(S.studySub === "cards" ? await cardsPane() : await quizPane());
+  appendUi(root, S.studySub === "cards" ? await cardsPane() : await quizPane());
   return root;
 }
 
@@ -3521,19 +3531,19 @@ async function cardsPane() {
   const box = h("div", {});
 
   if (!allCards.length) {
-    box.append(empty("🃏", "Пока нет карточек",
+    appendUi(box, empty("🃏", "Пока нет карточек",
       "Создай первую карточку и повторяй материал по предметам.",
       h("button", {class:"btn", onclick:cardForm}, "Создать карточку")));
     return box;
   }
 
-  box.append(h("div", { class:"stats" },
+  appendUi(box, h("div", { class:"stats" },
     h("div", { class:"stat" }, h("b", {}, c.total), h("span", {}, "Всего")),
     h("div", { class:"stat " + (c.due ? "warn" : "ok") }, h("b", {}, c.due), h("span", {}, "Повторить")),
     h("div", { class:"stat ok" }, h("b", {}, c.learned), h("span", {}, "Выучено")),
   ));
 
-  box.append(h("div", { class:"card row", style:{gap:"12px"} },
+  appendUi(box, h("div", { class:"card row", style:{gap:"12px"} },
     h("div", { class:"ring" + (pct >= 100 ? " ok" : ""), style:{ "--p": pct } }, h("div", {}, pct + "%")),
     h("div", { class:"grow" },
       h("div", { style:{fontWeight:700, fontSize:"0.98rem"} }, "Карточки по предметам и темам"),
@@ -3551,13 +3561,13 @@ async function cardsPane() {
     decksMap.get(dName).push(card);
   });
 
-  box.append(h("h2", {}, `Темы и колоды (${decksMap.size})`));
+  appendUi(box, h("h2", {}, `Темы и колоды (${decksMap.size})`));
 
   for (const [deckName, deckCards] of decksMap.entries()) {
     const dueCount = deckCards.filter(x => !x.due || x.due <= S.today).length;
     const learnedCount = deckCards.filter(x => (x.box || 1) >= 4).length;
 
-    box.append(
+    appendUi(box,
       h("details", { class:"group-acc" },
         h("summary", {},
           h("div", { class:"group-icon" }, "📚"),
@@ -3629,7 +3639,7 @@ async function session(deckFilter) {
     const body = h("div");
     const step = () => {
       if (!q.length) {
-        body.replaceChildren(
+        replaceUi(body,
           h("div", { class:"empty" },
             h("div", { class:"big" }, "🏁"),
             h("h3", {}, "Сессия завершена!"),
@@ -3685,7 +3695,7 @@ async function session(deckFilter) {
         step();
       };
 
-      body.replaceChildren(
+      replaceUi(body,
         h("div", { class:"session-progress" },
           h("span", {}, (done + 1) + " / " + totalStart),
           h("div", { class:"bar" }, h("i", { style:{ width: pct + "%" } })),
@@ -3789,7 +3799,7 @@ async function quizPane() {
   const topicInp = h("input", { type:"text", placeholder:"Например: Электродинамика, Матрицы, Python…" });
   const countSel = h("select", {}, [5, 8, 10].map(n => h("option", { value: n }, n + " вопросов")));
 
-  box.append(h("div", { class:"card" },
+  appendUi(box, h("div", { class:"card" },
     h("h3", {}, "🎯 Быстрый ИИ-квиз"),
     h("div", { class:"sub", style:{marginTop:"4px", marginBottom:"10px"} },
       "Проверь знания по любой теме перед семинаром или зачётом"),
@@ -3814,10 +3824,10 @@ async function quizPane() {
 
   const history = d.quizzes || [];
   if (history.length) {
-    box.append(h("h2", {}, "Последние результаты"));
+    appendUi(box, h("h2", {}, "Последние результаты"));
     history.slice(0, 15).forEach(q => {
       const pct = q.total ? Math.round(100 * q.score / q.total) : 0;
-      box.append(h("div", { class:"card tight row between" },
+      appendUi(box, h("div", { class:"card tight row between" },
         h("div", { class:"grow" },
           h("div", { style:{fontWeight:700} }, q.topic || "Квиз"),
           h("div", { class:"sub" }, "Правильно: " + q.score + " из " + q.total)),
@@ -3838,7 +3848,7 @@ function runQuizModal(qz) {
     const step = () => {
       if (idx >= questions.length) {
         const pct = Math.round(100 * score / questions.length);
-        body.replaceChildren(
+        replaceUi(body,
           h("div", { class:"empty" },
             h("div", { class:"big" }, pct >= 80 ? "🏆" : pct >= 50 ? "👍" : "📚"),
             h("h3", {}, "Результат: " + score + " из " + questions.length + " (" + pct + "%)"),
@@ -3873,10 +3883,10 @@ function runQuizModal(qz) {
             nextBtn.classList.remove("hidden");
           }
         }, optText);
-        optsWrap.append(b);
+        appendUi(optsWrap, b);
       });
 
-      body.replaceChildren(
+      replaceUi(body,
         h("div", { class:"session-progress" },
           h("span", {}, "Вопрос " + (idx + 1) + " / " + questions.length),
           h("div", { class:"bar" }, h("i", { style:{ width: Math.round(100 * idx / questions.length) + "%" } })),
@@ -3902,7 +3912,7 @@ async function viewChat() {
   const acc = (S.me && S.me.account) || { name: "Артём", avatar: "🧑‍💻" };
   const root = h("div", {});
 
-  root.append(h("div", { class:"page-head" },
+  appendUi(root, h("div", { class:"page-head" },
     h("div", { class:"row", style:{gap:"10px"} },
       renderAvatar(acc.avatar, "sm", openProfileEditor),
       h("div", {},
@@ -3917,18 +3927,18 @@ async function viewChat() {
     )
   ));
 
-  root.append(seg([
+  appendUi(root, seg([
     ["chat", "💬 Диалог"],
     ["history", "📜 История"],
     ["settings", "⚙️ Настройки"]
   ], S.chatSub, (id) => { S.chatSub = id; render(); }));
 
   if (S.chatSub === "history") {
-    root.append(await chatHistoryPane());
+    appendUi(root, await chatHistoryPane());
   } else if (S.chatSub === "settings") {
-    root.append(await chatSettingsPane());
+    appendUi(root, await chatSettingsPane());
   } else {
-    root.append(chatDialogPane());
+    appendUi(root, chatDialogPane());
   }
   return root;
 }
@@ -3951,9 +3961,9 @@ function chatDialogPane() {
   const chatList = currentChatList();
 
   const drawMessages = () => {
-    listBox.replaceChildren();
+    replaceUi(listBox, );
     if (!chatList.length) {
-      listBox.append(empty("🤖", "Чем помочь по учёбе или коду?",
+      appendUi(listBox, empty("🤖", "Чем помочь по учёбе или коду?",
         "Прикрепляй PDF, фото задач, код или спрашивай напрямую — контекст и README твоего профиля уже подключены.",
         h("div", { class:"chips", style:{justifyContent:"center"} },
           h("button", { class:"chip", onclick: () => sendQuick("Что у меня сегодня по парам и дедлайнам?") }, "📅 Сводка на сегодня"),
@@ -4025,7 +4035,7 @@ function chatDialogPane() {
           }}, "🗑")
         ) : null
       );
-      listBox.append(bubble);
+      appendUi(listBox, bubble);
     });
   };
 
@@ -4033,11 +4043,11 @@ function chatDialogPane() {
   const drawFilesBar = () => {
     if (!S.chatFiles.length) {
       filesBar.classList.add("hidden");
-      filesBar.replaceChildren();
+      replaceUi(filesBar, );
       return;
     }
     filesBar.classList.remove("hidden");
-    filesBar.replaceChildren(...S.chatFiles.map((f, i) =>
+    replaceUi(filesBar, ...S.chatFiles.map((f, i) =>
       h("div", {
         class:"chat-file-chip",
         onclick: () => previewFileModal(f, () => { S.chatFiles.splice(i, 1); drawFilesBar(); })
@@ -4147,7 +4157,7 @@ function chatDialogPane() {
   drawFilesBar();
 
   if (chatList.length) {
-    wrap.append(h("div", { class:"row between", style:{marginBottom:"8px"} },
+    appendUi(wrap, h("div", { class:"row between", style:{marginBottom:"8px"} },
       h("span", { class:"sub" }, "Сообщений в сессии: " + chatList.length),
       h("button", { class:"chip gray", onclick: async () => {
         await api("/api/chat/clear", { method:"POST" });
@@ -4158,7 +4168,7 @@ function chatDialogPane() {
     ));
   }
 
-  wrap.append(
+  appendUi(wrap,
     listBox,
     h("div", { class:"chat-dock" },
       filesBar,
@@ -4178,11 +4188,11 @@ async function chatHistoryPane() {
   const box = h("div", {});
 
   if (!items.length) {
-    box.append(empty("📜", "История пуста", "Все ваши вопросы и прикреплённые файлы будут сохраняться здесь"));
+    appendUi(box, empty("📜", "История пуста", "Все ваши вопросы и прикреплённые файлы будут сохраняться здесь"));
     return box;
   }
 
-  box.append(h("div", { class:"row between", style:{marginBottom:"10px"} },
+  appendUi(box, h("div", { class:"row between", style:{marginBottom:"10px"} },
     h("span", { class:"sub" }, "Записей: " + items.length),
     h("button", { class:"btn danger small", onclick: async () => {
       if (!confirm("Очистить историю этого аккаунта?")) return;
@@ -4197,7 +4207,7 @@ async function chatHistoryPane() {
     const botFiles = it.bot_files || [];
     const allFiles = [...attFiles, ...botFiles];
 
-    box.append(h("details", { class:"acc" },
+    appendUi(box, h("details", { class:"acc" },
       h("summary", {},
         h("span", { class:"chip gray" }, dt),
         allFiles.length ? h("span", { class:"chip purple" }, "📎 " + allFiles.length) : null,
@@ -4228,7 +4238,7 @@ async function chatSettingsPane() {
   const acc = s.account || {};
   const box = h("div", {});
 
-  box.append(h("div", { class:"card" },
+  appendUi(box, h("div", { class:"card" },
     h("div", { class:"row", style:{gap:"12px", marginBottom:"10px"} },
       renderAvatar(acc.avatar, "", openProfileEditor),
       h("div", { class:"grow" },
@@ -4270,7 +4280,7 @@ async function chatSettingsPane() {
     }
   });
 
-  box.append(h("div", { class:"card stack" },
+  appendUi(box, h("div", { class:"card stack" },
     field("Режим ответов", modeSel),
     field("О пользователе", profileArea),
     field("Кастомные инструкции", instrArea),
@@ -4300,9 +4310,9 @@ async function chatSettingsPane() {
   ));
 
   if (s.keys && s.keys.length) {
-    box.append(h("h2", {}, "Состояние пула API-ключей"));
+    appendUi(box, h("h2", {}, "Состояние пула API-ключей"));
     s.keys.forEach(line => {
-      box.append(h("div", { class:"key-card mono" }, line));
+      appendUi(box, h("div", { class:"key-card mono" }, line));
     });
   }
 
@@ -4714,7 +4724,7 @@ function openReflectionHubModal(st) {
 
       const analysisBox = h("div", {});
       if (curState.journal_analysis) {
-        analysisBox.append(
+        appendUi(analysisBox,
           h("div", { class:"info-box", style:{borderColor:"#84cc16"} },
             h("div", { class:"row between wrap", style:{marginBottom:"6px"} },
               h("span", { class:"info-title", style:{marginBottom:0} }, "🧠 ИИ-разбор рефлексий за 7 дней"),
@@ -4829,7 +4839,7 @@ function openReflectionHubModal(st) {
         dIdx++;
       }
 
-      wrap.replaceChildren(
+      replaceUi(wrap,
         h("div", { class:"btn-row" },
           h("button", {
             class:"btn",
@@ -5003,7 +5013,7 @@ function openExamStudioModal(st) {
                   try {
                     const r = await api("/api/g/plan/expand", { method:"POST", body:{ d: p.d } });
                     p.deep_notes = r.deep_notes;
-                    deepBox.replaceChildren(
+                    replaceUi(deepBox,
                       h("div", { class:"info-box", style:{borderColor:"#84cc16", marginTop:"6px"} },
                         h("div", { class:"info-title" }, "📖 Подробный конспект и разбор от ИИ"),
                         renderMd(r.deep_notes)
@@ -5019,7 +5029,7 @@ function openExamStudioModal(st) {
         );
       });
 
-      wrap.replaceChildren(
+      replaceUi(wrap,
         plan.length ? h("div", { class:"card tight", style:{marginBottom:0} },
           h("div", { class:"row between" },
             h("div", {},
@@ -5057,7 +5067,7 @@ async function openDuelModal(duelId) {
       : location.origin + `/app?duel=${duelId}`;
 
     const renderResults = (resList, myScore) => {
-      box.replaceChildren(
+      replaceUi(box,
         h("div", { class:"card center" },
           h("div", { style:{fontSize:"42px"} }, "⚔️"),
           h("h2", { style:{margin:"6px 0"} }, myScore != null ? `Твой счёт: ${myScore} из ${qs.length}` : "Таблица дуэли"),
@@ -5100,7 +5110,7 @@ async function openDuelModal(duelId) {
 
     const step = () => {
       if (idx >= qs.length) {
-        box.replaceChildren(h("div", { class:"center sub", style:{padding:"24px"} }, "⏳ Подсчёт очков…"));
+        replaceUi(box, h("div", { class:"center sub", style:{padding:"24px"} }, "⏳ Подсчёт очков…"));
         api("/api/g/duel/" + encodeURIComponent(duelId) + "/answer", {
           method:"POST", body:{ a: answers }
         }).then(r => {
@@ -5111,7 +5121,7 @@ async function openDuelModal(duelId) {
         return;
       }
       const q = qs[idx];
-      box.replaceChildren(
+      replaceUi(box,
         h("div", { class:"session-progress" },
           h("span", {}, `Вопрос ${idx + 1} / ${qs.length}`),
           h("div", { class:"bar" }, h("i", { style:{width: Math.round(100 * idx / qs.length) + "%"} }))
@@ -5141,7 +5151,7 @@ async function viewGrowth() {
   const comp = st.companion || { stage: 1, title: "Семя Импульса", desc: "" };
   const root = h("div", { class:"g-shell" });
 
-  root.append(
+  appendUi(root,
     h("div", { class:"g-editorial-hero" + (st.risk ? " at-risk" : "") },
       h("div", { class:"g-hero-grid" },
         h("div", {},
@@ -5192,18 +5202,18 @@ async function viewGrowth() {
     )
   );
 
-  root.append(seg([
+  appendUi(root, seg([
     ["hub", "🌱 Квест & Привычки"],
     ["ai", "🧠 ИИ-Прокачка"],
     ["social", "🏆 Лидерборд & Дуэли"]
   ], S.growthSub, (id) => { hap(); S.growthSub = id; render(); }));
 
   if (S.growthSub === "ai") {
-    root.append(renderGrowthAiPane(st));
+    appendUi(root, renderGrowthAiPane(st));
   } else if (S.growthSub === "social") {
-    root.append(await renderGrowthSocialPane(st));
+    appendUi(root, await renderGrowthSocialPane(st));
   } else {
-    root.append(renderGrowthHubPane(st));
+    appendUi(root, renderGrowthHubPane(st));
   }
 
   return root;
@@ -5213,7 +5223,7 @@ function renderGrowthHubPane(st) {
   const box = h("div", { class:"g-shell" });
   const doneCount = (st.quest || []).filter(q => q.done).length;
 
-  box.append(
+  appendUi(box,
     h("div", { class:"g-sec-head" },
       h("h2", {}, "Ежедневный квест (обновление в 06:00)"),
       h("span", { class:"num" }, `${doneCount}/3 ВЫПОЛНЕНО · +35 XP`)
@@ -5277,7 +5287,7 @@ function renderGrowthHubPane(st) {
     fin: "💎 Финансы"
   };
 
-  box.append(
+  appendUi(box,
     h("div", { class:"g-sec-head" },
       h("h2", {}, "Цели и привычки (Пн – Вс)"),
       h("button", {
@@ -5290,7 +5300,7 @@ function renderGrowthHubPane(st) {
             const daysPicker = h("div", { class:"g-week-grid" });
 
             const drawPicker = () => {
-              daysPicker.replaceChildren(...DAYS.map((dName, idx) =>
+              replaceUi(daysPicker, ...DAYS.map((dName, idx) =>
                 h("div", {
                   class: "g-day-cell" + (pickedDays.has(idx) ? " done" : ""),
                   onclick: () => {
@@ -5327,7 +5337,7 @@ function renderGrowthHubPane(st) {
   );
 
   if (!(st.goals || []).length) {
-    box.append(empty("🎯", "Привычек пока нет", "Добавь спорт, английский или проект и выбери дни недели для цели."));
+    appendUi(box, empty("🎯", "Привычек пока нет", "Добавь спорт, английский или проект и выбери дни недели для цели."));
   } else {
     st.goals.forEach(g => {
       const allDays = g.days || [];
@@ -5337,7 +5347,7 @@ function renderGrowthHubPane(st) {
       const targetNames = targetWeekdays.map(i => DAYS[i]).join(", ");
       const thisWeekDoneDates = weekDays.filter(dStr => allDays.includes(dStr));
 
-      box.append(
+      appendUi(box,
         h("div", { class:"g-habit-card" },
           h("div", { class:"g-habit-top" },
             h("div", { class:"row wrap", style:{gap:"6px"} },
@@ -5439,7 +5449,7 @@ function renderGrowthHubPane(st) {
   const totalReflections = (st.journal || []).length;
   const lastEntry = totalReflections ? st.journal[totalReflections - 1] : null;
 
-  box.append(
+  appendUi(box,
     h("div", { class:"g-sec-head" },
       h("h2", {}, "Вечерний дневник & ИИ-рефлексия"),
       h("span", { class:"num" }, "+12 XP")
@@ -5490,7 +5500,7 @@ function renderGrowthHubPane(st) {
     )
   );
 
-  box.append(
+  appendUi(box,
     h("div", { class:"card row between wrap" },
       h("div", { class:"grow" },
         h("div", { style:{fontWeight:800} }, "🔔 Пуши и утренний брифинг в боте"),
@@ -5542,7 +5552,7 @@ function renderGrowthAiPane(st) {
     }
   });
 
-  box.append(
+  appendUi(box,
     h("div", { class:"g-sec-head" },
       h("h2", {}, "Сфоткал конспект / Голосовое с лекции"),
       h("span", { class:"num" }, "РАЗБОР + КАРТОЧКИ ПО ТЕМЕ + ТЕСТ + PDF")
@@ -5566,7 +5576,7 @@ function renderGrowthAiPane(st) {
               body:{ kind: snapKind, text: snapText.value.trim(), files: snapFiles, save_cards: true }
             });
             pick("success");
-            snapResult.replaceChildren(
+            replaceUi(snapResult,
               h("div", { class:"info-box", style:{marginTop:"10px"} },
                 h("div", { class:"row between wrap", style:{marginBottom:"10px", gap:"6px"} },
                   h("span", { class:"chip green" }, `📚 Колода «${r.title}»: +${r.saved_cards || (r.cards || []).length} карт.`),
@@ -5609,7 +5619,7 @@ function renderGrowthAiPane(st) {
   const doneDays = plan.filter(p => p.done).length;
   const todayPlan = plan.find(p => p.d === st.today) || plan[0];
 
-  box.append(
+  appendUi(box,
     h("div", { class:"g-sec-head" },
       h("h2", {}, "Режим «Сдать экзамен за N дней»"),
       h("span", { class:"num" }, "ПО БИЛЕТАМ И ФАЙЛАМ")
@@ -5645,7 +5655,7 @@ async function renderGrowthSocialPane(st) {
   const duelTopicInp = h("input", { type:"text", placeholder:"Тема дуэли (напр., Производные, Python, История)…" });
   const duelCodeInp = h("input", { type:"text", placeholder:"Код дуэли от друга…" });
 
-  box.append(
+  appendUi(box,
     h("div", { class:"g-sec-head" },
       h("h2", {}, "Дуэль знаний (5 вопросов)"),
       h("span", { class:"num" }, "+25 XP")
@@ -5681,7 +5691,7 @@ async function renderGrowthSocialPane(st) {
   );
 
   // 2. КОМНАТА ГРУППЫ / ПОТОКА + ОБЩИЕ ДЕДЛАЙНЫ
-  box.append(
+  appendUi(box,
     h("div", { class:"g-sec-head" },
       h("h2", {}, b.title || "Лидерборд группы"),
       h("button", {
@@ -5710,7 +5720,7 @@ async function renderGrowthSocialPane(st) {
 
   // Общие дедлайны группы
   if (b.has) {
-    box.append(
+    appendUi(box,
       h("div", { class:"card stack" },
         h("div", { class:"row between" },
           h("div", { style:{fontWeight:800} }, "📌 Общие дедлайны потока"),
@@ -5749,7 +5759,7 @@ async function renderGrowthSocialPane(st) {
   }
 
   // Лидерборд участников
-  box.append(
+  appendUi(box,
     h("div", { class:"stack" },
       ...(b.rows || []).map((r, i) =>
         h("div", { class: "g-rank-row" + (r.me ? " me" : "") },
