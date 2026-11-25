@@ -14,4 +14,11 @@ curl -fL --retry 3 \
 
 tar -xJf /tmp/geminibot-tinytex.tar.xz -C .tinytex --strip-components=1
 
-"$(pwd -P)/.tinytex/bin/x86_64-linux/tlmgr" install collection-langcyrillic cm-super parskip booktabs
+export PATH="$(pwd -P)/.tinytex/bin/x86_64-linux:$PATH"
+
+tlmgr update --self
+tlmgr install collection-langcyrillic cm-super parskip booktabs
+
+pdflatex --version
+
+echo "Build completed successfully"
