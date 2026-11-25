@@ -24,6 +24,7 @@ from study_markdown import inline_tokens, parse_markdown
 from study_figures import plot, diagram, label
 from study_layout import math_slot, mathjax_prepare, page_target, print_fitted
 from study_polish import document_kind, clean_summary
+from study_clean import normalize_blocks
 from study_typography import rich_figure_label, print_font_css, ordered_source
 from study_math_text import mark_formula_locations, add_formula_text
 
@@ -166,9 +167,9 @@ def opener(num, title, kicker, anchor=""):
 def document_html(title, blocks):
     rich = inline
 
-    target = page_target(blocks)
     title = readable_title(title)
-    blocks = [dict(b) for b in blocks]
+    blocks = normalize_blocks(blocks,title)
+    target = page_target(blocks)
     for b in blocks:
         if b["t"] == "h":
             b["text"] = heading_text(b["text"])
@@ -383,7 +384,13 @@ def display_math(tex, section, number):
 
 
 def render_pdf(title, blocks):
+    import time, logging
+    log=logging.getLogger('study.pdf')
+    start=time.monotonic()
+    title=readable_title(title)
+    blocks=normalize_blocks(blocks,title)
     html = document_html(title, blocks)
+    log.info('PDF HTML prepared: %.1fs; %d blocks',time.monotonic()-start,len(blocks))
     # One browser at a time on small Render instances, and no profile shared between users.
     import playwright
     if (Path(playwright.__file__).parent / "driver/package/.local-browsers").is_dir():
@@ -410,14 +417,19 @@ def render_pdf(title, blocks):
             page.route(address, lambda route: route.fulfill(content_type="text/html; charset=utf-8", body=html))
             page.goto(address, wait_until="load", timeout=15000)
             page.evaluate("() => document.fonts.ready")
+            t_math=time.monotonic()
             errors = mathjax_prepare(page, address)
+            log.info("PDF MathJax: %.1fs, %d fallback formulas",time.monotonic()-t_math,errors)
             if errors:
                 # Preserve formulas we cannot render instead of quietly deleting them.
                 page.evaluate("""(n)=>{const note=document.querySelector('.volume-note');if(note){note.hidden=false;note.textContent=`${n} формул не удалось обработать MathJax. Для них сохранён исходник или резервная вёрстка.`;}}""", errors)
             prefix, formulas = mark_formula_locations(page)
             data = print_fitted(page, page_target(blocks), PdfReader)
             try:
-                return add_formula_text(data, formulas, prefix, ordered_source(title, blocks))
+                t_text=time.monotonic()
+                result=add_formula_text(data, formulas, prefix, ordered_source(title, blocks))
+                log.info("PDF source attachment: %.1fs; total %.1fs",time.monotonic()-t_text,time.monotonic()-start)
+                return result
             except Exception:
                 import logging
                 logging.getLogger(__name__).exception("Unable to add searchable formula source; preserving visual PDF")

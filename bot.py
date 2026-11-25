@@ -1690,7 +1690,7 @@ def build_post_tool(scope: list) -> genai_types.Tool:
 
 
 
-async def improve_pdf_response(resp, user_text, contents, client, model_name, config):
+async def improve_pdf_response(resp, user_text, contents, client, model_name, config, deadline=None):
     """At most one extra completion. Preserve the draft if the repair fails."""
     from study_quality import document_issues, response_text, attach_warning
     from study_layout import stamp_page_target
@@ -1714,7 +1714,7 @@ async def improve_pdf_response(resp, user_text, contents, client, model_name, co
             args["content"] = stamp_profile(stamp_page_target(original, user_text), user_text)
             call.args = args
             continue
-        if not repair_budget:
+        if not repair_budget or (deadline is not None and deadline-time.monotonic()<8):
             attach_warning(args, issues)
             args["content"] = stamp_profile(stamp_page_target(str(args.get("content") or ""), user_text), user_text)
             call.args = args
@@ -1726,10 +1726,15 @@ async def improve_pdf_response(resp, user_text, contents, client, model_name, co
                 temperature=0.3, max_output_tokens=16384,
             )
             prompt = ("\nДоработай черновик учебного PDF. Возвращай только ПОЛНЫЙ исправленный Markdown, без общей внешней ограды кода и без вызова инструментов. "
+                      "Не пиши приветствия, обращения, обещания, титул и оглавление. Начинай с единственного блока study или содержательного заголовка. "
                       "Сохрани правильные данные, добавь недостающие разделы, реальные plot/diagram, решения и объяснения. "
                       "Исходный запрос выше. Недочёты:\n- " + "\n- ".join(issues) + "\n\nЧЕРНОВИК:\n" + original[:40000])
+            repair_started=time.monotonic()
+            repair_timeout=min(45, max(1,deadline-time.monotonic())) if deadline is not None else 45
+            log.info("PDF content repair start; budget %.1fs; %d issues",repair_timeout,len(issues))
             repaired = await asyncio.wait_for(client.aio.models.generate_content(
-                model=model_name, contents=[*contents, prompt], config=repair_config), timeout=85)
+                model=model_name, contents=[*contents, prompt], config=repair_config), timeout=repair_timeout)
+            log.info("PDF content repair done %.1fs",time.monotonic()-repair_started)
             new = response_text(repaired)
             if new and len(new) <= 80000:
                 new_issues = document_issues(user_text, new)
@@ -1773,11 +1778,15 @@ async def generate_reply(history: list, user_text: str, extra_parts: Optional[li
         if pdf_request(user_text):
             config.system_instruction = str(config.system_instruction) + "\n" + PDF_INSTRUCTIONS + page_budget_hint(user_text)
     req_timeout = 90 if file_mode else REQUEST_TIMEOUT_SEC
+    pdf_deadline = time.monotonic()+135 if pdf_request(user_text) else None
+    if pdf_deadline is not None: log.info("PDF request started; Gemini total budget 135s")
     last_err = None
 
     for model_name in target_pool.get_model_order(pref_model=pref_model, allow_fallback=allow_fallback):
         timeouts_on_model = 0
         for _ in range(len(target_pool.keys)):
+            if pdf_deadline is not None and pdf_deadline-time.monotonic()<2:
+                raise RuntimeError("Превышено время ожидания Gemini для PDF. Повтори запрос или сократи объём.")
             idx = target_pool.pick_for_model(model_name)
             if idx is None:
                 break  # на этой модели свободных ключей нет — мгновенно переходим к следующей модели
@@ -1789,7 +1798,7 @@ async def generate_reply(history: list, user_text: str, extra_parts: Optional[li
                     target_pool.client(idx).aio.models.generate_content(
                         model=model_name, contents=contents, config=config
                     ),
-                    timeout=req_timeout,
+                    timeout=min(70, max(1,pdf_deadline-time.monotonic())) if pdf_deadline is not None else req_timeout,
                 )
                 target_pool.record(idx, "ok", time.monotonic() - t0, model=model_name)
                 log.info(
@@ -1798,7 +1807,7 @@ async def generate_reply(history: list, user_text: str, extra_parts: Optional[li
                 )
                 if file_mode and pdf_request(user_text):
                     try:
-                        await improve_pdf_response(resp, user_text, contents, target_pool.client(idx), model_name, config)
+                        await improve_pdf_response(resp, user_text, contents, target_pool.client(idx), model_name, config, pdf_deadline)
                     except Exception:
                         log.warning("PDF completeness check failed", exc_info=True)
                 return resp
@@ -2380,8 +2389,8 @@ def wrap_code(text: str, width: int = 86) -> str:
 
 
 def build_pdf(title: str, blocks: list) -> bytes:
-    from study_pdf import render_pdf
-    return render_pdf(title, blocks)
+    from study_render_worker import render_bounded
+    return render_bounded(title, blocks)
 
 
 LATEX_UNICODE_MAP = {

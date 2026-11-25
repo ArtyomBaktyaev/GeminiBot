@@ -115,6 +115,17 @@ def mathjax_prepare(page, address):
           if(svg.querySelector('[data-mml-node="merror"], [data-mjx-error]')) throw Error('TeX');
           for (const hidden of svg.querySelectorAll("mjx-assistive-mml")) hidden.remove();
           svg.setAttribute("aria-label", tex);
+          if (el.closest('figure.editorial-figure')) {
+            const vector=svg.querySelector('svg');
+            if(vector){
+              const w=vector.getAttribute('width'), h=vector.getAttribute('height');
+              if(w&&h&&/^[\d.]+ex$/.test(w)&&/^[\d.]+ex$/.test(h)){
+                vector.style.setProperty('--study-svg-w',w);
+                vector.style.setProperty('--study-svg-h',h);
+                vector.setAttribute('data-study-math-size','1');
+              }
+            }
+          }
           el.replaceChildren(svg);
         } catch(e) { errors++; }
       }
@@ -173,29 +184,33 @@ LAYOUT_JS = r"""() => {
 
 
 def print_fitted(page, target, pdf_reader):
+    import time, logging
+    log=logging.getLogger('study.pdf')
+    passes=0
     def render():
+        nonlocal passes
+        passes+=1
+        t=time.monotonic()
         page.evaluate(LAYOUT_JS)
-        return page.pdf(prefer_css_page_size=True, print_background=True, outline=True)
+        # A regression guard catches oversized graph formulas before printing.
+        bad=page.evaluate("""() => [...document.querySelectorAll('figure .study-math mjx-container > svg')].filter(s=>{const r=s.getBoundingClientRect();return r.height>60||r.width>s.closest('figure').clientWidth+2}).length""")
+        if bad: raise RuntimeError(f'Неверный размер математических подписей на графиках: {bad}')
+        result=page.pdf(prefer_css_page_size=True, print_background=True, outline=True)
+        log.info('PDF print pass %d: %.1fs, %d bytes',passes,time.monotonic()-t,len(result))
+        return result
     page.evaluate("() => delete document.body.dataset.density")
     data=render()
-    if target:
-        best_count=len(pdf_reader(BytesIO(data)).pages)
-        best_density=current_density=None
-        for density in ('compact','dense'):
-            if best_count<=target[1]:
-                break
-            page.evaluate('(density) => document.body.dataset.density=density',density)
-            current_density=density
-            candidate=render()
-            count=len(pdf_reader(BytesIO(candidate)).pages)
-            if count<best_count:
-                data,best_count,best_density=candidate,count,density
-        # Never compress when it saves no page; restore the most spacious winning layout.
-        if current_density!=best_density:
-            page.evaluate("(d) => {if(d)document.body.dataset.density=d;else delete document.body.dataset.density;}",best_density)
-            data=render()
+    if target and len(pdf_reader(BytesIO(data)).pages)>target[1]:
+        normal_count=len(pdf_reader(BytesIO(data)).pages)
+        page.evaluate("() => document.body.dataset.density='compact'")
+        candidate=render()
+        if len(pdf_reader(BytesIO(candidate)).pages)<normal_count:
+            data=candidate
+        else:
+            page.evaluate("() => delete document.body.dataset.density")
+            # Existing data is already the normal layout; only reprint if the TOC changes.
     # Resolve contents after density is final; repeat if page locations change.
-    for _ in range(3):
+    for _ in range(2):
         draft=pdf_reader(BytesIO(data))
         pages={k.lstrip('/'):str(draft.get_destination_page_number(v)+1).zfill(2) for k,v in draft.named_destinations.items()}
         changed=page.locator('.toc-page').evaluate_all("""(nodes,pages)=>{
