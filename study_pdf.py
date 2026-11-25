@@ -280,8 +280,21 @@ def display_math(tex, section, number):
 def render_pdf(title, blocks):
     html = document_html(title, blocks)
     # One browser at a time on small Render instances, and no profile shared between users.
+    import playwright
+    if (Path(playwright.__file__).parent / "driver/package/.local-browsers").is_dir():
+        os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", "0")
     with SLOT, sync_playwright() as engine:
-        browser = engine.chromium.launch(executable_path=os.environ.get("STUDY_CHROMIUM") or None)
+        executable = os.environ.get("STUDY_CHROMIUM") or None
+        try:
+            browser = engine.chromium.launch(executable_path=executable)
+        except Exception as exc:
+            if executable or not os.environ.get("RENDER") or "Executable doesn't exist" not in str(exc):
+                raise
+            import subprocess
+            import sys
+            subprocess.run([sys.executable, "-m", "playwright", "install", "--only-shell", "chromium"],
+                           check=True, timeout=180)
+            browser = engine.chromium.launch()
         try:
             page = browser.new_page(offline=True, service_workers="block")
             page.route("**/*", lambda route: route.abort())

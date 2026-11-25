@@ -5,7 +5,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt \
     && python -m playwright install --with-deps --only-shell chromium \
     && apt-get update \
-    && apt-get install -y --no-install-recommends fonts-texgyre-math fonts-liberation \
+    && apt-get install -y --no-install-recommends fonts-texgyre-math fonts-liberation texlive-latex-extra texlive-lang-cyrillic cm-super \
     && rm -rf /var/lib/apt/lists/*
 RUN useradd --create-home study && chown study:study /app
 COPY --chown=study:study *.py ./

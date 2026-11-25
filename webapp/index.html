@@ -1522,7 +1522,7 @@ async function exportMessageDoc(text, fmt) {
     toast("Нет текста для экспорта", "err");
     return;
   }
-  const fmtNames = { pdf: "PDF", docx: "Word", tex: "LaTeX (.tex)" };
+  const fmtNames = { pdf: "PDF", docx: "Word", tex: "LaTeX (.tex)", texpdf: "PDF из LaTeX" };
   const label = fmtNames[fmt] || fmt.toUpperCase();
   toast(`Генерация ${label}… ⏳`, "info");
   try {
@@ -4024,6 +4024,7 @@ function chatDialogPane() {
           !isMe && m.text ? h("button", { class:"act-btn", onclick: () => exportMessageDoc(m.exportText || m.text, "pdf") }, "📄 PDF") : null,
           !isMe && m.text ? h("button", { class:"act-btn", onclick: () => exportMessageDoc(m.exportText || m.text, "docx") }, "📝 Word") : null,
           !isMe && m.text ? h("button", { class:"act-btn", onclick: () => exportMessageDoc(m.exportText || m.text, "tex") }, "📐 LaTeX (.tex)") : null,
+          !isMe && m.text ? h("button", { class:"act-btn", onclick: () => exportMessageDoc(m.exportText || m.text, "texpdf") }, "Собрать TeX → PDF") : null,
           h("button", { class:"act-btn", onclick: () => {
             navigator.clipboard.writeText(m.text || "");
             toast("Скопировано 📋", "ok");
