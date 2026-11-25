@@ -1249,7 +1249,7 @@ async function api(path, opt) {
   }
 
   const ctrl = new AbortController();
-  const timeoutMs = method === "GET" ? 12000 : 45000;
+  const timeoutMs = method === "GET" ? 12000 : (path === "/api/ask" ? 210000 : 45000);
   const tid = setTimeout(() => ctrl.abort(), timeoutMs);
   if (opt.signal) opt.signal.addEventListener("abort", () => ctrl.abort());
 

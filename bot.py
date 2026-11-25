@@ -581,7 +581,7 @@ class KeyPool:
         if i not in self._clients:
             # Отключаем встроенные повторы SDK (attempts=1), чтобы 429 не зависал на 22 секунды!
             try:
-                http_kwargs: dict = {"timeout": REQUEST_TIMEOUT_SEC * 1000}
+                http_kwargs: dict = {"timeout": max(REQUEST_TIMEOUT_SEC, 90) * 1000}
                 if hasattr(genai_types, "HttpRetryOptions"):
                     http_kwargs["retry_options"] = genai_types.HttpRetryOptions(attempts=1)
                 self._clients[i] = genai.Client(
@@ -1689,11 +1689,64 @@ def build_post_tool(scope: list) -> genai_types.Tool:
     return genai_types.Tool(function_declarations=decls + PLUGIN_TOOLS)
 
 
+
+async def improve_pdf_response(resp, user_text, contents, client, model_name, config):
+    """At most one extra completion. Preserve the draft if the repair fails."""
+    from study_quality import document_issues, response_text, attach_warning
+    candidate = resp.candidates[0] if resp.candidates else None
+    parts = getattr(getattr(candidate, "content", None), "parts", None) or []
+    repair_budget = 1
+    for p in parts:
+        call = getattr(p, "function_call", None)
+        if not call or call.name != "create_file":
+            continue
+        args = dict(call.args or {})
+        if str(args.get("format", "")).lower() not in ("pdf", "пдф"):
+            continue
+        original = str(args.get("content") or "")
+        issues = document_issues(user_text, original)
+        reason = str(getattr(candidate, "finish_reason", ""))
+        if "MAX_TOKENS" in reason:
+            issues.append("Первоначальная генерация достигла лимита токенов")
+        if not issues:
+            continue
+        if not repair_budget:
+            attach_warning(args, issues)
+            call.args = args
+            continue
+        repair_budget -= 1
+        try:
+            repair_config = genai_types.GenerateContentConfig(
+                system_instruction=config.system_instruction,
+                temperature=0.3, max_output_tokens=16384,
+            )
+            prompt = ("\nДоработай черновик учебного PDF. Возвращай только ПОЛНЫЙ исправленный Markdown, без общей внешней ограды кода и без вызова инструментов. "
+                      "Сохрани правильные данные, добавь недостающие разделы, реальные plot/diagram, решения и объяснения. "
+                      "Исходный запрос выше. Недочёты:\n- " + "\n- ".join(issues) + "\n\nЧЕРНОВИК:\n" + original[:40000])
+            repaired = await asyncio.wait_for(client.aio.models.generate_content(
+                model=model_name, contents=[*contents, prompt], config=repair_config), timeout=85)
+            new = response_text(repaired)
+            if new and len(new) <= 80000:
+                new_issues = document_issues(user_text, new)
+                if "MAX_TOKENS" in str(getattr(repaired.candidates[0], "finish_reason", "")):
+                    new_issues.append("Повторная генерация достигла лимита токенов")
+                if len(new_issues) < len(issues) or (len(new_issues) == len(issues) and len(new) > len(original)):
+                    args["content"] = new
+                    issues = new_issues
+        except Exception:
+            log.warning("Не удалось дополнить PDF; сохраняем черновик", exc_info=True)
+        attach_warning(args, issues)
+        call.args = args
+    return resp
+
+
 async def generate_reply(history: list, user_text: str, extra_parts: Optional[list], use_tools: bool,
                          current_topic: Optional[str] = None, last_files_names: Optional[list] = None,
                          scope: Optional[list] = None, is_private: bool = False,
                          *, pool: Optional[KeyPool] = None, account: Optional[dict] = None,
                          user_name: Optional[str] = None):
+    from study_quality import pdf_request, PDF_INSTRUCTIONS
+    file_mode = bool(FILE_REQ_RE.search(user_text or "")) or pdf_request(user_text)
     target_pool = pool or globals()["pool"]
     pref_model = (account.get("preferred_model") if account else None) or GEMINI_MODEL
     allow_fallback = account.get("model_fallback", True) if account else True
@@ -1703,13 +1756,15 @@ async def generate_reply(history: list, user_text: str, extra_parts: Optional[li
             scope or [], is_private, current_topic, last_files_names,
             account=account, user_name=user_name,
         ),
-        tools=[build_post_tool(scope or [])] if use_tools else None,
+        tools=[build_post_tool(scope or [])] if use_tools else ([genai_types.Tool(function_declarations=[d for d in build_post_tool([]).function_declarations if d.name == "create_file"])] if file_mode else None),
         temperature=0.7,
     )
-    file_mode = bool(FILE_REQ_RE.search(user_text or ""))
     if file_mode:
-        config.temperature = 0.3  # документы и таблицы — без творчества
-    req_timeout = 40 if file_mode else REQUEST_TIMEOUT_SEC
+        config.temperature = 0.3
+        config.max_output_tokens = 16384
+        if pdf_request(user_text):
+            config.system_instruction = str(config.system_instruction) + "\n" + PDF_INSTRUCTIONS
+    req_timeout = 90 if file_mode else REQUEST_TIMEOUT_SEC
     last_err = None
 
     for model_name in target_pool.get_model_order(pref_model=pref_model, allow_fallback=allow_fallback):
@@ -1733,6 +1788,11 @@ async def generate_reply(history: list, user_text: str, extra_parts: Optional[li
                     "✅ %s ответила за %.1f c (ключ #%d, инструменты: %s)",
                     model_name, time.monotonic() - t0, idx + 1, "да" if use_tools else "нет",
                 )
+                if file_mode and pdf_request(user_text):
+                    try:
+                        await improve_pdf_response(resp, user_text, contents, target_pool.client(idx), model_name, config)
+                    except Exception:
+                        log.warning("PDF completeness check failed", exc_info=True)
                 return resp
             except Exception as e:
                 last_err = e
@@ -3002,6 +3062,8 @@ def build_pptx(title: str, blocks: list) -> bytes:
 
 def build_document(fmt: str, title: str, content: str) -> tuple:
     """Возвращает (байты, имя файла, mime). Выполняется в потоке — тяжёлые библиотеки грузятся лениво."""
+    if fmt == "pdf" and len(content) > 80000:
+        raise ValueError("Документ слишком большой для одного файла (80000 символов). Раздели его на части.")
     blocks = parse_markdown(content[:80000])
     base = re.sub(r"\s+", "_", clean_filename(plain_text(title)))[:60].strip("._") or "document"
     if fmt == "texpdf":

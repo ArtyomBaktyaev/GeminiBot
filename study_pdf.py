@@ -11,6 +11,8 @@ import re
 from string import Template
 from threading import BoundedSemaphore
 import tokenize
+import unicodedata
+import base64
 from urllib.parse import urlsplit
 from xml.etree import ElementTree as ET
 
@@ -38,6 +40,15 @@ def formula(tex, display=False):
                 if node.tag not in MATH_TAGS:
                     raise ValueError("Unsupported MathML element")
                 node.attrib = {k: v for k, v in node.attrib.items() if k in MATH_ATTRS}
+                # Greek capitals such as mathematical italic Delta are absent in some Render fonts.
+                if node.tag == "mi" and node.text:
+                    normalized = unicodedata.normalize("NFKC", node.text)
+                    if normalized == "∆":
+                        normalized = "Δ"
+                    if len(normalized) == 1 and "GREEK CAPITAL" in unicodedata.name(normalized, ""):
+                        node.text = normalized
+                        node.set("mathvariant", "normal")
+                        node.set("class", "math-greek-capital")
             return ET.tostring(root, encoding="unicode", method="html")
         except Exception:
             pass
@@ -109,7 +120,23 @@ def code_block(block):
 CALLOUTS = {"определение": "def-block", "теорема": "theorem-block", "доказательство": "proof-block",
             "пример": "example-block", "важно": "callout-important", "запомни": "callout-remember",
             "вывод": "callout-conclusion"}
-CALLOUT = re.compile(r"^(?:\*\*)?(" + "|".join(CALLOUTS) + r")(?:\s+([\d.]+))?\s*[:.]\s*(?:\*\*)?\s*(.*)$", re.I | re.S)
+CALLOUT = re.compile(r"^(?:\*\*)?(" + "|".join(CALLOUTS) + r")(?:\s+(\d+(?:\.\d+)*))?(?:\s*\(([^)\n]{1,100})\))?(?:\*\*)?\s*[:.]\s*(?:\*\*)?\s*(.*)$", re.I | re.S)
+
+
+def readable_title(title):
+    title = str(title).strip()
+    # Only normalize filename-like prose; leave mathematical subscripts alone.
+    if "$" not in title and "\\(" not in title and "_" in title and " " not in title:
+        title = title.replace("_", " ")
+    return title or "Учебный материал"
+
+
+def heading_text(text):
+    return re.sub(r"^\s*\d+(?:\.\d+)*(?:[.)]\s+|\s+(?=[А-ЯA-Z]))", "", str(text)).strip()
+
+
+def title_key(text):
+    return re.sub(r"[\W_]+", " ", readable_title(text).casefold()).strip()
 
 
 def opener(num, title, kicker, anchor=""):
@@ -121,7 +148,11 @@ def opener(num, title, kicker, anchor=""):
 def document_html(title, blocks):
     rich = inline
 
-    blocks = list(blocks)
+    title = readable_title(title)
+    blocks = [dict(b) for b in blocks]
+    for b in blocks:
+        if b["t"] == "h":
+            b["text"] = heading_text(b["text"])
     meta = {}
     if blocks and blocks[0].get("lang") == "study":
         try:
@@ -136,8 +167,15 @@ def document_html(title, blocks):
                 blocks.pop(0)
         except ValueError:
             pass
-    if blocks and blocks[0]["t"] == "h" and blocks[0]["text"].strip() == title.strip():
+    if blocks and blocks[0]["t"] == "h" and title_key(blocks[0]["text"]) == title_key(title):
         blocks.pop(0)
+    # Drop empty subtitle headings and move a leading annotation onto the cover.
+    while len(blocks) > 1 and blocks[0]["t"] == "h" and re.match(r"^(?:учебное пособие|учебный конспект)(?: для|$)", blocks[0]["text"], re.I) and blocks[1]["t"] == "h":
+        blocks.pop(0)
+    if len(blocks) > 1 and blocks[0]["t"] == "h" and blocks[0]["text"].casefold() == "аннотация" and blocks[1]["t"] == "p":
+        meta.setdefault("subtitle", blocks[1]["text"])
+        if len(blocks[1]["text"]) <= 260:
+            del blocks[:2]
     level = min((b["lvl"] for b in blocks if b["t"] == "h"), default=1)
     if not blocks or blocks[0]["t"] != "h":
         blocks.insert(0, {"t": "h", "lvl": level, "text": "Основной материал"})
@@ -160,7 +198,7 @@ def document_html(title, blocks):
                 data = json.loads(txt)
                 drawing = (plot if lang == "plot" else diagram)(data)
                 caption = label(data["title"])
-            except (KeyError, TypeError, ValueError, OverflowError, RecursionError):
+            except (KeyError, TypeError, ValueError, ArithmeticError, RecursionError):
                 flush_figures()
                 sections.append(code_block(b))
                 continue
@@ -192,10 +230,10 @@ def document_html(title, blocks):
                 tag = "blockquote" if kind == "quote" else "p"
                 sections.append(f'<{tag}>{rich(txt)}</{tag}>')
                 continue
-            name, number, body = m.groups()
+            name, number, subject, body = m.groups()
             style = CALLOUTS[name.lower()]
             tag = "callout-tag" if style.startswith("callout-") else "block-kicker"
-            label_text = escape(name + (" " + number if number else ""))
+            label_text = escape(name + (" " + number if number else "") + (" · " + subject if subject else ""))
             sections.append(f'<div class="{style}"><span class="{tag}">{label_text}</span> {rich(body)}')
             while i < len(blocks) and blocks[i]["t"] == "math":
                 equation += 1
@@ -208,7 +246,24 @@ def document_html(title, blocks):
                                     f'<span>{rich(step["text"])}</span></div>')
                     i += 1
             if name.lower() == "доказательство":
-                sections.append('<span class="qed">■</span>')
+                # Keep consecutive proof steps and the concluding paragraph together.
+                while i < len(blocks):
+                    step = blocks[i]
+                    if step["t"] in ("p", "quote") and CALLOUT.match(step["text"]):
+                        break
+                    if step["t"] not in ("p", "quote", "li", "math"):
+                        break
+                    if step["t"] == "math":
+                        equation += 1
+                        sections.append(display_math(step["text"], major, equation))
+                    elif step["t"] == "li":
+                        marker = str(step["num"]) + "." if step["ordered"] else "•"
+                        sections.append(f'<p class="proof-step"><b>{marker}</b> {rich(step["text"])}</p>')
+                    else:
+                        sections.append(f'<p>{rich(step["text"])}</p>')
+                    i += 1
+                    if step.get("text", "").rstrip().endswith(("□", "■", "∎")):
+                        break
             sections.append('</div>')
         elif kind == "math":
             equation += 1
@@ -262,12 +317,16 @@ def document_html(title, blocks):
            + '<div><div class="toc-title">Разделы и подразделы</div><ul class="toc-list">' + "".join(toc) + '</ul></div>'
            + '<h3><span class="sub-num">§</span>Условные обозначения и навигация по блокам</h3>' + guide)
     css = "\n".join((ASSETS / f).read_text(encoding="utf8") for f in ("template.css", "print.css"))
+    font = ASSETS.parent / "fonts" / "DejaVuSans.ttf"
+    if font.is_file() and any("math-greek-capital" in part for part in sections):
+        encoded = base64.b64encode(font.read_bytes()).decode("ascii")
+        css += "\n@font-face{font-family:StudyGreek;src:url(data:font/ttf;base64," + encoded + ") format('truetype');} math .math-greek-capital{font-family:StudyGreek,sans-serif!important;}"
     for num, name, _, _ in chapters:
         # Encode all characters of the heading, including quotes and '<', inside the CSS string.
         value = "".join("\\" + format(ord(ch), "x") + " " for ch in name[:48].upper())
         css += f'\n@page chapter{int(num)} {{ @top-right {{ content: "{num} · {value}"; }} }}'
     return (f'<!doctype html><html lang="ru"><head><meta charset="utf-8"><title>{escape(title)}</title>'
-            '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; style-src \'unsafe-inline\'">'
+            '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; style-src \'unsafe-inline\'; font-src data:">'
             f'<style>{css}</style></head><body><section class="cover">{cover}</section>'
             f'<section class="navigation">{nav}</section>{"".join(sections)}</body></html>')
 
@@ -304,6 +363,7 @@ def render_pdf(title, blocks):
             address = "https://study.invalid/document"
             page.route(address, lambda route: route.fulfill(content_type="text/html; charset=utf-8", body=html))
             page.goto(address, wait_until="load", timeout=15000)
+            page.evaluate("() => document.fonts.ready")
             # MathML is atomic in Chromium. Fit long expressions to the actual
             # column (including table cells) before measuring destinations.
             page.evaluate("""() => {

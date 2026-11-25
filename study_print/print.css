@@ -75,3 +75,9 @@ figure .legend svg { width: 17px; height: 5px; }
 .branches li { position: relative; margin: 5px 0; background: var(--bg-tint-soft); border: .6pt solid var(--border-hairline); }
 .branches li::before { content: ""; position: absolute; width: 10px; border-top: 1pt solid #6CA591; left: -11px; top: 50%; }
 .code-line { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* Content-flow improvements, without changing the original design tokens. */
+.proof-block,.def-block,.theorem-block,.example-block { break-inside: avoid-page; }
+.proof-block p { widows: 3; orphans: 3; }
+.proof-block .proof-step { margin: 5px 0; }
+.math-greek-capital { font-style: normal; }

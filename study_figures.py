@@ -18,6 +18,8 @@ def numbers(values):
 
 
 def plot(data):
+    from study_plot_expr import expand_plot
+    data = expand_plot(data)
     xs = numbers(data["x"])
     series = data["series"]
     if not isinstance(series, list) or not 1 <= len(series) <= 5:
@@ -50,6 +52,11 @@ def plot(data):
         val = lo + (hi - lo) * i / 3
         parts.append(f'<text x="{x(val):.2f}" y="139" text-anchor="middle">{val:.3g}</text>')
     parts.append('<path d="M38 12V122H292" fill="none" stroke="#68756F"/>')
+    if low <= 0 <= high:
+        parts.append(f'<path d="M38 {y(0):.2f}H292" stroke="#68756F" stroke-width=".8"/>')
+    if lo <= 0 <= hi:
+        parts.append(f'<path d="M{x(0):.2f} 12V122" stroke="#68756F" stroke-width=".8"/>')
+    parts.append('<text x="301" y="139" text-anchor="end">x</text><text x="15" y="12">y</text>')
     colors = ("#18221F", "#245E51", "#52997E", "#68756F", "#327E8A")
     dashes = ("none", "6 3", "2 2", "8 2 2 2", "3 5")
     keys = []
