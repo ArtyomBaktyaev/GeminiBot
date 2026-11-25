@@ -1694,6 +1694,7 @@ async def improve_pdf_response(resp, user_text, contents, client, model_name, co
     """At most one extra completion. Preserve the draft if the repair fails."""
     from study_quality import document_issues, response_text, attach_warning
     from study_layout import stamp_page_target
+    from study_polish import stamp_profile
     candidate = resp.candidates[0] if resp.candidates else None
     parts = getattr(getattr(candidate, "content", None), "parts", None) or []
     repair_budget = 1
@@ -1710,12 +1711,12 @@ async def improve_pdf_response(resp, user_text, contents, client, model_name, co
         if "MAX_TOKENS" in reason:
             issues.append("Первоначальная генерация достигла лимита токенов")
         if not issues:
-            args["content"] = stamp_page_target(original, user_text)
+            args["content"] = stamp_profile(stamp_page_target(original, user_text), user_text)
             call.args = args
             continue
         if not repair_budget:
             attach_warning(args, issues)
-            args["content"] = stamp_page_target(str(args.get("content") or ""), user_text)
+            args["content"] = stamp_profile(stamp_page_target(str(args.get("content") or ""), user_text), user_text)
             call.args = args
             continue
         repair_budget -= 1
@@ -1741,7 +1742,7 @@ async def improve_pdf_response(resp, user_text, contents, client, model_name, co
         except Exception:
             log.warning("Не удалось дополнить PDF; сохраняем черновик", exc_info=True)
         attach_warning(args, issues)
-        args["content"] = stamp_page_target(str(args.get("content") or ""), user_text)
+        args["content"] = stamp_profile(stamp_page_target(str(args.get("content") or ""), user_text), user_text)
         call.args = args
     return resp
 
@@ -3102,6 +3103,9 @@ async def handle_create_file(message: types.Message, scope: list, is_private: bo
     try:
         async with chat_action(message.chat.id, ChatAction.UPLOAD_DOCUMENT, message.message_thread_id):
             data, filename, _ = await asyncio.to_thread(build_document, fmt, title, content)
+        if fmt == "pdf":
+            from study_polish import pdf_notice, add_notice
+            caption = add_notice(caption, pdf_notice(data, content))
         doc = BufferedInputFile(data, filename=filename)
         cap_html = md_to_html(caption[:900]) if caption else None
 
@@ -3568,7 +3572,11 @@ async def cb_generate_doc(call: types.CallbackQuery):
         async with chat_action(call.message.chat.id, ChatAction.UPLOAD_DOCUMENT):
             data, filename, _ = await asyncio.to_thread(build_document, fmt, title, content)
             doc = BufferedInputFile(data, filename=filename)
-            await call.message.reply_document(doc, caption=f"Твой ответ · {label}")
+            caption = f"Твой ответ · {label}"
+            if fmt == "pdf":
+                from study_polish import pdf_notice, add_notice
+                caption = add_notice(caption, pdf_notice(data, content))
+            await call.message.reply_document(doc, caption=caption)
     except Exception as e:
         log.exception("cb_generate_doc error")
         await call.message.reply(f"⚠️ Не удалось создать {label}: {e}")

@@ -113,3 +113,17 @@ body[data-density="dense"] .editorial-table td,body[data-density="dense"] .edito
 body[data-density="dense"] .chapter + .chapter { margin-top:12px; }
 body[data-density="dense"] figure.editorial-figure > svg { max-height:43mm; }
 body[data-density="dense"] .proof-block .proof-step { margin:3px 0; }
+
+/* Editorial polish: preserve the v4 visual system. */
+.chapter + .chapter { break-before: page !important; margin-top: 0 !important; }
+.chapter .solution-group.keep-small { break-inside: avoid-page; }
+.solution-group > * + * { margin-top: 12px; }
+body[data-density="compact"] .solution-group > * + * { margin-top: 8px; }
+body[data-density="dense"] .solution-group > * + * { margin-top: 5px; }
+.proof-block > :last-child { orphans: 2; widows: 2; }
+.short-title .document-kind { color: #245E51; font-weight: 700; font-size: 9pt; letter-spacing: .09em; text-transform: uppercase; }
+.short-title p:empty { display:none; }
+.short-title + .chapter { margin-top: 12px; }
+.point-key { gap: 3px 9px; }
+.editorial-table th .study-math mjx-container { color: inherit; }
+.study-formula-location { text-decoration:none; }

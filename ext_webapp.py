@@ -835,7 +835,9 @@ async def api_export(request, user):
 
     data, fname, mime = await asyncio.to_thread(core.build_document, fmt, title, content)
     fid = _store_generated_file(data, fname, mime)
-    return {"ok": True, "id": fid, "name": fname, "size": len(data)}
+    from study_polish import pdf_notice
+    warning = pdf_notice(data, content) if fmt == "pdf" else ""
+    return {"ok": True, "id": fid, "name": fname, "size": len(data), "warning": warning}
 
 
 async def _generate_with_account_pool(acc: dict, user: dict, **kwargs):
@@ -916,6 +918,9 @@ async def api_ask(request, user):
             caption = str(args.get("caption", "") or "").strip()
             if content:
                 data, filename, mime = await asyncio.to_thread(core.build_document, fmt, title, content)
+                if fmt == "pdf":
+                    from study_polish import pdf_notice, add_notice
+                    caption = add_notice(caption, pdf_notice(data, content))
                 fid = _store_generated_file(data, filename, mime)
                 generated_files.append({
                     "id": fid,
@@ -1135,7 +1140,7 @@ async def _handle_menu_cmd(message):
     print(f"--> [TG] Получен /menu от ID={message.from_user.id}", flush=True)
     menu = compact_reply_main_menu()
     await message.answer("Готово, кнопки на месте 👌", reply_markup=menu)
-    
+
 def setup(c) -> None:
     global core
     core = c

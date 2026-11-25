@@ -123,6 +123,35 @@ def mathjax_prepare(page, address):
 
 
 LAYOUT_JS = r"""() => {
+
+    // Keep the statement, short solution and answer together, without locking long solutions.
+    for(const chapter of document.querySelectorAll('.chapter')) {
+      for(const el of [...chapter.children]) {
+        if(!el.classList.contains('example-block') || el.parentElement!==chapter) continue;
+        const first=el.nextElementSibling;
+        if(!first || !/^Решение\s*[:.]/i.test(first.textContent.trim())) continue;
+        const nodes=[el]; let current=first;
+        while(current && nodes.length<60) {
+          if(current.matches('h1,h2,h3,.section-opener,.example-block,.theorem-block,.def-block,.proof-block,.figures,hr')) break;
+          const next=current.nextElementSibling; nodes.push(current);
+          if(current.classList.contains('callout-conclusion')) break;
+          current=next;
+        }
+        const wrap=document.createElement('div');wrap.className='solution-group';
+        el.before(wrap);for(const n of nodes) wrap.append(n);
+      }
+    }
+    for(const node of document.querySelectorAll('.solution-group')) {
+      const h=node.getBoundingClientRect().height;
+      node.classList.toggle('keep-small',h>0&&h<340);
+    }
+    for(const proof of document.querySelectorAll('.proof-block')) {
+      const children=[...proof.children];
+      if(children.length>1 && children.at(-1).getBoundingClientRect().height<100) {
+        children.at(-2).classList.add('keep-next');
+      }
+    }
+
     for(const node of document.querySelectorAll('.chapter p, .proof-block p, .list-row')) {
         const next=node.nextElementSibling;
         if(next && next.classList.contains('math-display') && /[:：]\s*$/.test(node.textContent.trim())) node.classList.add('keep-next');
@@ -165,17 +194,4 @@ def print_fitted(page, target, pdf_reader):
         }""", pages)
         if not changed: break
         data=render()
-    count=len(pdf_reader(BytesIO(data)).pages)
-    if target and not target[0]<=count<=target[1]:
-        page.evaluate("""({a,b})=>{
-          const el=document.querySelector('.volume-note');
-          if(el){el.hidden=false;el.textContent=(el.textContent ? el.textContent+' ' : '')+`Запрошено ${a===b?a:a+'–'+b} стр. Точный объём не достигнут без потери материала или ухудшения читаемости. Фактическое количество указано в колонтитуле.`;}
-        }""", {'a':target[0],'b':target[1]})
-        data=render()
-        # Note may change a page location; update the TOC again.
-        for _ in range(2):
-            d=pdf_reader(BytesIO(data)); p={k.lstrip('/'):str(d.get_destination_page_number(v)+1).zfill(2) for k,v in d.named_destinations.items()}
-            changed=page.locator('.toc-page').evaluate_all('(nodes,pages)=>{let c=false;for(const n of nodes){if(pages[n.dataset.target]&&n.textContent!==pages[n.dataset.target]){n.textContent=pages[n.dataset.target];c=true;}}return c;}',p)
-            if not changed: break
-            data=render()
     return data

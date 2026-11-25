@@ -22,6 +22,7 @@ def plot(data):
     original = data
     data = expand_plot(data)
     from study_graph_marks import nice_ticks, markers
+    from study_polish import coord
     xs = numbers(data["x"])
     series = data["series"]
     if not isinstance(series, list) or not 1 <= len(series) <= 5:
@@ -76,9 +77,7 @@ def plot(data):
         px,py=x(a),y(b)
         parts.append(f'<circle cx="{px:.2f}" cy="{py:.2f}" r="3.4" fill="#245E51" stroke="#FAFAF7" stroke-width="1.1"/>'
                      f'<text x="{max(42,min(286,px+7)):.2f}" y="{max(10,py-6):.2f}" fill="#245E51" font-weight="bold">{i}</text>')
-        a=0 if abs(a)<1e-8 else a
-        b=0 if abs(b)<1e-8 else b
-        point_keys.append(f'<span><b>{i}.</b> {escape(name)} ({a:.4g}; {b:.4g})</span>')
+        point_keys.append(f'<span><b>{i}.</b> {escape(name)} ({coord(a)}; {coord(b)})</span>')
     parts.append('</svg><div class="legend">' + "".join(keys) + '</div>')
     if point_keys:
         parts.append('<div class="point-key">' + ''.join(point_keys) + '</div>')

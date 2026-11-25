@@ -23,6 +23,8 @@ from pypdf import PdfReader
 from study_markdown import inline_tokens, parse_markdown
 from study_figures import plot, diagram, label
 from study_layout import math_slot, mathjax_prepare, page_target, print_fitted
+from study_polish import document_kind, clean_summary
+from study_math_text import mark_formula_locations, add_formula_text
 
 ASSETS = Path(__file__).with_name("study_print")
 SLOT = BoundedSemaphore(1)
@@ -192,6 +194,16 @@ def document_html(title, blocks):
         meta.setdefault("subtitle", blocks[1]["text"])
         if len(blocks[1]["text"]) <= 260:
             del blocks[:2]
+    kind_profile = meta.get("document_kind")
+    if kind_profile not in ("book", "lab", "cheat", "solution", "note"):
+        kind_profile = document_kind("", title, " ".join(b.get("text", "") for b in blocks))
+    short = (target[1] <= 2) if target else kind_profile in ("cheat", "solution", "note")
+    profile_label = {"book":"Учебное пособие", "lab":"Лабораторная работа", "cheat":"Шпаргалка", "solution":"Решение задачи", "note":"Учебная заметка"}[kind_profile]
+    if short:
+        # One main section in compact documents; user headings become subsections.
+        for b in blocks:
+            if b["t"] == "h": b["lvl"] = 2
+        blocks.insert(0, {"t":"h", "lvl":1, "text":"Материал" if kind_profile == "book" else profile_label})
     level = min((b["lvl"] for b in blocks if b["t"] == "h"), default=1)
     if not blocks or blocks[0]["t"] != "h":
         blocks.insert(0, {"t": "h", "lvl": level, "text": "Основной материал"})
@@ -324,9 +336,10 @@ def document_html(title, blocks):
                     f'<div><span class="workflow-title">{rich(goal)}</span> <span class="workflow-desc">— {rich(detail)}</span></div></li>'
                     for i, (goal, detail) in enumerate(meta["goals"], 1)]
     summary = meta.get("subtitle") or next((b["text"] for b in blocks if b["t"] == "p"), "")
+    summary = clean_summary(summary, title, [e[1] for e in entries if e[3]])
     if len(summary) > 260:
         summary = summary[:256].rsplit(" ", 1)[0] + "…"
-    fields = [("Дисциплина", meta.get("subject", title)), ("Формат", meta.get("format", "Учебный конспект")),
+    fields = [("Дисциплина", meta.get("subject", title)), ("Формат", meta.get("format", profile_label)),
               ("Содержание", meta.get("outcomes", f"Разделов — {len(chapters)}, иллюстраций — {figure}."))]
     cover = Template((ASSETS / "cover.html").read_text(encoding="utf8")).substitute(
         year=year, title=rich(title), subtitle=rich(summary), overview="".join(overview),
@@ -354,8 +367,8 @@ def document_html(title, blocks):
     notice = '<p class="volume-note" hidden></p>'
     cover_section = f'<section class="cover">{cover}{notice}</section>'
     nav_section = f'<section class="navigation">{nav}</section>'
-    if target and target[1] <= 2:
-        cover_section = f'<header class="short-title"><h1>{rich(title)}</h1><p>{rich(summary)}</p>{notice}</header>'
+    if short:
+        cover_section = f'<header class="short-title"><div class="document-kind">{escape(profile_label)}</div><h1>{rich(title)}</h1>{notice}</header>'
         nav_section = ''
     return (f'<!doctype html><html lang="ru"><head><meta charset="utf-8"><title>{escape(title)}</title>'
             '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'self\'; style-src \'unsafe-inline\'; font-src data:">'
@@ -399,7 +412,15 @@ def render_pdf(title, blocks):
             if errors:
                 # Preserve formulas we cannot render instead of quietly deleting them.
                 page.evaluate("""(n)=>{const note=document.querySelector('.volume-note');if(note){note.hidden=false;note.textContent=`${n} формул не удалось обработать MathJax. Для них сохранён исходник или резервная вёрстка.`;}}""", errors)
-            return print_fitted(page, page_target(blocks), PdfReader)
+            prefix, formulas = mark_formula_locations(page)
+            data = print_fitted(page, page_target(blocks), PdfReader)
+            try:
+                return add_formula_text(data, formulas, prefix)
+            except Exception:
+                import logging
+                logging.getLogger(__name__).exception("Unable to add searchable formula source; preserving visual PDF")
+                page.locator(".study-formula-location").evaluate_all("nodes => nodes.forEach(n=>n.remove())")
+                return print_fitted(page, page_target(blocks), PdfReader)
         finally:
             browser.close()
 

@@ -977,7 +977,7 @@ window.onerror = function(msg, src, line) {
 };
 </script>
 <script>
-   
+
 "use strict";
 
 const NL = String.fromCharCode(10);
@@ -1023,7 +1023,7 @@ if (tg) {
     } catch (e) {}
   }
 }
-   
+
 /* =========================================================
    APPEARANCE ENGINE (ТЕМА, ШРИФТ, МАСШТАБ ЭКРАНА)
    ========================================================= */
@@ -1532,6 +1532,7 @@ async function exportMessageDoc(text, fmt) {
     });
     if (fileObj && fileObj.id) {
       previewFileModal(fileObj);
+      if (fileObj.warning) toast(fileObj.warning, "info");
     } else {
       toast("Не удалось создать документ", "err");
     }
@@ -1773,7 +1774,7 @@ function drawNav() {
     }, icSpan, label);
   }));
 }
-   
+
 async function render() {
   syncBackProtection();
   if (S.timerInterval) { clearInterval(S.timerInterval); S.timerInterval = null; }
