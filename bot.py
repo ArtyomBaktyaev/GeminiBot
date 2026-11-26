@@ -690,6 +690,8 @@ def make_response_action_kb(msg_id: int) -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="📄 PDF", callback_data=f"doc_pdf:{msg_id}"),
             InlineKeyboardButton(text="📝 Word", callback_data=f"doc_docx:{msg_id}"),
         ], [
+            InlineKeyboardButton(text="📝 Оформить в MD", callback_data=f"doc_md:{msg_id}"),
+        ], [
             InlineKeyboardButton(text="📐 LaTeX (.tex)", callback_data=f"doc_tex:{msg_id}"),
             InlineKeyboardButton(text="Собрать TeX → PDF", callback_data=f"doc_texpdf:{msg_id}"),
         ]
@@ -1660,11 +1662,11 @@ def build_post_tool(scope: list) -> genai_types.Tool:
         },
     }, {
         "name": "create_file",
-        "description": "Создаёт файл PDF / Word (docx) / LaTeX (.tex) / Excel (xlsx) / PowerPoint (pptx) с готовым ответом и отправляет его в чат.",
+        "description": "Создаёт файл PDF / Markdown (.md) / Word (docx) / LaTeX (.tex) / Excel (xlsx) / PowerPoint (pptx) с готовым ответом и отправляет его в чат.",
         "parameters": {
             "type": "OBJECT",
             "properties": {
-                "format": {"type": "STRING", "enum": ["pdf", "docx", "xlsx", "pptx", "tex"],
+                "format": {"type": "STRING", "enum": ["pdf", "docx", "xlsx", "pptx", "tex", "md"],
                            "description": "Формат файла."},
                 "title": {"type": "STRING", "description": "Название документа (оно же имя файла)."},
                 "content": {"type": "STRING",
@@ -2241,8 +2243,9 @@ async def ask_gemini(
 # =====================================================================
 # 9b. ГЕНЕРАЦИЯ ФАЙЛОВ: PDF / DOCX / XLSX / PPTX (ответ Gemini -> красивый документ)
 # =====================================================================
-FILE_REQ_RE = re.compile(r"\b(в\s+(?:ворд|word|docx|эксел|excel|xlsx|пдф|pdf|latex|латех|tex)|(?:latex|латех|tex)|сделай\s+(?:презентац|файл|pdf|docx|pptx|xlsx))\b", re.I)
+FILE_REQ_RE = re.compile(r"\b(в\s+(?:ворд|word|docx|эксел|excel|xlsx|пдф|pdf|latex|латех|tex|markdown|md)|(?:latex|латех|tex)|сделай\s+(?:презентац|файл|pdf|docx|pptx|xlsx|markdown|md))\b|\.md\b", re.I)
 FORMAT_ALIASES = {
+    "md": "md", "markdown": "md",
     "pdf": "pdf", "пдф": "pdf",
     "docx": "docx", "doc": "docx", "word": "docx", "ворд": "docx",
     "xlsx": "xlsx", "xls": "xlsx", "excel": "xlsx", "эксель": "xlsx", "эксел": "xlsx",
@@ -2250,6 +2253,7 @@ FORMAT_ALIASES = {
     "tex": "tex", "latex": "tex", "латех": "tex", "текс": "tex",
 }
 FORMAT_MIME = {
+    "md": "text/markdown; charset=utf-8",
     "pdf": "application/pdf",
     "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -3129,8 +3133,11 @@ def build_document(fmt: str, title: str, content: str) -> tuple:
     """Возвращает (байты, имя файла, mime). Выполняется в потоке — тяжёлые библиотеки грузятся лениво."""
     if fmt in ("pdf", "texpdf") and len(content) > 80000:
         raise ValueError("Документ слишком большой для одного файла (80000 символов). Раздели его на части.")
-    blocks = parse_markdown(content[:80000])
     base = re.sub(r"\s+", "_", clean_filename(plain_text(title)))[:60].strip("._") or "document"
+    if fmt == "md":
+        from study_markdown_export import markdown_bytes
+        return markdown_bytes(content), f"{base}.md", FORMAT_MIME["md"]
+    blocks = parse_markdown(content[:80000])
     if fmt == "texpdf":
         from tex_export import compile_tex
         return compile_tex(build_latex(title, blocks)), f"{base}_LaTeX.pdf", "application/pdf"
@@ -3148,7 +3155,7 @@ async def handle_create_file(message: types.Message, scope: list, is_private: bo
     caption = str(args.get("caption", "") or "").strip()
     where = str(args.get("where", "") or "")
     if not fmt:
-        await message.reply("Такой формат не поддерживается. Доступны: PDF, LaTeX (.tex), Word (docx), Excel (xlsx), PowerPoint (pptx).")
+        await message.reply("Такой формат не поддерживается. Доступны: PDF, Markdown (.md), LaTeX (.tex), Word (docx), Excel (xlsx), PowerPoint (pptx).")
         return "[файл не создан: неизвестный формат]"
     if not content:
         await message.reply("Не получилось подготовить содержимое файла. Повтори просьбу.")
@@ -3632,7 +3639,7 @@ async def cb_set_model(call: types.CallbackQuery):
     )
 
 
-@dp.callback_query(F.data.startswith("doc_pdf:") | F.data.startswith("doc_docx:") | F.data.startswith("doc_tex:") | F.data.startswith("doc_texpdf:"))
+@dp.callback_query(F.data.startswith("doc_pdf:") | F.data.startswith("doc_docx:") | F.data.startswith("doc_tex:") | F.data.startswith("doc_texpdf:") | F.data.startswith("doc_md:"))
 async def cb_generate_doc(call: types.CallbackQuery):
     started = time.monotonic()
     action = call.data.partition(":")[0]
@@ -3645,6 +3652,7 @@ async def cb_generate_doc(call: types.CallbackQuery):
     fmt_map = {
         "doc_pdf": ("pdf", "📄 PDF"),
         "doc_docx": ("docx", "📝 Word"),
+        "doc_md": ("md", "Markdown (.md)"),
         "doc_texpdf": ("texpdf", "PDF из LaTeX"),
         "doc_tex": ("tex", "📐 LaTeX (.tex)"),
     }

@@ -895,8 +895,8 @@ async def _api_export(request, user):
     title = str(body.get("title") or "Ответ").strip()
     if not content:
         return {"error": "Текст для экспорта пуст"}
-    if fmt not in ("pdf", "docx", "tex", "texpdf"):
-        return {"error": f"Формат {fmt} не поддерживается (доступны: pdf, docx, tex, texpdf)"}
+    if fmt not in ("pdf", "docx", "tex", "texpdf", "md"):
+        return {"error": f"Формат {fmt} не поддерживается (доступны: pdf, docx, tex, texpdf, md)"}
 
     data, fname, mime = await asyncio.to_thread(core.build_document, fmt, title, content)
     fid = _store_generated_file(data, fname, mime)
