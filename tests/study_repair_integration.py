@@ -1,4 +1,5 @@
 """Full integration test, runs against the actual cloned project's PDF renderer."""
+import asyncio
 import sys
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
@@ -8,6 +9,7 @@ from study_markdown import parse_markdown
 from study_layout import stamp_page_target
 from study_polish import stamp_profile
 from study_render_worker import render_bounded
+from study_deadline import PdfBudget, size_seconds
 from study_clean import normalize_blocks
 from study_pdf import document_html
 
@@ -22,7 +24,9 @@ assert 'Привет!' not in html and 'Вот доработанный вари
 assert 'class="code-lang">study' not in html
 assert html.count('class="editorial-figure"')==3
 assert 'figure.editorial-figure svg {' not in html, 'Global chart SVG style is still present'
-data=render_bounded(TITLE,blocks)
+budget = PdfBudget(size_seconds(request))
+data = asyncio.run(budget.run(lambda: asyncio.to_thread(render_bounded, TITLE, blocks)))
+assert budget.seconds == 600
 reader=PdfReader(BytesIO(data)); count=len(reader.pages)
 assert 5<=count<=8,f'Unexpected page count: {count}'
 found={key.lstrip('/'):reader.get_destination_page_number(dest) for key,dest in reader.named_destinations.items()}

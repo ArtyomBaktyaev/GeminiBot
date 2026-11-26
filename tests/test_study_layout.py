@@ -1,5 +1,6 @@
 import json
 import math
+import re
 import unittest
 from study_layout import requested_page_range, stamp_page_target, page_target, volume_issues, math_slot
 from study_graph_marks import nice_ticks, markers
@@ -31,6 +32,8 @@ class LayoutTests(unittest.TestCase):
         self.assertEqual(nice_ticks(-2.4,2.4),[-2,-1,0,1,2])
     def test_explicit(self):
         data={'title':'Касательная','domain':[-2,2],'series':[{'name':'f','expr':'x*x'}],'points':[{'x':1,'label':'Касание'}]}
-        self.assertIn('Касание (1; 1)',plot(data))
+        drawing = plot(data)
+        self.assertIn('Касание (1; 1)', re.sub(r'<[^>]+>', '', drawing))
+        self.assertIn('data-tex="', drawing.split('class="point-key"', 1)[1])
 
 if __name__=='__main__': unittest.main()

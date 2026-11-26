@@ -115,6 +115,31 @@ class Exports(unittest.TestCase):
                 page.goto("https://study.invalid/app")
                 rendered = page.evaluate("h('div', {}, null, [false, undefined, 'A', 0]).textContent")
                 self.assertEqual(rendered, "A0")
+                # Drive the production polling loop with a virtual monotonic clock.
+                poll = page.evaluate("""async () => {
+                  let now = 0, posts = 0, polls = 0;
+                  const once = apiOnce, sleep = window.setTimeout;
+                  Object.defineProperty(performance, 'now', {configurable:true, value:() => now});
+                  window.setTimeout = (fn, ms) => { now += ms; fn(); };
+                  apiOnce = async (path, opts) => {
+                    if (path.endsWith('/start')) {
+                      posts++; return {job_id:'x',budget_ms:900000,remaining_ms:900000};
+                    }
+                    polls++;
+                    if (opts.timeoutMs > 900000-now) throw Error('Exceeded budget');
+                    if (polls === 1) throw Object.assign(Error('offline'), {transient:true});
+                    if (now > 600000) return {state:'done', result:{answer:'done'}};
+                    return {state:'running',remaining_ms:900000-now};
+                  };
+                  try {
+                    const result = await api('/api/ask', {method:'POST'});
+                    return [result.answer, posts, now];
+                  } finally {
+                    apiOnce = once; window.setTimeout = sleep; delete performance.now;
+                  }
+                }""")
+                self.assertEqual(poll[:2], ["done", 1])
+                self.assertGreater(poll[2], 600000)
                 page.evaluate("openGuide()")
                 self.assertEqual(page.locator(".tour-layer").count(), 1)
                 page.locator(".tour-skip").click()

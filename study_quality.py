@@ -1,6 +1,7 @@
 """Bounded, data-only checks for educational PDFs; no model-supplied code execution."""
 import json
 import re
+from study_deadline import minimum_words
 from study_markdown import parse_markdown
 from study_figures import plot, diagram, label
 from study_layout import volume_issues, requested_page_range
@@ -57,6 +58,14 @@ def document_issues(request, content):
     prose = "\n".join(b.get("text", "") for b in blocks if b["t"] in ("p", "quote", "li"))
     words = len(re.findall(r"\b[^\W\d_]{2,}\b", prose))
     issues = volume_issues(request, words, blocks)
+    requested_words = minimum_words(request)
+    if requested_words:
+        # Include headings and table cells in the estimate, excluding code and metadata.
+        body = " ".join(" ".join(" ".join(row) for row in b["rows"]) if b["t"] == "table"
+                        else b.get("text", "") for b in blocks if b["t"] != "code")
+        actual = len(re.findall(r"\b\w+\b", body))
+        if actual < requested_words * .85:
+            issues.append(f"Текст заметно короче запроса: около {actual} слов при запросе {requested_words}")
     pages = requested_min_pages(request)
     # This is a lower bound on substance, not a claim about the actual page count.
     if pages >= 5 and words < max(250, (pages - 2) * 180):
@@ -105,5 +114,6 @@ def attach_warning(args, issues):
     if not issues:
         return
     warning = "Автопроверка выявила неполноту: " + "; ".join(issues) + "."
-    args["caption"] = (str(args.get("caption") or "") + "\n⚠️ " + warning).strip()[:900]
+    args["_pdf_incomplete"] = True
+    args["caption"] = ("⚠️ Черновик. " + warning)[:900]
     # Diagnostics belong in the caption, not in the educational material.

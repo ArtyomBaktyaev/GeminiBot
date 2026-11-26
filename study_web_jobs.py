@@ -3,6 +3,15 @@ import asyncio
 import logging
 import time
 import uuid
+from contextvars import ContextVar
+
+ACTIVE_JOB = ContextVar("active_study_job", default=None)
+
+
+def announce_pdf(budget):
+    job = ACTIVE_JOB.get()
+    if job is not None:
+        job.update(started=budget.started, end=budget.end)
 
 LOG = logging.getLogger("study.jobs")
 
@@ -17,10 +26,10 @@ class JobStore:
     def prune(self):
         now = time.monotonic()
         for key, job in list(self.items.items()):
-            if job["state"] != "running" and now - job["finished"] > self.ttl:
+            if job["state"] != "running" and now - job["finished"] >= self.ttl:
                 self.items.pop(key, None)
 
-    def start(self, owner, kind, work):
+    def start(self, owner, kind, work, *, budget=None):
         self.prune()
         active = [j for j in self.items.values() if j["state"] == "running"]
         if any(j["owner"] == owner for j in active):
@@ -28,10 +37,12 @@ class JobStore:
         if len(active) >= self.max_active or len(self.items) >= self.max_records:
             return {"error": "Сервер занят. Повтори запрос немного позже."}
         key = uuid.uuid4().hex
-        job = {"owner": owner, "kind": kind, "state": "running", "started": time.monotonic()}
+        job = {"owner": owner, "kind": kind, "state": "running", "started": budget.started if budget else time.monotonic(),
+               "end": budget.end if budget else None}
         self.items[key] = job
 
         async def run():
+            token = ACTIVE_JOB.set(job)
             LOG.info("Web job %s %s started", key[:8], kind)
             try:
                 result = await work()
@@ -48,11 +59,12 @@ class JobStore:
                 job["state"] = "error"
                 job["result"] = {"error": "Сбой обработки запроса. Код диагностики: " + key[:8]}
             finally:
+                ACTIVE_JOB.reset(token)
                 job["finished"] = time.monotonic()
                 LOG.info("Web job %s %s %s after %.1fs", key[:8], kind, job["state"], job["finished"] - job["started"])
 
         job["task"] = asyncio.create_task(run())
-        return {"job_id": key, "state": "running"}
+        return self.status(owner, key)
 
     def status(self, owner, key):
         self.prune()
@@ -60,6 +72,9 @@ class JobStore:
         if not job or job["owner"] != owner:
             return {"error": "Запрос не найден: возможно, сервер перезапустился или результат устарел."}
         result = {"job_id": key, "state": job["state"], "elapsed": round(time.monotonic() - job["started"])}
+        if job["end"] is not None:
+            result["budget_ms"] = round(1000 * (job["end"] - job["started"]))
+            result["remaining_ms"] = max(0, int(1000 * (job["end"] - time.monotonic())))
         if job["state"] != "running":
             result["result"] = job["result"]
         return result

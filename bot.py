@@ -60,6 +60,9 @@ from urllib.parse import urlsplit
 
 import aiohttp
 from aiohttp import web
+from functools import wraps
+from study_deadline import CURRENT, LATE_PDF, PdfBudget, PdfExpired, run_unclassified, size_seconds
+from study_quality import pdf_request
 from study_markdown import inline_tokens, parse_markdown
 
 from aiogram import Bot, Dispatcher, F, types
@@ -67,6 +70,7 @@ from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.enums import ChatAction, ParseMode
 from aiogram.exceptions import (
     TelegramBadRequest,
+    TelegramNetworkError,
     TelegramConflictError,
     TelegramRetryAfter,
 )
@@ -1706,7 +1710,10 @@ async def improve_pdf_response(resp, user_text, contents, client, model_name, co
         if str(args.get("format", "")).lower() not in ("pdf", "пдф"):
             continue
         original = str(args.get("content") or "")
-        issues = document_issues(user_text, original)
+        budget = CURRENT.get()
+        if budget:
+            budget.draft = original[:80000]
+        issues = await asyncio.to_thread(document_issues, user_text, original)
         reason = str(getattr(candidate, "finish_reason", ""))
         if "MAX_TOKENS" in reason:
             issues.append("Первоначальная генерация достигла лимита токенов")
@@ -1720,6 +1727,8 @@ async def improve_pdf_response(resp, user_text, contents, client, model_name, co
             call.args = args
             continue
         repair_budget -= 1
+        if budget:
+            budget.enter("доработка Gemini")
         try:
             repair_config = genai_types.GenerateContentConfig(
                 system_instruction=config.system_instruction,
@@ -1730,14 +1739,16 @@ async def improve_pdf_response(resp, user_text, contents, client, model_name, co
                       "Сохрани правильные данные, добавь недостающие разделы, реальные plot/diagram, решения и объяснения. "
                       "Исходный запрос выше. Недочёты:\n- " + "\n- ".join(issues) + "\n\nЧЕРНОВИК:\n" + original[:40000])
             repair_started=time.monotonic()
-            repair_timeout=min(45, max(1,deadline-time.monotonic())) if deadline is not None else 45
+            repair_timeout = budget.available(deadline) if budget else 45
+            if budget:
+                repair_config.http_options = genai_types.HttpOptions(timeout=int(repair_timeout * 1000))
             log.info("PDF content repair start; budget %.1fs; %d issues",repair_timeout,len(issues))
             repaired = await asyncio.wait_for(client.aio.models.generate_content(
                 model=model_name, contents=[*contents, prompt], config=repair_config), timeout=repair_timeout)
             log.info("PDF content repair done %.1fs",time.monotonic()-repair_started)
             new = response_text(repaired)
             if new and len(new) <= 80000:
-                new_issues = document_issues(user_text, new)
+                new_issues = await asyncio.to_thread(document_issues, user_text, new)
                 if "MAX_TOKENS" in str(getattr(repaired.candidates[0], "finish_reason", "")):
                     new_issues.append("Повторная генерация достигла лимита токенов")
                 if len(new_issues) < len(issues) or (len(new_issues) == len(issues) and (
@@ -1757,7 +1768,7 @@ async def generate_reply(history: list, user_text: str, extra_parts: Optional[li
                          scope: Optional[list] = None, is_private: bool = False,
                          *, pool: Optional[KeyPool] = None, account: Optional[dict] = None,
                          user_name: Optional[str] = None):
-    from study_quality import pdf_request, PDF_INSTRUCTIONS
+    from study_quality import PDF_INSTRUCTIONS, attach_warning
     from study_layout import page_budget_hint
     file_mode = bool(FILE_REQ_RE.search(user_text or "")) or pdf_request(user_text)
     target_pool = pool or globals()["pool"]
@@ -1778,15 +1789,18 @@ async def generate_reply(history: list, user_text: str, extra_parts: Optional[li
         if pdf_request(user_text):
             config.system_instruction = str(config.system_instruction) + "\n" + PDF_INSTRUCTIONS + page_budget_hint(user_text)
     req_timeout = 90 if file_mode else REQUEST_TIMEOUT_SEC
-    pdf_deadline = time.monotonic()+135 if pdf_request(user_text) else None
-    if pdf_deadline is not None: log.info("PDF request started; Gemini total budget 135s")
+    budget = CURRENT.get()
+    pdf_deadline = budget.model_end if budget else None
     last_err = None
 
     for model_name in target_pool.get_model_order(pref_model=pref_model, allow_fallback=allow_fallback):
         timeouts_on_model = 0
         for _ in range(len(target_pool.keys)):
-            if pdf_deadline is not None and pdf_deadline-time.monotonic()<2:
-                raise RuntimeError("Превышено время ожидания Gemini для PDF. Повтори запрос или сократи объём.")
+            if budget:
+                budget.enter("генерация Gemini")
+                # A slow first key still leaves room for repair or another model.
+                req_timeout = min(budget.seconds * .45, budget.available(pdf_deadline))
+                config.http_options = genai_types.HttpOptions(timeout=max(1, int(req_timeout * 1000)))
             idx = target_pool.pick_for_model(model_name)
             if idx is None:
                 break  # на этой модели свободных ключей нет — мгновенно переходим к следующей модели
@@ -1798,18 +1812,34 @@ async def generate_reply(history: list, user_text: str, extra_parts: Optional[li
                     target_pool.client(idx).aio.models.generate_content(
                         model=model_name, contents=contents, config=config
                     ),
-                    timeout=min(70, max(1,pdf_deadline-time.monotonic())) if pdf_deadline is not None else req_timeout,
+                    timeout=req_timeout,
                 )
                 target_pool.record(idx, "ok", time.monotonic() - t0, model=model_name)
                 log.info(
                     "✅ %s ответила за %.1f c (ключ #%d, инструменты: %s)",
                     model_name, time.monotonic() - t0, idx + 1, "да" if use_tools else "нет",
                 )
-                if file_mode and pdf_request(user_text):
+                if not budget and LATE_PDF.get() and resp.candidates:
+                    parts = getattr(resp.candidates[0].content, "parts", None) or []
+                    for part in parts:
+                        call = getattr(part, "function_call", None)
+                        if call and call.name == "create_file":
+                            args = call.args or {}
+                            if str(args.get("format") or "pdf").strip().lower() in ("pdf", "пдф"):
+                                budget = LATE_PDF.get()(user_text, str(args.get("content") or ""))
+                                pdf_deadline = budget.model_end
+                                break
+                if budget or (file_mode and pdf_request(user_text)):
                     try:
                         await improve_pdf_response(resp, user_text, contents, target_pool.client(idx), model_name, config, pdf_deadline)
                     except Exception:
                         log.warning("PDF completeness check failed", exc_info=True)
+                        for part in resp.candidates[0].content.parts or []:
+                            call = getattr(part, "function_call", None)
+                            if call and call.name == "create_file" and str((call.args or {}).get("format") or "pdf").lower() in ("pdf", "пдф"):
+                                args = dict(call.args)
+                                attach_warning(args, ["Проверка полноты документа не завершилась"])
+                                call.args = args
                 return resp
             except Exception as e:
                 last_err = e
@@ -1842,6 +1872,10 @@ async def generate_reply(history: list, user_text: str, extra_parts: Optional[li
                 else:
                     raise
 
+    if budget:
+        budget.available(pdf_deadline)
+        if isinstance(last_err, TimeoutError):
+            raise PdfExpired("генерация Gemini") from last_err
     wait_sec = target_pool.min_wait(pref_model=pref_model)
     if wait_sec > 0:
         raise RuntimeError(f"Все доступные ключи сейчас на паузе из-за лимитов Gemini. Подожди ~{wait_sec} сек.")
@@ -2080,6 +2114,8 @@ async def ask_gemini(
                 [f["name"] for f in lfs], scope, is_private,
                 pool=target_pool, account=acc, user_name=_uname,
             )
+        except PdfExpired:
+            raise
         except Exception as e:
             log.exception("ask_gemini failed")
             await message.reply("Что-то пошло не так на моей стороне 😕 Попробуй отправить ещё раз через минутку. "
@@ -2099,7 +2135,10 @@ async def ask_gemini(
             texts.append(p.text)
 
     reply_text = "\n".join(texts).strip()
-    if reply_text:
+    if any((c.args or {}).get("_pdf_incomplete") for c in calls if c.name == "create_file"):
+        reply_text = ""
+
+    async def send_answer_text():
         kb = make_response_action_kb(message.message_id) if is_private else None
         sent_msgs = await reply_md(message, reply_text, reply_markup=kb)
         if is_private and sent_msgs:
@@ -2113,6 +2152,10 @@ async def ask_gemini(
                 oldest = min(RECENT_ANSWERS.keys(), key=lambda k: RECENT_ANSWERS[k]["ts"])
                 RECENT_ANSWERS.pop(oldest, None)
 
+    defer_text = bool(CURRENT.get() and any(c.name == "create_file" for c in calls))
+    if reply_text and not defer_text:
+        await send_answer_text()
+    original_text = reply_text
     origin = (message.chat.id, None if is_private else (message.message_thread_id or None))
     for call in calls:
         args = dict(call.args or {})
@@ -2131,6 +2174,9 @@ async def ask_gemini(
             continue
         if call.name == "create_file":
             summary = await handle_create_file(message, scope, is_private, args, origin)
+            if defer_text and not summary.startswith("[создан файл "):
+                original_text = ""
+                reply_text = summary
             reply_text = reply_text or summary
             continue
         if call.name == "create_timer":
@@ -2179,6 +2225,8 @@ async def ask_gemini(
         await reply_md(message, f"{report}\n\n{post}")
         reply_text = reply_text or f"[опубликовано в «{topic}»]: {post[:300]}"
 
+    if defer_text and original_text:
+        await send_answer_text()
     if not reply_text and not calls:
         await message.reply("Тут я промолчал — похоже, сработал фильтр. Попробуй сказать иначе, и я отвечу.", parse_mode=None)
         return
@@ -3079,7 +3127,7 @@ def build_pptx(title: str, blocks: list) -> bytes:
 
 def build_document(fmt: str, title: str, content: str) -> tuple:
     """Возвращает (байты, имя файла, mime). Выполняется в потоке — тяжёлые библиотеки грузятся лениво."""
-    if fmt == "pdf" and len(content) > 80000:
+    if fmt in ("pdf", "texpdf") and len(content) > 80000:
         raise ValueError("Документ слишком большой для одного файла (80000 символов). Раздели его на части.")
     blocks = parse_markdown(content[:80000])
     base = re.sub(r"\s+", "_", clean_filename(plain_text(title)))[:60].strip("._") or "document"
@@ -3110,18 +3158,32 @@ async def handle_create_file(message: types.Message, scope: list, is_private: bo
         await message.reply("⛔ Отправлять файлы в другие темы могут только администраторы.")
         return "[отказ: недостаточно прав]"
     try:
+        budget = CURRENT.get()
+        if budget and fmt in ("pdf", "texpdf"):
+            budget.draft = content[:80000]
+        if args.get("_pdf_incomplete"):
+            title = "Черновик — " + title
         log.info("Telegram file build start; format=%s; chars=%d",fmt,len(content))
         async with chat_action(message.chat.id, ChatAction.UPLOAD_DOCUMENT, message.message_thread_id):
             data, filename, _ = await asyncio.to_thread(build_document, fmt, title, content)
         log.info("Telegram file built; format=%s; bytes=%d",fmt,len(data))
         if fmt == "pdf":
             from study_polish import pdf_notice, add_notice
-            caption = add_notice(caption, pdf_notice(data, content))
+            caption = add_notice(caption, await asyncio.to_thread(pdf_notice, data, content))
         doc = BufferedInputFile(data, filename=filename)
         cap_html = md_to_html(caption[:900]) if caption else None
 
         async def _send(parse_mode):
+            if budget:
+                budget.enter("отправка в Telegram")
+                budget.available(budget.work_end)
+                budget.upload_pending = True
             kw = {"caption": cap_html if parse_mode else (strip_md(caption)[:900] or None), "parse_mode": parse_mode}
+            if budget:
+                timeout = max(1, int(budget.available(budget.work_end)))
+                if dest == origin:
+                    return await bot(message.reply_document(doc, **kw), request_timeout=timeout)
+                return await bot.send_document(dest[0], doc, message_thread_id=dest[1], request_timeout=timeout, **kw)
             if dest == origin:
                 return await message.reply_document(doc, **kw)
             return await bot.send_document(dest[0], doc, message_thread_id=dest[1], **kw)
@@ -3131,20 +3193,27 @@ async def handle_create_file(message: types.Message, scope: list, is_private: bo
             sent = await _send(ParseMode.HTML if caption else None)
         except TelegramBadRequest:
             sent = await _send(None)
+        if budget:
+            budget.upload_pending = False
+            budget.delivered += 1
+            budget.draft = ""
         log.info("Telegram file upload done")
         remember_file(mem_key(message), "document", sent.document.file_id, filename)
         if dest != origin:
             await message.reply(f"✅ Файл «{filename}» отправлен: {dest_label(dest)}")
         return f"[создан файл {filename}]: {caption[:200]}"
-    except ImportError as e:
-        log.warning("Нет библиотеки для %s: %s", fmt, e)
-        await message.reply(f"⚠️ Формат {fmt.upper()} сейчас недоступен (не установлена библиотека). "
-                            "Пришлю ответ текстом.")
-    except Exception as e:
+    except PdfExpired:
+        raise
+    except Exception as exc:
+        if budget and budget.upload_pending and isinstance(exc, (TelegramNetworkError, TimeoutError)):
+            raise PdfExpired("отправка в Telegram") from exc
+        if isinstance(exc, ImportError):
+            log.warning("Нет библиотеки для %s: %s", fmt, exc)
         log.exception("create_file error")
-        await message.reply(f"⚠️ Не удалось создать файл ({e}). Пришлю ответ текстом.")
+        await message.reply(f"⚠️ Не удалось создать файл ({exc}). Пришлю ответ текстом.")
     await reply_md(message, content)
     return "[файл не создан, ответ отправлен текстом]"
+
 
 
 # =====================================================================
@@ -3565,6 +3634,7 @@ async def cb_set_model(call: types.CallbackQuery):
 
 @dp.callback_query(F.data.startswith("doc_pdf:") | F.data.startswith("doc_docx:") | F.data.startswith("doc_tex:") | F.data.startswith("doc_texpdf:"))
 async def cb_generate_doc(call: types.CallbackQuery):
+    started = time.monotonic()
     action = call.data.partition(":")[0]
     ans_data = RECENT_ANSWERS.get((call.message.chat.id, call.message.message_id))
     content = ans_data.get("text") if ans_data else (call.message.text or call.message.caption or "")
@@ -3579,6 +3649,13 @@ async def cb_generate_doc(call: types.CallbackQuery):
         "doc_tex": ("tex", "📐 LaTeX (.tex)"),
     }
     fmt, label = fmt_map.get(action, ("pdf", "📄 PDF"))
+    if fmt in ("pdf", "texpdf"):
+        budget = PdfBudget(size_seconds(source=content), started, draft=content[:80000])
+        return await telegram_pdf_request(call.message, budget, lambda: _export_answer(call, fmt, label, content))
+    return await _export_answer(call, fmt, label, content)
+
+
+async def _export_answer(call, fmt, label, content):
     await call.answer(f"Генерирую {label}...")
     title = "Ответ ассистента"
     try:
@@ -3588,8 +3665,23 @@ async def cb_generate_doc(call: types.CallbackQuery):
             caption = f"Твой ответ · {label}"
             if fmt == "pdf":
                 from study_polish import pdf_notice, add_notice
-                caption = add_notice(caption, pdf_notice(data, content))
-            await call.message.reply_document(doc, caption=caption)
+                caption = add_notice(caption, await asyncio.to_thread(pdf_notice, data, content))
+            budget = CURRENT.get()
+            if budget:
+                budget.enter("отправка в Telegram")
+                timeout = max(1, int(budget.available(budget.work_end)))
+                budget.upload_pending = True
+                try:
+                    await bot(call.message.reply_document(doc, caption=caption), request_timeout=timeout)
+                except (TelegramNetworkError, TimeoutError) as exc:
+                    raise PdfExpired(budget.stage) from exc
+                budget.upload_pending = False
+                budget.delivered += 1
+                budget.draft = ""
+            else:
+                await call.message.reply_document(doc, caption=caption)
+    except PdfExpired:
+        raise
     except Exception as e:
         log.exception("cb_generate_doc error")
         await call.message.reply(f"⚠️ Не удалось создать {label}: {e}")
@@ -4028,7 +4120,40 @@ async def _after_media(message: types.Message, status: types.Message, saved_text
             await status.edit_text(saved_text, parse_mode=None)
 
 
+async def telegram_pdf_request(message, budget, work):
+    try:
+        return await budget.run(work)
+    except PdfExpired:
+        return await recover_telegram_pdf(message, budget)
+
+
+async def recover_telegram_pdf(message, budget):
+    log.warning("PDF %s stopped at %s", budget.trace, budget.stage)
+    try:
+        async with asyncio.timeout(budget.available(budget.end)):
+            await message.reply(budget.message(), parse_mode=None)
+            if budget.draft:
+                draft = BufferedInputFile(budget.draft.encode("utf-8"), filename="Черновик.md")
+                await message.reply_document(draft, caption="Черновик для восстановления. Полнота не проверена.")
+    except (TimeoutError, PdfExpired, TelegramNetworkError):
+        log.warning("PDF %s recovery delivery unconfirmed", budget.trace)
+
+
+def pdf_message(handler):
+    @wraps(handler)
+    async def wrapped(message):
+        started = time.monotonic()
+        prompt = message.text or message.caption or ""
+        if not pdf_request(prompt):
+            return await run_unclassified(started, lambda: handler(message),
+                                          lambda budget: recover_telegram_pdf(message, budget))
+        budget = PdfBudget(size_seconds(prompt), started)
+        return await telegram_pdf_request(message, budget, lambda: handler(message))
+    return wrapped
+
+
 @dp.message(F.photo)
+@pdf_message
 async def handle_photo(message: types.Message):
     if not is_allowed(message):
         return
@@ -4044,6 +4169,8 @@ async def handle_photo(message: types.Message):
         })
         await _after_media(message, status, "📷 Изображение сохранено в контекст темы!",
                            "📖 Фотография изучена! Решаю...")
+    except PdfExpired:
+        raise
     except Exception as e:
         log.exception("photo error")
         with suppress(Exception):
@@ -4084,6 +4211,7 @@ async def build_document_item(name: str, data: bytes) -> dict:
 
 
 @dp.message(F.document, ~F.animation)
+@pdf_message
 async def handle_document(message: types.Message):
     if not is_allowed(message):
         return
@@ -4101,6 +4229,8 @@ async def handle_document(message: types.Message):
         mem_add(mem_key(message), item)
         await _after_media(message, status, f"📄 Документ «{name}» сохранён в память темы!",
                            "📖 Документ изучен! Обрабатываю задачу...")
+    except PdfExpired:
+        raise
     except Exception as e:
         log.exception("document error")
         with suppress(Exception):
@@ -4108,6 +4238,7 @@ async def handle_document(message: types.Message):
 
 
 @dp.message(F.voice | F.audio)
+@pdf_message
 async def handle_voice(message: types.Message):
     if not is_allowed(message):
         return
@@ -4135,6 +4266,8 @@ async def handle_voice(message: types.Message):
             prompt += f"\nПодпись к сообщению: {message.caption}"
         await ask_gemini(message, prompt, extra_parts=[part], force_tools=True,
                          remember_as="[голосовое сообщение]")
+    except PdfExpired:
+        raise
     except Exception as e:
         log.exception("voice error")
         await message.reply("Не разобрал голосовое 🎧 Запиши ещё раз или напиши текстом.", parse_mode=None)
@@ -4163,6 +4296,7 @@ load_plugins()
 # 14. ТЕКСТОВЫЕ СООБЩЕНИЯ (регистрируется ПОСЛЕДНИМ)
 # =====================================================================
 @dp.message(F.text)
+@pdf_message
 async def handle_text_messages(message: types.Message):
     if not is_allowed(message):
         return
@@ -4204,7 +4338,8 @@ async def handle_text_messages(message: types.Message):
 # 15. ВЕБ-СЕРВЕР ДЛЯ RENDER + ЗАПУСК
 # =====================================================================
 async def health(_request: web.Request) -> web.Response:
-    return web.json_response({"status": "ok", "model": GEMINI_MODEL, "keys": len(pool.keys)})
+    return web.json_response({"status": "ok", "version": "7.2", "commit": os.getenv("RENDER_GIT_COMMIT", ""),
+                              "model": GEMINI_MODEL, "keys": len(pool.keys)})
 
 
 async def start_web_server() -> web.AppRunner:

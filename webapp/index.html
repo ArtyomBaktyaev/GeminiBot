@@ -1241,27 +1241,43 @@ async function api(path, opt) {
   if ((opt.method || "GET").toUpperCase() !== "POST" || !["/api/ask", "/api/export"].includes(path)) {
     return apiOnce(path, opt);
   }
-  const deadline = Date.now() + 360000;
+  const started = performance.now();
   const start = await apiOnce(path + "/start", opt);
   if (!start.job_id) throw new Error("Сервер не подтвердил запуск запроса");
   const url = "/api/study-jobs/" + encodeURIComponent(start.job_id);
-  while (Date.now() < deadline) {
+  let pdfBudget = start.budget_ms;
+  let deadline = Math.min(started + (start.budget_ms ?? 360000),
+    performance.now() + (start.remaining_ms ?? 360000));
+  while (performance.now() < deadline) {
     if (opt.signal?.aborted) throw new DOMException("Aborted", "AbortError");
-    await new Promise(resolve => setTimeout(resolve, 1800));
+    await new Promise(resolve => setTimeout(resolve, Math.min(1800, deadline - performance.now())));
+    const remaining = deadline - performance.now();
+    if (remaining <= 0) break;
     if (opt.signal?.aborted) throw new DOMException("Aborted", "AbortError");
     let job;
     try {
-      job = await apiOnce(url, { fresh: true, signal: opt.signal });
+      job = await apiOnce(url, { fresh: true, signal: opt.signal, timeoutMs: remaining });
     } catch (e) {
       if (opt.signal?.aborted) throw e;
       if (e.transient) continue; // Poll only: do not repeat the original POST.
       throw e;
     }
     if (job.state === "done") return job.result;
-    if (job.state === "error") throw new Error(job.result?.error || "Сервер не завершил запрос");
+    if (job.state === "error") {
+      const err = new Error(job.result?.error || "Сервер не завершил запрос");
+      err.draft = job.result?.draft;
+      throw err;
+    }
+    if (Number.isFinite(job.remaining_ms)) {
+      if (pdfBudget == null) {
+        pdfBudget = job.budget_ms;
+        deadline = started + pdfBudget;
+      }
+      deadline = Math.min(deadline, performance.now() + job.remaining_ms);
+    }
     if (job.state !== "running") throw new Error("Неизвестное состояние запроса");
   }
-  throw new Error("Истекло время ожидания результата; сервер мог продолжить обработку. Проверь историю перед повтором.");
+  throw new Error("Истекло время ожидания. Результат не подтверждён. Проверь историю перед повтором.");
 }
 
 async function apiOnce(path, opt) {
@@ -1278,7 +1294,7 @@ async function apiOnce(path, opt) {
   }
 
   const ctrl = new AbortController();
-  const timeoutMs = method === "GET" ? 12000 : 45000;
+  const timeoutMs = Math.min(opt.timeoutMs ?? Infinity, method === "GET" ? 12000 : 45000);
   const tid = setTimeout(() => ctrl.abort(), timeoutMs);
   const abortFromUser = () => ctrl.abort();
   if (opt.signal?.aborted) ctrl.abort();
@@ -4041,6 +4057,9 @@ function chatDialogPane() {
           ? h("div", { class:"dots" }, h("span"), h("span"), h("span"))
           : (isMe ? h("div", { style:{whiteSpace:"pre-wrap"} }, m.text) : renderMd(m.text)),
 
+        m.draft ? h("details", {}, h("summary", {}, "Открыть текстовый черновик"),
+          h("pre", {style:{whiteSpace:"pre-wrap"}}, m.draft)) : null,
+
         botFiles.map(bf => {
           const dlUrl = "/api/files/" + bf.id + "?initData=" + encodeURIComponent(getInitData()) + "&acc=" + encodeURIComponent(getActiveAccountId()) + "&client=tg";
           return h("div", { class:"bot-file-card" },
@@ -4069,10 +4088,10 @@ function chatDialogPane() {
         !m.loading && !isMe && m.text ? reactionPicker(m, drawMessages) : null,
         !m.loading ? h("div", { class:"meta-row" },
           m.model ? h("span", {}, "⚡ " + shortModelName(m.model)) : null,
-          !isMe && m.text ? h("button", { class:"act-btn", onclick: () => exportMessageDoc(m.exportText || m.text, "pdf") }, "📄 PDF") : null,
-          !isMe && m.text ? h("button", { class:"act-btn", onclick: () => exportMessageDoc(m.exportText || m.text, "docx") }, "📝 Word") : null,
-          !isMe && m.text ? h("button", { class:"act-btn", onclick: () => exportMessageDoc(m.exportText || m.text, "tex") }, "📐 LaTeX (.tex)") : null,
-          !isMe && m.text ? h("button", { class:"act-btn", onclick: () => exportMessageDoc(m.exportText || m.text, "texpdf") }, "Собрать TeX → PDF") : null,
+          !isMe && !m.failed && m.text ? h("button", { class:"act-btn", onclick: () => exportMessageDoc(m.exportText || m.text, "pdf") }, "📄 PDF") : null,
+          !isMe && !m.failed && m.text ? h("button", { class:"act-btn", onclick: () => exportMessageDoc(m.exportText || m.text, "docx") }, "📝 Word") : null,
+          !isMe && !m.failed && m.text ? h("button", { class:"act-btn", onclick: () => exportMessageDoc(m.exportText || m.text, "tex") }, "📐 LaTeX (.tex)") : null,
+          !isMe && !m.failed && m.text ? h("button", { class:"act-btn", onclick: () => exportMessageDoc(m.exportText || m.text, "texpdf") }, "Собрать TeX → PDF") : null,
           h("button", { class:"act-btn", onclick: () => {
             navigator.clipboard.writeText(m.text || "");
             toast("Скопировано 📋", "ok");
@@ -4192,6 +4211,8 @@ function chatDialogPane() {
       hap("light");
     } catch (err) {
       botEntry.loading = false;
+      botEntry.draft = err.draft || "";
+      botEntry.failed = true;
       botEntry.text = err.name === "AbortError" ? "⏹ Ожидание остановлено. Сервер может завершить запрос; проверь историю." : ("❌ Ошибка: " + err.message);
     } finally {
       S.sending = false;

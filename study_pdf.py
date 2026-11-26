@@ -198,7 +198,12 @@ def document_html(title, blocks):
             del blocks[:2]
     kind_profile = meta.get("document_kind")
     if kind_profile not in ("book", "lab", "cheat", "solution", "note"):
-        kind_profile = document_kind("", title, " ".join(b.get("text", "") for b in blocks))
+        # Tables keep cells in rows. Count them when choosing the compact layout.
+        profile_text = "\n".join(
+            "\n".join(" | ".join(row) for row in b["rows"]) if b["t"] == "table"
+            else b.get("text", "") for b in blocks
+        )
+        kind_profile = document_kind("", title, profile_text)
     short = (target[1] <= 2) if target else kind_profile in ("cheat", "solution", "note")
     profile_label = {"book":"Учебное пособие", "lab":"Лабораторная работа", "cheat":"Шпаргалка", "solution":"Решение задачи", "note":"Учебная заметка"}[kind_profile]
     if short:

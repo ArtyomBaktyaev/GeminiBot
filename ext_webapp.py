@@ -823,7 +823,9 @@ async def api_file_send_tg(request, user):
     return {"ok": True}
 
 
-from study_web_jobs import JobStore
+from study_deadline import CURRENT, PdfBudget, PdfExpired, run_unclassified, size_seconds
+from study_quality import pdf_request
+from study_web_jobs import JobStore, announce_pdf
 _STUDY_JOBS = JobStore()
 
 
@@ -831,20 +833,47 @@ def _job_owner(request, user):
     return (int(user["id"]), str(get_request_account(request, user)["id"]))
 
 
-async def _start_study_job(request, user, handler, kind):
-    # Cache request bytes before returning the short acknowledgement; request.json()
-    # in the existing handlers can then read the cached body without a live socket.
-    await request.read()
-    owner = _job_owner(request, user)
-    return _STUDY_JOBS.start(owner, kind, lambda: handler(request, user))
+async def _study_request(request, user, handler, kind, *, background=False):
+    started = time.monotonic()
+    try:
+        async with asyncio.timeout(900):
+            body = await request.json()
+    except TimeoutError:
+        return {"error": "Истекло время получения запроса."}
+    budget = None
+    if kind == "export" and str(body.get("format") or "pdf").strip().lower() in ("pdf", "texpdf"):
+        source = str(body.get("content") or "")
+        budget = PdfBudget(size_seconds(source=source), started, draft=source[:80000])
+    elif kind == "ask":
+        prompt = str(body.get("text") or "")[:4000]
+        if pdf_request(prompt):
+            budget = PdfBudget(size_seconds(prompt), started)
+
+    async def recovery(expired):
+        core.log.warning("PDF %s expired stage=%s", expired.trace, expired.stage)
+        return {"error": expired.message(), "draft": expired.draft}
+
+    async def work():
+        if not budget and kind == "ask":
+            return await run_unclassified(started, lambda: handler(request, user), recovery, announce_pdf)
+        if not budget:
+            return await handler(request, user)
+        try:
+            return await budget.run(lambda: handler(request, user))
+        except PdfExpired:
+            return await recovery(budget)
+
+    if background:
+        return _STUDY_JOBS.start(_job_owner(request, user), kind, work, budget=budget)
+    return await work()
 
 
 async def api_ask_start(request, user):
-    return await _start_study_job(request, user, api_ask, "ask")
+    return await _study_request(request, user, _api_ask, "ask", background=True)
 
 
 async def api_export_start(request, user):
-    return await _start_study_job(request, user, api_export, "export")
+    return await _study_request(request, user, _api_export, "export", background=True)
 
 
 async def api_study_job(request, user):
@@ -856,6 +885,10 @@ async def _shutdown_study_jobs(app):
 
 
 async def api_export(request, user):
+    return await _study_request(request, user, _api_export, "export")
+
+
+async def _api_export(request, user):
     body = await request.json()
     content = str(body.get("content") or "").strip()
     fmt = str(body.get("format") or "pdf").lower().strip()
@@ -868,7 +901,7 @@ async def api_export(request, user):
     data, fname, mime = await asyncio.to_thread(core.build_document, fmt, title, content)
     fid = _store_generated_file(data, fname, mime)
     from study_polish import pdf_notice
-    warning = pdf_notice(data, content) if fmt == "pdf" else ""
+    warning = await asyncio.to_thread(pdf_notice, data, content) if fmt == "pdf" else ""
     return {"ok": True, "id": fid, "name": fname, "size": len(data), "warning": warning}
 
 
@@ -883,6 +916,10 @@ async def _generate_with_account_pool(acc: dict, user: dict, **kwargs):
 
 
 async def api_ask(request, user):
+    return await _study_request(request, user, _api_ask, "ask")
+
+
+async def _api_ask(request, user):
     acc = get_request_account(request, user)
     chat_list = APP_CHATS.setdefault(acc["id"], [])
 
@@ -948,11 +985,17 @@ async def api_ask(request, user):
             title = str(args.get("title", "") or "").strip() or "Документ"
             content = str(args.get("content", "") or "").strip()
             caption = str(args.get("caption", "") or "").strip()
+            if args.get("_pdf_incomplete"):
+                title = "Черновик — " + title
+                texts.clear()
             if content:
+                budget = CURRENT.get()
+                if budget and fmt in ("pdf", "texpdf"):
+                    budget.draft = content[:80000]
                 data, filename, mime = await asyncio.to_thread(core.build_document, fmt, title, content)
                 if fmt == "pdf":
                     from study_polish import pdf_notice, add_notice
-                    caption = add_notice(caption, pdf_notice(data, content))
+                    caption = add_notice(caption, await asyncio.to_thread(pdf_notice, data, content))
                 fid = _store_generated_file(data, filename, mime)
                 generated_files.append({
                     "id": fid,
