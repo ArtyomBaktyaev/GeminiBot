@@ -392,6 +392,7 @@ def render_pdf(title, blocks):
     import time, logging
     log=logging.getLogger('study.pdf')
     from study_runtime_diag import memory_status
+    from study_chromium import chromium_args
     start=time.monotonic()
     title=readable_title(title)
     blocks=normalize_blocks(blocks,title)
@@ -405,7 +406,7 @@ def render_pdf(title, blocks):
         executable = os.environ.get("STUDY_CHROMIUM") or None
         log.info("PDF launching Chromium; %s", memory_status())
         try:
-            browser = engine.chromium.launch(executable_path=executable, timeout=25000)
+            browser = engine.chromium.launch(executable_path=executable, timeout=25000, args=chromium_args())
         except Exception as exc:
             if executable or not os.environ.get("RENDER") or "Executable doesn't exist" not in str(exc):
                 raise
@@ -413,7 +414,7 @@ def render_pdf(title, blocks):
             import sys
             subprocess.run([sys.executable, "-m", "playwright", "install", "--only-shell", "chromium"],
                            check=True, timeout=180)
-            browser = engine.chromium.launch()
+            browser = engine.chromium.launch(timeout=25000, args=chromium_args())
         log.info("PDF Chromium ready; %s", memory_status())
         try:
             page = browser.new_page(offline=True, service_workers="block")
