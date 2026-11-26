@@ -106,6 +106,7 @@ class PdfBudget:
     draft: str = ""
     upload_pending: bool = False
     delivered: int = 0
+    failure_reason: str = ""
 
     @property
     def end(self):
@@ -135,6 +136,8 @@ class PdfBudget:
         LOG.info("PDF %s stage=%s remaining=%.1fs", self.trace, stage, self.end - time.monotonic())
 
     def message(self):
+        if self.failure_reason:
+            return self.failure_reason
         text = (f"Время на этап «{self.stage}» исчерпано. Общий лимит PDF — "
                 f"{self.seconds // 60} мин.")
         if self.upload_pending:
