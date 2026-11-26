@@ -386,6 +386,7 @@ def display_math(tex, section, number):
 def render_pdf(title, blocks):
     import time, logging
     log=logging.getLogger('study.pdf')
+    from study_runtime_diag import memory_status
     start=time.monotonic()
     title=readable_title(title)
     blocks=normalize_blocks(blocks,title)
@@ -397,8 +398,9 @@ def render_pdf(title, blocks):
         os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", "0")
     with SLOT, sync_playwright() as engine:
         executable = os.environ.get("STUDY_CHROMIUM") or None
+        log.info("PDF launching Chromium; %s", memory_status())
         try:
-            browser = engine.chromium.launch(executable_path=executable)
+            browser = engine.chromium.launch(executable_path=executable, timeout=25000)
         except Exception as exc:
             if executable or not os.environ.get("RENDER") or "Executable doesn't exist" not in str(exc):
                 raise
@@ -407,6 +409,7 @@ def render_pdf(title, blocks):
             subprocess.run([sys.executable, "-m", "playwright", "install", "--only-shell", "chromium"],
                            check=True, timeout=180)
             browser = engine.chromium.launch()
+        log.info("PDF Chromium ready; %s", memory_status())
         try:
             page = browser.new_page(offline=True, service_workers="block")
             page.route("**/*", lambda route: route.abort())
@@ -416,7 +419,10 @@ def render_pdf(title, blocks):
             address = "https://study.invalid/document"
             page.route(address, lambda route: route.fulfill(content_type="text/html; charset=utf-8", body=html))
             page.goto(address, wait_until="load", timeout=15000)
+            page.unroute(address)
+            del html
             page.evaluate("() => document.fonts.ready")
+            log.info("PDF fonts ready; %s", memory_status())
             t_math=time.monotonic()
             errors = mathjax_prepare(page, address)
             log.info("PDF MathJax: %.1fs, %d fallback formulas",time.monotonic()-t_math,errors)
@@ -425,18 +431,21 @@ def render_pdf(title, blocks):
                 page.evaluate("""(n)=>{const note=document.querySelector('.volume-note');if(note){note.hidden=false;note.textContent=`${n} формул не удалось обработать MathJax. Для них сохранён исходник или резервная вёрстка.`;}}""", errors)
             prefix, formulas = mark_formula_locations(page)
             data = print_fitted(page, page_target(blocks), PdfReader)
-            try:
-                t_text=time.monotonic()
-                result=add_formula_text(data, formulas, prefix, ordered_source(title, blocks))
-                log.info("PDF source attachment: %.1fs; total %.1fs",time.monotonic()-t_text,time.monotonic()-start)
-                return result
-            except Exception:
-                import logging
-                logging.getLogger(__name__).exception("Unable to add searchable formula source; preserving visual PDF")
-                page.locator(".study-formula-location").evaluate_all("nodes => nodes.forEach(n=>n.remove())")
-                return print_fitted(page, page_target(blocks), PdfReader)
         finally:
             browser.close()
+    # Chromium and Playwright are gone before pypdf clones the output.
+    # This lowers peak memory without changing the PDF appearance.
+    log.info("PDF browser closed; %s", memory_status())
+    t_text=time.monotonic()
+    try:
+        result=add_formula_text(data, formulas, prefix, ordered_source(title, blocks))
+    except Exception:
+        log.exception("PDF searchable layer failed; removing temporary markers")
+        from study_math_text import strip_formula_links
+        result=strip_formula_links(data, prefix)
+    log.info("PDF source finalization: %.1fs; total %.1fs; %s",time.monotonic()-t_text,time.monotonic()-start,memory_status())
+    return result
+
 
 if __name__ == "__main__":
     import argparse

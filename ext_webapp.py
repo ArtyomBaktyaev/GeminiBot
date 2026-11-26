@@ -823,6 +823,38 @@ async def api_file_send_tg(request, user):
     return {"ok": True}
 
 
+from study_web_jobs import JobStore
+_STUDY_JOBS = JobStore()
+
+
+def _job_owner(request, user):
+    return (int(user["id"]), str(get_request_account(request, user)["id"]))
+
+
+async def _start_study_job(request, user, handler, kind):
+    # Cache request bytes before returning the short acknowledgement; request.json()
+    # in the existing handlers can then read the cached body without a live socket.
+    await request.read()
+    owner = _job_owner(request, user)
+    return _STUDY_JOBS.start(owner, kind, lambda: handler(request, user))
+
+
+async def api_ask_start(request, user):
+    return await _start_study_job(request, user, api_ask, "ask")
+
+
+async def api_export_start(request, user):
+    return await _start_study_job(request, user, api_export, "export")
+
+
+async def api_study_job(request, user):
+    return _STUDY_JOBS.status(_job_owner(request, user), request.match_info["id"])
+
+
+async def _shutdown_study_jobs(app):
+    await _STUDY_JOBS.shutdown()
+
+
 async def api_export(request, user):
     body = await request.json()
     content = str(body.get("content") or "").strip()
@@ -1113,6 +1145,7 @@ async def compact_setup_bot_commands() -> None:
 
 
 def mount(app: web.Application) -> None:
+    app.on_shutdown.append(_shutdown_study_jobs)
     app._client_max_size = 25 * 1024 * 1024
     app.router.add_get("/app", index)
     for method, path, handler in core.API_ROUTES:
@@ -1214,6 +1247,9 @@ def setup(c) -> None:
         ("GET", "/api/history", api_history),
         ("DELETE", "/api/history", api_history_clear),
         ("POST", "/api/ask", api_ask),
+        ("POST", "/api/ask/start", api_ask_start),
+        ("POST", "/api/export/start", api_export_start),
+        ("GET", "/api/study-jobs/{id}", api_study_job),
         ("POST", "/api/chat/delete", api_chat_delete),
         ("POST", "/api/chat/clear", api_chat_clear),
         ("GET", "/api/files/{id}", api_file_download),

@@ -3110,8 +3110,10 @@ async def handle_create_file(message: types.Message, scope: list, is_private: bo
         await message.reply("⛔ Отправлять файлы в другие темы могут только администраторы.")
         return "[отказ: недостаточно прав]"
     try:
+        log.info("Telegram file build start; format=%s; chars=%d",fmt,len(content))
         async with chat_action(message.chat.id, ChatAction.UPLOAD_DOCUMENT, message.message_thread_id):
             data, filename, _ = await asyncio.to_thread(build_document, fmt, title, content)
+        log.info("Telegram file built; format=%s; bytes=%d",fmt,len(data))
         if fmt == "pdf":
             from study_polish import pdf_notice, add_notice
             caption = add_notice(caption, pdf_notice(data, content))
@@ -3124,10 +3126,12 @@ async def handle_create_file(message: types.Message, scope: list, is_private: bo
                 return await message.reply_document(doc, **kw)
             return await bot.send_document(dest[0], doc, message_thread_id=dest[1], **kw)
 
+        log.info("Telegram file upload start; bytes=%d",len(data))
         try:
             sent = await _send(ParseMode.HTML if caption else None)
         except TelegramBadRequest:
             sent = await _send(None)
+        log.info("Telegram file upload done")
         remember_file(mem_key(message), "document", sent.document.file_id, filename)
         if dest != origin:
             await message.reply(f"✅ Файл «{filename}» отправлен: {dest_label(dest)}")

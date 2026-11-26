@@ -11,6 +11,7 @@ from threading import BoundedSemaphore
 
 _SLOT=BoundedSemaphore(1)
 LOG=logging.getLogger('study.pdf')
+from study_runtime_diag import memory_status
 
 
 def render_bounded(title, blocks):
@@ -18,15 +19,17 @@ def render_bounded(title, blocks):
     if not _SLOT.acquire(timeout=30):
         raise RuntimeError('Генератор PDF занят. Повтори запрос немного позже.')
     try:
-        LOG.info('PDF worker start; queue %.1fs',time.monotonic()-start)
+        LOG.info('PDF worker start; queue %.1fs; %s',time.monotonic()-start,memory_status())
         executable=Path(sys.executable)
         if executable.name.lower()=='pythonw.exe': executable=executable.with_name('python.exe')
         args=[str(executable),str(Path(__file__).resolve()),'--worker']
         proc=subprocess.Popen(args,stdin=subprocess.PIPE,stdout=subprocess.PIPE,
                               start_new_session=(os.name=='posix'))
+        LOG.info('PDF worker spawned pid=%s',proc.pid)
         try:
             output,_=proc.communicate(json.dumps([title,blocks],ensure_ascii=False).encode('utf-8'),timeout=90)
         except subprocess.TimeoutExpired as e:
+            LOG.error('PDF worker timeout; pid=%s; %s',proc.pid,memory_status())
             if os.name=='posix':
                 try: os.killpg(proc.pid,signal.SIGKILL)
                 except ProcessLookupError: pass
@@ -36,6 +39,7 @@ def render_bounded(title, blocks):
             proc.communicate()
             raise RuntimeError('PDF не удалось сверстать за 90 секунд; генерация остановлена без отправки повреждённого файла.') from e
         if proc.returncode or not output.startswith(b'%PDF-'):
+            LOG.error('PDF worker failed; exit=%s; output bytes=%d; %s',proc.returncode,len(output),memory_status())
             raise RuntimeError('Ошибка генератора PDF; подробности в журнале Render (PDF worker).')
         LOG.info('PDF worker done %.1fs; %d bytes',time.monotonic()-start,len(output))
         return output
@@ -45,6 +49,7 @@ def render_bounded(title, blocks):
 if __name__=='__main__':
     logging.basicConfig(level=logging.INFO,format='%(asctime)s | %(levelname)s | %(message)s',stream=sys.stderr)
     if sys.argv[1:]!=['--worker']: raise SystemExit('Internal PDF worker')
+    LOG.info('PDF child importing renderer; %s',memory_status())
     from study_pdf import render_pdf
     title,blocks=json.loads(sys.stdin.buffer.read())
     sys.stdout.buffer.write(render_pdf(title,blocks))

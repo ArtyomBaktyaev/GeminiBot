@@ -91,3 +91,25 @@ def mark_formula_locations(page):
       return formulas;
     }''', prefix)
     return prefix, formulas
+
+
+def strip_formula_links(data, prefix=PREFIX):
+    """Preserve the visual PDF and all ordinary links, remove temporary markers."""
+    writer = PdfWriter(clone_from=PdfReader(BytesIO(data)))
+    for page in writer.pages:
+        annots = page.get('/Annots')
+        if not annots:
+            continue
+        kept = ArrayObject()
+        for ref in annots:
+            action = ref.get_object().get('/A') or {}
+            if not str(action.get('/URI', '')).startswith(prefix):
+                kept.append(ref)
+        if len(kept) != len(annots):
+            if kept:
+                page[NameObject('/Annots')] = kept
+            else:
+                page.pop('/Annots', None)
+    output = BytesIO()
+    writer.write(output)
+    return output.getvalue()

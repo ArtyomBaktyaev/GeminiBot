@@ -1235,7 +1235,36 @@ function setActiveAccountId(id) {
 
 const API_CACHE = new Map();
 
+// Long operations are acknowledged immediately and polled with short HTTP requests.
 async function api(path, opt) {
+  opt = opt || {};
+  if ((opt.method || "GET").toUpperCase() !== "POST" || !["/api/ask", "/api/export"].includes(path)) {
+    return apiOnce(path, opt);
+  }
+  const deadline = Date.now() + 360000;
+  const start = await apiOnce(path + "/start", opt);
+  if (!start.job_id) throw new Error("Сервер не подтвердил запуск запроса");
+  const url = "/api/study-jobs/" + encodeURIComponent(start.job_id);
+  while (Date.now() < deadline) {
+    if (opt.signal?.aborted) throw new DOMException("Aborted", "AbortError");
+    await new Promise(resolve => setTimeout(resolve, 1800));
+    if (opt.signal?.aborted) throw new DOMException("Aborted", "AbortError");
+    let job;
+    try {
+      job = await apiOnce(url, { fresh: true, signal: opt.signal });
+    } catch (e) {
+      if (opt.signal?.aborted) throw e;
+      if (e.transient) continue; // Poll only: do not repeat the original POST.
+      throw e;
+    }
+    if (job.state === "done") return job.result;
+    if (job.state === "error") throw new Error(job.result?.error || "Сервер не завершил запрос");
+    if (job.state !== "running") throw new Error("Неизвестное состояние запроса");
+  }
+  throw new Error("Истекло время ожидания результата; сервер мог продолжить обработку. Проверь историю перед повтором.");
+}
+
+async function apiOnce(path, opt) {
   opt = opt || {};
   const method = (opt.method || "GET").toUpperCase();
   const accKey = getActiveAccountId() || "def";
@@ -1249,9 +1278,11 @@ async function api(path, opt) {
   }
 
   const ctrl = new AbortController();
-  const timeoutMs = method === "GET" ? 12000 : (path === "/api/ask" ? 210000 : 45000);
+  const timeoutMs = method === "GET" ? 12000 : 45000;
   const tid = setTimeout(() => ctrl.abort(), timeoutMs);
-  if (opt.signal) opt.signal.addEventListener("abort", () => ctrl.abort());
+  const abortFromUser = () => ctrl.abort();
+  if (opt.signal?.aborted) ctrl.abort();
+  if (opt.signal) opt.signal.addEventListener("abort", abortFromUser, { once: true });
 
   try {
     const r = await fetch(path, {
@@ -1266,13 +1297,29 @@ async function api(path, opt) {
       signal: ctrl.signal,
     });
     let d;
-    try { d = await r.json(); } catch (e) { d = { error: "Ошибка ответа сервера" }; }
-    if (!r.ok || !d || d.error) throw new Error(d?.error || "HTTP " + r.status);
+    try { d = await r.json(); } catch (e) {
+      const err = new Error("Ответ сервера не JSON (HTTP " + r.status + ")");
+      err.transient = [429, 502, 503, 504].includes(r.status);
+      throw err;
+    }
+    if (!r.ok || !d || d.error) {
+      const err = new Error(d?.error || "HTTP " + r.status);
+      err.transient = [429, 502, 503, 504].includes(r.status);
+      throw err;
+    }
     if (method === "GET" && /^\/api\/(?:home(?:\?|$)|timetable(?:\/|\?)|tasks(?:\/|\?|$)|me(?:\?|$))/.test(path)) normalizeUiMetadata(d);
-    if (method === "GET") API_CACHE.set(cacheKey, { ts: Date.now(), data: d });
+    if (method === "GET" && !path.startsWith("/api/study-jobs/")) API_CACHE.set(cacheKey, { ts: Date.now(), data: d });
     return d;
+  } catch (e) {
+    if (!opt.signal?.aborted && (e.name === "AbortError" || e instanceof TypeError)) {
+      const err = new Error(e.name === "AbortError" ? "Сервер не ответил вовремя" : "Соединение с сервером прервано");
+      err.transient = true;
+      throw err;
+    }
+    throw e;
   } finally {
     clearTimeout(tid);
+    if (opt.signal) opt.signal.removeEventListener("abort", abortFromUser);
   }
 }
 
@@ -4145,7 +4192,7 @@ function chatDialogPane() {
       hap("light");
     } catch (err) {
       botEntry.loading = false;
-      botEntry.text = err.name === "AbortError" ? "⏹ Запрос остановлен пользователем." : ("❌ Ошибка: " + err.message);
+      botEntry.text = err.name === "AbortError" ? "⏹ Ожидание остановлено. Сервер может завершить запрос; проверь историю." : ("❌ Ошибка: " + err.message);
     } finally {
       S.sending = false;
       S.abortCtrl = null;
