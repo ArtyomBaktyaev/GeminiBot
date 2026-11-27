@@ -417,7 +417,8 @@ def render_pdf(title, blocks):
     if use_direct:
         _legacy_formula.cache_clear()
         print_font_css.cache_clear()
-        gc.collect()
+        from study_memory_relief import trim_free_memory
+        trim_free_memory()
     log.info('PDF HTML prepared: %.1fs; %d blocks',time.monotonic()-start,len(blocks))
     # One browser at a time on small Render instances, and no profile shared between users.
     import playwright
@@ -461,7 +462,7 @@ def render_pdf(title, blocks):
         del html
         page.evaluate("() => document.fonts.ready.then(() => true)")
         if use_direct:
-            gc.collect()
+            trim_free_memory()
         log.info("PDF fonts ready; %s", memory_status())
         t_math=time.monotonic()
         errors = mathjax_prepare(page, address, compact=use_direct)

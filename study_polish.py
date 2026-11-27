@@ -38,11 +38,27 @@ def stamp_profile(content, request):
 
 def pdf_notice(data, content):
     from study_layout import page_target
-    from pypdf import PdfReader
     target = page_target(parse_markdown(content))
     if not target:
         return ''
-    count = len(PdfReader(BytesIO(data)).pages)
+    # Page counting after rendering must not retain the parser in the bot.
+    import subprocess, sys, logging, time
+    from pathlib import Path
+    from study_deadline import CURRENT
+    budget = CURRENT.get()
+    timeout = min(12., budget.work_end-time.monotonic()-2.) if budget else 12.
+    if timeout <= 0:
+        return 'Число страниц отдельно не проверено.'
+    try:
+        exe = Path(sys.executable)
+        if exe.name.lower() == 'pythonw.exe': exe = exe.with_name('python.exe')
+        answer = subprocess.run([str(exe), str(Path(__file__).with_name('study_pdf_notice_worker.py'))],
+                                input=data, capture_output=True, check=True, timeout=timeout)
+        count = int(answer.stdout.strip())
+        if count < 1: raise ValueError('Invalid page count')
+    except (OSError, subprocess.SubprocessError, ValueError):
+        logging.getLogger('study.pdf').warning('PDF page count unavailable', exc_info=True)
+        return 'Число страниц отдельно не проверено.'
     if target[0] <= count <= target[1]:
         return ''
     wanted = str(target[0]) if target[0] == target[1] else f'{target[0]}–{target[1]}'

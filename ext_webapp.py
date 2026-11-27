@@ -40,7 +40,8 @@ core = None
 HERE = os.path.dirname(os.path.abspath(__file__))
 INDEX = os.path.join(HERE, "webapp", "index.html")
 APP_CHATS: dict = {}        # account_id -> list of chat messages
-GENERATED_FILES: dict = {}  # file_id -> {"data": bytes, "name": str, "mime": str, "ts": float}
+from study_file_cache import DiskFileCache
+GENERATED_FILES = DiskFileCache(directory=os.environ.get("STUDY_CACHE_DIR") or HERE)
 USER_POOLS: dict = {}       # account_id -> (keys_tuple, KeyPool)
 LATEX_RE = re.compile(r"\$\$(.+?)\$\$|\\\[(.+?)\\\]|\\\((.+?)\\\)|\$(?!\s)([^$\n]+?)(?<!\s)\$", re.S)
 
@@ -323,15 +324,7 @@ def prompt_hook(scope, is_private) -> str:
 
 
 def _store_generated_file(data: bytes, filename: str, mime: str) -> str:
-    now = time.time()
-    for k in [k for k, v in GENERATED_FILES.items() if now - v["ts"] > 7200]:
-        GENERATED_FILES.pop(k, None)
-    while len(GENERATED_FILES) >= 60:
-        oldest = min(GENERATED_FILES, key=lambda k: GENERATED_FILES[k]["ts"])
-        GENERATED_FILES.pop(oldest, None)
-    fid = uuid.uuid4().hex
-    GENERATED_FILES[fid] = {"owner": core.CURRENT_ACCOUNT.get()["id"], "data": data, "name": filename, "mime": mime, "ts": now}
-    return fid
+    return GENERATED_FILES.store(data, filename, mime, core.CURRENT_ACCOUNT.get()["id"])
 
 
 async def _decode_uploaded_files(raw_files: list) -> tuple:
@@ -804,10 +797,9 @@ async def api_file_download(request, user):
     inline = request.query.get("inline") == "1"
     disp_type = "inline" if inline else "attachment"
     disp = f"{disp_type}; filename*=UTF-8''{quote(f['name'])}"
-    return web.Response(
-        body=f["data"],
-        content_type=f["mime"],
-        headers={"Content-Disposition": disp, "Cache-Control": "no-store"},
+    return web.FileResponse(
+        path=f["path"],
+        headers={"Content-Type": f["mime"], "Content-Disposition": disp, "Cache-Control": "no-store"},
     )
 
 
@@ -818,7 +810,8 @@ async def api_file_send_tg(request, user):
         return {"error": "Файл устарел или не найден"}
     acc = get_request_account(request, user)
     target_uid = int(acc.get("tg_id") or user["id"])
-    doc = core.BufferedInputFile(f["data"], filename=f["name"])
+    from aiogram.types import FSInputFile
+    doc = FSInputFile(f["path"], filename=f["name"])
     await core.bot.send_document(target_uid, doc, caption=f"📄 {f['name']}")
     return {"ok": True}
 
