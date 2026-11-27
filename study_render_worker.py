@@ -14,7 +14,8 @@ LOG=logging.getLogger('study.pdf')
 from study_runtime_diag import memory_status
 from study_deadline import CURRENT, PdfExpired
 from study_layout import page_target
-from study_chromium import MemoryPressure, check_memory, communicate_guarded
+from study_chromium import MemoryPressure, check_memory, communicate_guarded, memory_snapshot, MIB
+from study_memory_relief import reclaim_if_small
 
 
 def _memory_failure(budget, exc):
@@ -71,6 +72,7 @@ def render_bounded(title, blocks):
             if budget:
                 raise PdfExpired(budget.stage)
             raise RuntimeError('Истекло время ожидания в очереди PDF.')
+        reclaim_if_small()
         LOG.info('PDF worker start; queue %.1fs; %s',time.monotonic()-start,memory_status())
         executable=Path(sys.executable)
         if executable.name.lower()=='pythonw.exe': executable=executable.with_name('python.exe')
@@ -80,29 +82,41 @@ def render_bounded(title, blocks):
             check_memory()
         except MemoryPressure as e:
             _memory_failure(budget, e)
-        proc=subprocess.Popen(args,stdin=subprocess.PIPE,stdout=subprocess.PIPE,
-                              start_new_session=(os.name=='posix'))
-        LOG.info('PDF worker spawned pid=%s',proc.pid)
-        try:
-            deadline = start + 300 if five_minutes else time.monotonic() + 90
-            if budget:
-                deadline = min(deadline, budget.render_end) if five_minutes else budget.render_end
-            timeout = max(0, deadline - time.monotonic())
-            output,_=communicate_guarded(proc, payload, timeout)
-        except (subprocess.TimeoutExpired, MemoryPressure) as e:
-            LOG.error('PDF worker stopped; pid=%s; reason=%s; %s',proc.pid,type(e).__name__,memory_status())
-            _terminate(proc)
-            if isinstance(e, MemoryPressure):
-                _memory_failure(budget, e)
-            if budget:
-                raise PdfExpired(budget.stage) from e
-            raise RuntimeError('Время вёрстки PDF истекло; генерация остановлена без отправки повреждённого файла.') from e
-        except BaseException:
-            _terminate(proc)
-            raise
-        if proc.returncode or not output.startswith(b'%PDF-') or not output.rstrip().endswith(b'%%EOF'):
-            LOG.error('PDF worker failed; exit=%s; output bytes=%d; %s',proc.returncode,len(output),memory_status())
-            raise RuntimeError('Ошибка генератора PDF; подробности в журнале Render (PDF worker).')
+        deadline = start + 300 if five_minutes else time.monotonic() + 90
+        if budget:
+            deadline = min(deadline, budget.render_end) if five_minutes else budget.render_end
+        for attempt in range(2):
+            baseline = memory_snapshot()
+            proc=subprocess.Popen(args,stdin=subprocess.PIPE,stdout=subprocess.PIPE,
+                                  start_new_session=(os.name=='posix'))
+            LOG.info('PDF worker spawned pid=%s; attempt=%s',proc.pid,attempt+1)
+            try:
+                timeout = max(0, deadline - time.monotonic())
+                output,_=communicate_guarded(proc, payload, timeout)
+            except (subprocess.TimeoutExpired, MemoryPressure) as e:
+                LOG.error('PDF worker stopped; pid=%s; reason=%s; %s',proc.pid,type(e).__name__,memory_status())
+                _terminate(proc)
+                if isinstance(e, MemoryPressure):
+                    # A single retry, only after freeing pages, with demonstrably
+                    # lower baseline memory and enough original deadline left.
+                    if attempt == 0 and baseline and deadline-time.monotonic()>30:
+                        reclaim_if_small()
+                        time.sleep(1)
+                        recovered = memory_snapshot()
+                        if recovered and recovered.limit==baseline.limit and not recovered.pressured and recovered.working_set+8*MIB <= baseline.working_set:
+                            LOG.info('PDF memory retry; working set fell by at least 8 MiB; same document and deadline')
+                            continue
+                    _memory_failure(budget, e)
+                if budget:
+                    raise PdfExpired(budget.stage) from e
+                raise RuntimeError('Время вёрстки PDF истекло; генерация остановлена без отправки повреждённого файла.') from e
+            except BaseException:
+                _terminate(proc)
+                raise
+            if proc.returncode or not output.startswith(b'%PDF-') or not output.rstrip().endswith(b'%%EOF'):
+                LOG.error('PDF worker failed; exit=%s; output bytes=%d; %s',proc.returncode,len(output),memory_status())
+                raise RuntimeError('Ошибка генератора PDF; подробности в журнале Render (PDF worker).')
+            break
         LOG.info('PDF worker done %.1fs; %d bytes',time.monotonic()-start,len(output))
         return output
     finally: _SLOT.release()

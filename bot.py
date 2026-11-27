@@ -92,7 +92,6 @@ from aiogram.types import (
 )
 from google import genai
 from google.genai import types as genai_types
-from PIL import Image, ImageOps
 
 logging.basicConfig(
     level=logging.INFO,
@@ -1354,6 +1353,7 @@ def render_tasks(scope_chat: Optional[int] = None) -> tuple:
 # =====================================================================
 def shrink_image(raw: bytes) -> bytes:
     """Ресайз до 1600 px по большей стороне + JPEG q85 — экономит токены и трафик."""
+    from PIL import Image, ImageOps
     with Image.open(io.BytesIO(raw)) as img:
         img = ImageOps.exif_transpose(img)
         if max(img.size) > IMG_MAX_SIDE:
