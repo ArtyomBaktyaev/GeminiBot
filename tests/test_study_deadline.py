@@ -69,6 +69,21 @@ class Sizing(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "генератора"):
                 render_bounded("test", [])
 
+    def test_six_to_eight_pages_can_render_for_up_to_five_minutes(self):
+        blocks = [{"t": "code", "lang": "study", "text": '{"target_pages":[6,8]}'}]
+        for budget in (None, PdfBudget(600), PdfBudget(300)):
+            token = CURRENT.set(budget)
+            try:
+                with patch("study_render_worker.subprocess.Popen", return_value=Mock(returncode=0)), \
+                     patch("study_render_worker.communicate_guarded", return_value=(b"%PDF-test%%EOF", None)) as wait:
+                    render_bounded("test", blocks)
+                timeout = wait.call_args.args[2]
+                limit = min(300, budget.render_end - budget.started) if budget else 300
+                self.assertLessEqual(timeout, limit)
+                self.assertGreater(timeout, limit - 5)
+            finally:
+                CURRENT.reset(token)
+
     def test_worker_timeout_releases_slot_and_discards_bytes(self):
         budget = PdfBudget(300)
         process = Mock(pid=123)

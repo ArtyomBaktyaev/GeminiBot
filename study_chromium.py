@@ -1,5 +1,6 @@
 """Best-effort PDF worker memory protection on small Linux cgroups."""
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 import subprocess
 import time
@@ -11,6 +12,7 @@ class MemorySnapshot:
     current: int
     limit: int
     inactive_file: int = 0
+    directory: Path | None = None
 
     @property
     def working_set(self):
@@ -26,7 +28,52 @@ class MemorySnapshot:
         return self.constrained and self.working_set >= max(0, self.limit-reserve)
 
 
-def memory_snapshot(root=Path('/sys/fs/cgroup')):
+@lru_cache(maxsize=1)
+def _v2_directories(membership):
+    """Resolve proc membership against each visible cgroup2 mount root."""
+    path = Path(membership)
+    if not path.is_absolute() or '..' in path.parts:
+        return ()
+    try:
+        lines = Path('/proc/self/mountinfo').read_text().splitlines()
+    except OSError:
+        return ()
+    directories = []
+    for line in lines:
+        mount, _, fs = line.partition(' - ')
+        if not fs.startswith('cgroup2 '):
+            continue
+        fields = mount.split()
+        mount_root, point = (Path(s.replace(r'\040', ' ')) for s in fields[3:5])
+        if path.is_relative_to(mount_root):
+            leaf = point / path.relative_to(mount_root)
+        else:
+            leaf = point / path.relative_to('/')
+        while leaf.is_relative_to(point):
+            directories.append(leaf)
+            if leaf == point:
+                break
+            leaf = leaf.parent
+    return tuple(dict.fromkeys(directories))
+
+
+def memory_snapshot(root=None):
+    if root is None:
+        root = Path('/sys/fs/cgroup')
+        try:
+            membership = next(line[3:] for line in Path('/proc/self/cgroup').read_text().splitlines()
+                              if line.startswith('0::'))
+        except (OSError, StopIteration):
+            membership = ''
+        # A parent may own the service limit while a child reports "max".
+        snaps = [s for p in _v2_directories(membership) if (s := _snapshot(p)) is not None]
+        if snaps:
+            small = [s for s in snaps if s.constrained]
+            return min(small or snaps, key=lambda s: s.limit - max(48*MIB, s.limit//8) - s.working_set)
+    return _snapshot(root)
+
+
+def _snapshot(root):
     root = Path(root)
     for directory, used, cap, keys in (
         (root, 'memory.current', 'memory.max', ('inactive_file',)),
@@ -45,7 +92,7 @@ def memory_snapshot(root=Path('/sys/fs/cgroup')):
             inactive = next((int(stats[k]) for k in keys if k in stats), 0)
         except (OSError, ValueError, UnicodeError):
             inactive = 0
-        return MemorySnapshot(current, limit, max(0, min(current,inactive)))
+        return MemorySnapshot(current, limit, max(0, min(current,inactive)), directory)
     return None
 
 

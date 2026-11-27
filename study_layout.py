@@ -189,6 +189,7 @@ def print_fitted(page, target, pdf_reader):
     log=logging.getLogger('study.pdf')
     passes=0
     def render():
+        from study_runtime_diag import memory_status
         nonlocal passes
         passes+=1
         t=time.monotonic()
@@ -197,23 +198,27 @@ def print_fitted(page, target, pdf_reader):
         bad=page.evaluate("""() => [...document.querySelectorAll('figure .study-math mjx-container > svg')].filter(s=>{const r=s.getBoundingClientRect();return r.height>60||r.width>s.closest('figure').clientWidth+2}).length""")
         if bad: raise RuntimeError(f'Неверный размер математических подписей на графиках: {bad}')
         result=page.pdf(prefer_css_page_size=True, print_background=True, outline=True)
-        log.info('PDF print pass %d: %.1fs, %d bytes',passes,time.monotonic()-t,len(result))
+        log.info('PDF print pass %d: %.1fs, %d bytes; %s',passes,time.monotonic()-t,len(result),memory_status())
         return result
     page.evaluate("() => delete document.body.dataset.density")
     data=render()
-    if target and len(pdf_reader(BytesIO(data)).pages)>target[1]:
-        normal_count=len(pdf_reader(BytesIO(data)).pages)
+    def page_count(pdf):
+        with pdf_reader(BytesIO(pdf)) as reader:
+            return len(reader.pages)
+
+    if target and (normal_count := page_count(data)) > target[1]:
         page.evaluate("() => document.body.dataset.density='compact'")
         candidate=render()
-        if len(pdf_reader(BytesIO(candidate)).pages)<normal_count:
+        if page_count(candidate)<normal_count:
             data=candidate
         else:
             page.evaluate("() => delete document.body.dataset.density")
             # Existing data is already the normal layout; only reprint if the TOC changes.
+        del candidate
     # Resolve contents after density is final; repeat if page locations change.
     for _ in range(2):
-        draft=pdf_reader(BytesIO(data))
-        pages={k.lstrip('/'):str(draft.get_destination_page_number(v)+1).zfill(2) for k,v in draft.named_destinations.items()}
+        with pdf_reader(BytesIO(data)) as draft:
+            pages={k.lstrip('/'):str(draft.get_destination_page_number(v)+1).zfill(2) for k,v in draft.named_destinations.items()}
         changed=page.locator('.toc-page').evaluate_all("""(nodes,pages)=>{
           let changed=false;
           for(const n of nodes){const number=pages[n.dataset.target]; if(!number) throw Error('Не найдена страница раздела '+n.dataset.target); if(n.textContent!==number){n.textContent=number;changed=true;}}

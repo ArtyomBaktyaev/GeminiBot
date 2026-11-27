@@ -474,7 +474,7 @@ def render_pdf(title, blocks):
             page.locator('.study-math[data-deferred-fallback="1"]:not(:has(mjx-container svg))').evaluate_all(
                 "(nodes, htmls) => nodes.forEach((n,i)=>{n.innerHTML=htmls[i]})", fallbacks)
             page.evaluate("() => document.fonts.ready.then(() => true)")
-        log.info("PDF MathJax: %.1fs, %d fallback formulas",time.monotonic()-t_math,errors)
+        log.info("PDF MathJax: %.1fs, %d fallback formulas; %s",time.monotonic()-t_math,errors,memory_status())
         if errors:
             # Preserve formulas we cannot render instead of quietly deleting them.
             page.evaluate("""(n)=>{const note=document.querySelector('.volume-note');if(note){note.hidden=false;note.textContent=`${n} формул не удалось обработать MathJax. Для них сохранён исходник или резервная вёрстка.`;}}""", errors)

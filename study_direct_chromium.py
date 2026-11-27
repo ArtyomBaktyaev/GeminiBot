@@ -45,11 +45,14 @@ class Route:
         self.page.call('Fetch.failRequest', requestId=self.request_id, errorReason='Aborted')
     def fulfill(self, *, content_type, body=None, path=None):
         if path is not None:
-            body = Path(path).read_bytes()
-        if isinstance(body,str): body=body.encode('utf-8')
+            encoded = Path(path)
+        else:
+            if isinstance(body, str):
+                body = body.encode('utf-8')
+            encoded = base64.b64encode(body).decode('ascii')
         self.page.call('Fetch.fulfillRequest', requestId=self.request_id, responseCode=200,
                        responseHeaders=[{'name':'Content-Type','value':content_type}],
-                       body=base64.b64encode(body).decode('ascii'))
+                       body=encoded)
 
 
 class Locator:
@@ -66,11 +69,29 @@ class PipeTransport:
         self.read_fd, self.write_fd = read_fd, write_fd
         self.pending=bytearray()
 
-    def send(self, obj):
-        data=memoryview(json.dumps(obj,ensure_ascii=False).encode('utf-8')+b'\0')
+    def _write(self, data):
+        data = memoryview(data)
         while data:
             n=os.write(self.write_fd,data)
             data=data[n:]
+
+    def send(self, obj):
+        params = obj.get('params', {})
+        path = params.get('body')
+        if not isinstance(path, Path):
+            self._write(json.dumps(obj, ensure_ascii=False).encode('utf-8'))
+            self._write(b'\0')
+            return
+        # CDP requires one base64 field. Write it incrementally on the same
+        # pipe so neither the asset nor its JSON/base64 copies live in Python.
+        envelope = {k: v for k, v in obj.items() if k != 'params'}
+        headers = {k: v for k, v in params.items() if k != 'body'}
+        with path.open('rb') as asset:
+            prefix = json.dumps(envelope)[:-1] + ',"params":' + json.dumps(headers)[:-1] + ',"body":"'
+            self._write(prefix.encode('utf-8'))
+            while chunk := asset.read(48 * 1024):
+                self._write(base64.b64encode(chunk))
+            self._write(b'"}}\0')
 
     def receive(self):
         deadline=time.monotonic()+60
@@ -144,6 +165,9 @@ class DirectPage:
         self.evaluate('''url => new Promise((resolve,reject)=>{const s=document.createElement('script');s.src=url;s.onload=()=>resolve(true);s.onerror=()=>reject(Error('Script load failed'));document.head.append(s);})''',url)
     def locator(self, selector): return Locator(self,selector)
     def pdf(self, *, prefer_css_page_size, print_background, outline):
+        # MathJax and the preceding print pass may leave reclaimable V8 objects.
+        # Collect between passes while retaining the live document and all links.
+        self.call('HeapProfiler.collectGarbage')
         r=self.call('Page.printToPDF',transferMode='ReturnAsStream',landscape=False,displayHeaderFooter=False,
                     headerTemplate='',footerTemplate='',printBackground=print_background,scale=1,paperWidth=8.5,paperHeight=11,
                     marginTop=0,marginBottom=0,marginLeft=0,marginRight=0,pageRanges='',preferCSSPageSize=prefer_css_page_size,
@@ -179,6 +203,8 @@ def direct_page(*, args=()):
             os.close(from_parent);from_parent=None
             os.close(to_parent);to_parent=None
             launcher='import os,sys; a,b=map(int,sys.argv[1:3]); os.dup2(a,3);os.dup2(b,4);os.close(a);os.close(b);os.execv(sys.argv[3],sys.argv[3:])'
+            flags += ['--no-zygote', '--in-process-gpu', '--enable-features=NetworkServiceInProcess2',
+                      '--js-flags=--optimize-for-size']
             proc=subprocess.Popen([sys.executable,'-c',launcher,str(r),str(w),executable_path(),*flags,*args,'about:blank'],
                                   pass_fds=(r,w),stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
             os.close(r);r=None;os.close(w);w=None

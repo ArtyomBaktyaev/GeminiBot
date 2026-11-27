@@ -43,6 +43,30 @@ class MarkdownTests(unittest.TestCase):
 
 @unittest.skipUnless(os.name=='posix','CDP pipe is Linux-only')
 class TransportTests(unittest.TestCase):
+    def test_asset_pipe_matches_cdp_payload(self):
+        import base64
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        data = bytes(range(256)) * 601
+        with TemporaryDirectory() as folder:
+            path = Path(folder) / 'font.ttf'
+            path.write_bytes(data)
+            r, w = os.pipe()
+            try:
+                transport = PipeTransport(r, w)
+                message = {'id': 7, 'sessionId': 'a', 'method': 'Fetch.fulfillRequest',
+                           'params': {'requestId': 'b', 'responseCode': 200, 'body': path}}
+                sender = threading.Thread(target=transport.send, args=(message,))
+                sender.start()
+                actual = transport.receive()
+                sender.join()
+                self.assertEqual(base64.b64decode(actual['params'].pop('body'), validate=True), data)
+                self.assertEqual(actual['params'], {'requestId': 'b', 'responseCode': 200})
+                self.assertEqual(actual['sessionId'], 'a')
+            finally:
+                os.close(r)
+                os.close(w)
+
     def test_fragmented_null_delimited_messages(self):
         r,w=os.pipe()
         try:

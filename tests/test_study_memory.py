@@ -7,6 +7,19 @@ from unittest.mock import patch
 from study_chromium import MIB, MemoryPressure, MemorySnapshot, check_memory, chromium_args, communicate_guarded, memory_snapshot
 
 class MemoryTests(unittest.TestCase):
+    def test_child_with_unlimited_memory_inherits_service_limit(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            parent = Path(tmp)
+            child = parent / 'worker'
+            child.mkdir()
+            for directory, cap, used in ((parent, str(512*MIB), 460*MIB), (child, 'max', 5*MIB)):
+                (directory/'memory.current').write_text(str(used))
+                (directory/'memory.max').write_text(cap)
+            with patch('study_chromium._v2_directories', return_value=(child, parent)):
+                snap = memory_snapshot()
+                self.assertEqual(snap.directory, parent)
+                self.assertTrue(snap.pressured)
+
     def test_cache_and_limit(self):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp)

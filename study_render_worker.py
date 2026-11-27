@@ -13,6 +13,7 @@ _SLOT=BoundedSemaphore(1)
 LOG=logging.getLogger('study.pdf')
 from study_runtime_diag import memory_status
 from study_deadline import CURRENT, PdfExpired
+from study_layout import page_target
 from study_chromium import MemoryPressure, check_memory, communicate_guarded
 
 
@@ -50,10 +51,14 @@ def _terminate(proc):
 
 def render_bounded(title, blocks):
     start=time.monotonic()
+    target = page_target(blocks)
+    five_minutes = target is not None and 6 <= target[1] <= 8
     budget = CURRENT.get()
     if budget:
         budget.enter("очередь рендера")
     wait = budget.available(budget.render_end - budget.seconds * .10) if budget else 30
+    if five_minutes:
+        wait = min(wait, 300)
     if not _SLOT.acquire(timeout=wait):
         if budget:
             raise PdfExpired(budget.stage)
@@ -62,6 +67,10 @@ def render_bounded(title, blocks):
         if budget:
             budget.enter("вёрстка PDF")
             budget.available(budget.render_end)
+        if five_minutes and time.monotonic() >= start + 300:
+            if budget:
+                raise PdfExpired(budget.stage)
+            raise RuntimeError('Истекло время ожидания в очереди PDF.')
         LOG.info('PDF worker start; queue %.1fs; %s',time.monotonic()-start,memory_status())
         executable=Path(sys.executable)
         if executable.name.lower()=='pythonw.exe': executable=executable.with_name('python.exe')
@@ -75,7 +84,10 @@ def render_bounded(title, blocks):
                               start_new_session=(os.name=='posix'))
         LOG.info('PDF worker spawned pid=%s',proc.pid)
         try:
-            timeout = max(0, budget.render_end - time.monotonic()) if budget else 90
+            deadline = start + 300 if five_minutes else time.monotonic() + 90
+            if budget:
+                deadline = min(deadline, budget.render_end) if five_minutes else budget.render_end
+            timeout = max(0, deadline - time.monotonic())
             output,_=communicate_guarded(proc, payload, timeout)
         except (subprocess.TimeoutExpired, MemoryPressure) as e:
             LOG.error('PDF worker stopped; pid=%s; reason=%s; %s',proc.pid,type(e).__name__,memory_status())
@@ -84,7 +96,7 @@ def render_bounded(title, blocks):
                 _memory_failure(budget, e)
             if budget:
                 raise PdfExpired(budget.stage) from e
-            raise RuntimeError('PDF не удалось сверстать за 90 секунд; генерация остановлена без отправки повреждённого файла.') from e
+            raise RuntimeError('Время вёрстки PDF истекло; генерация остановлена без отправки повреждённого файла.') from e
         except BaseException:
             _terminate(proc)
             raise
