@@ -185,7 +185,7 @@ class DeadlineFlows(unittest.IsolatedAsyncioTestCase):
                               reply=AsyncMock(), reply_document=Mock())
         async def recovery(doc, **kwargs):
             self.assertEqual(doc.filename, "Черновик.md")
-            self.assertEqual(doc.data.decode(), msg.text)
+            self.assertEqual(doc.data.decode().strip(), msg.text)
         msg.reply_document.side_effect = lambda doc, **kw: recovery(doc, **kw) if doc.filename.endswith(".md") else object()
         call = SimpleNamespace(data="doc_pdf:4", message=msg, answer=AsyncMock())
         transport = AsyncMock(side_effect=TimeoutError)

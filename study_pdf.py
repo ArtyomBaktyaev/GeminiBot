@@ -16,8 +16,8 @@ import base64
 from urllib.parse import urlsplit
 from xml.etree import ElementTree as ET
 
-from latex2mathml.converter import convert
-from playwright.sync_api import sync_playwright
+from contextvars import ContextVar
+_DEFER_MATHML = ContextVar("study_defer_mathml", default=False)
 from pypdf import PdfReader
 
 from study_markdown import inline_tokens, parse_markdown
@@ -25,7 +25,7 @@ from study_figures import plot, diagram, label
 from study_layout import math_slot, mathjax_prepare, page_target, print_fitted
 from study_polish import document_kind, clean_summary
 from study_clean import normalize_blocks
-from study_typography import rich_figure_label, print_font_css, ordered_source
+from study_typography import rich_figure_label, print_font_css, ordered_source, print_font_resources
 from study_math_text import mark_formula_locations, add_formula_text
 
 ASSETS = Path(__file__).with_name("study_print")
@@ -39,6 +39,7 @@ def _legacy_formula(tex, display=False):
     # Rebuild converter output as presentational MathML only.
     if len(tex) <= 2200 and not re.search(r"\\(?:def|gdef|newcommand|renewcommand|href|url|style|class|html|include|input|require|unicode)\b", tex):
         try:
+            from latex2mathml.converter import convert
             root = ET.fromstring(convert(tex, display="block" if display else "inline"))
             for node in root.iter():
                 node.tag = node.tag.rsplit("}", 1)[-1]
@@ -61,6 +62,8 @@ def _legacy_formula(tex, display=False):
 
 
 def formula(tex, display=False):
+    if _DEFER_MATHML.get():
+        return math_slot(tex, display, escape(tex)).replace('class="study-math"','class="study-math" data-deferred-fallback="1"',1)
     return math_slot(tex, display, _legacy_formula(tex, display))
 
 
@@ -164,7 +167,7 @@ def opener(num, title, kicker, anchor=""):
             f'<h2>{title}</h2></div></div>')
 
 
-def document_html(title, blocks):
+def document_html(title, blocks, *, external_fonts=False):
     rich = inline
 
     title = readable_title(title)
@@ -367,11 +370,11 @@ def document_html(title, blocks):
            + '<p>Выберите раздел или подраздел, чтобы перейти к нему. Справа указан номер страницы в этом издании.</p>'
            + '<div><div class="toc-title">Разделы и подразделы</div><ul class="toc-list">' + "".join(toc) + '</ul></div>'
            + '<h3><span class="sub-num">§</span>Условные обозначения и навигация по блокам</h3>' + guide)
-    css = print_font_css() + "\n" + "\n".join((ASSETS / f).read_text(encoding="utf8") for f in ("template.css", "print.css"))
+    css = print_font_css(external_fonts) + "\n" + "\n".join((ASSETS / f).read_text(encoding="utf8") for f in ("template.css", "print.css"))
     font = ASSETS.parent / "fonts" / "DejaVuSans.ttf"
-    if font.is_file() and any("math-greek-capital" in part for part in sections):
-        encoded = base64.b64encode(font.read_bytes()).decode("ascii")
-        css += "\n@font-face{font-family:StudyGreek;src:url(data:font/ttf;base64," + encoded + ") format('truetype');} math .math-greek-capital{font-family:StudyGreek,sans-serif!important;}"
+    if font.is_file() and (external_fonts or any("math-greek-capital" in part for part in sections)):
+        source = "/fonts/DejaVuSans.ttf" if external_fonts else "data:font/ttf;base64," + base64.b64encode(font.read_bytes()).decode("ascii")
+        css += "\n@font-face{font-family:StudyGreek;src:url(" + source + ") format('truetype');} math .math-greek-capital{font-family:StudyGreek,sans-serif!important;}"
     notice = '<p class="volume-note" hidden></p>'
     cover_section = f'<section class="cover">{cover}{notice}</section>'
     nav_section = f'<section class="navigation">{nav}</section>'
@@ -379,7 +382,7 @@ def document_html(title, blocks):
         cover_section = f'<header class="short-title"><div class="document-kind">{escape(profile_label)}</div><h1>{rich(title)}</h1>{notice}</header>'
         nav_section = ''
     return (f'<!doctype html><html lang="ru"><head><meta charset="utf-8"><title>{escape(title)}</title>'
-            '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'self\'; style-src \'unsafe-inline\'; font-src data:">'
+            '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'self\'; style-src \'unsafe-inline\'; font-src data: \'self\'">'
             f'<style>{css}</style></head><body>{cover_section}{nav_section}{"".join(sections)}</body></html>')
 
 
@@ -392,17 +395,38 @@ def render_pdf(title, blocks):
     import time, logging
     log=logging.getLogger('study.pdf')
     from study_runtime_diag import memory_status
-    from study_chromium import chromium_args
+    from study_chromium import chromium_args, memory_snapshot
+    from study_direct_chromium import direct_page
+    from contextlib import contextmanager
+    import gc, sys
     start=time.monotonic()
     title=readable_title(title)
     blocks=normalize_blocks(blocks,title)
-    html = document_html(title, blocks)
+    setting = os.environ.get("STUDY_PDF_TRANSPORT", "auto").lower()
+    if setting not in ("auto", "direct", "playwright"):
+        raise ValueError("Invalid STUDY_PDF_TRANSPORT")
+    snap = memory_snapshot()
+    use_direct = sys.platform.startswith("linux") and (setting == "direct" or (setting == "auto" and snap is not None and snap.constrained))
+    if setting == "direct" and not use_direct:
+        raise RuntimeError("Direct Chromium transport is Linux-only")
+    token = _DEFER_MATHML.set(use_direct)
+    try:
+        html = document_html(title, blocks, external_fonts=use_direct)
+    finally:
+        _DEFER_MATHML.reset(token)
+    if use_direct:
+        _legacy_formula.cache_clear()
+        print_font_css.cache_clear()
+        gc.collect()
     log.info('PDF HTML prepared: %.1fs; %d blocks',time.monotonic()-start,len(blocks))
     # One browser at a time on small Render instances, and no profile shared between users.
     import playwright
     if (Path(playwright.__file__).parent / "driver/package/.local-browsers").is_dir():
         os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", "0")
-    with SLOT, sync_playwright() as engine:
+    @contextmanager
+    def original_page():
+      from playwright.sync_api import sync_playwright
+      with sync_playwright() as engine:
         executable = os.environ.get("STUDY_CHROMIUM") or None
         log.info("PDF launching Chromium; %s", memory_status())
         try:
@@ -417,28 +441,45 @@ def render_pdf(title, blocks):
             browser = engine.chromium.launch(timeout=25000, args=chromium_args())
         log.info("PDF Chromium ready; %s", memory_status())
         try:
-            page = browser.new_page(offline=True, service_workers="block")
-            page.route("**/*", lambda route: route.abort())
-            page.emulate_media(media="print")
-            # A document URL lets Chromium classify fragment links as PDF
-            # destinations. The route is fulfilled from memory, even offline.
-            address = "https://study.invalid/document"
-            page.route(address, lambda route: route.fulfill(content_type="text/html; charset=utf-8", body=html))
-            page.goto(address, wait_until="load", timeout=15000)
-            page.unroute(address)
-            del html
-            page.evaluate("() => document.fonts.ready")
-            log.info("PDF fonts ready; %s", memory_status())
-            t_math=time.monotonic()
-            errors = mathjax_prepare(page, address)
-            log.info("PDF MathJax: %.1fs, %d fallback formulas",time.monotonic()-t_math,errors)
-            if errors:
-                # Preserve formulas we cannot render instead of quietly deleting them.
-                page.evaluate("""(n)=>{const note=document.querySelector('.volume-note');if(note){note.hidden=false;note.textContent=`${n} формул не удалось обработать MathJax. Для них сохранён исходник или резервная вёрстка.`;}}""", errors)
-            prefix, formulas = mark_formula_locations(page)
-            data = print_fitted(page, page_target(blocks), PdfReader)
+            yield browser.new_page(offline=True, service_workers="block")
         finally:
             browser.close()
+    LOG_MODE = "direct CDP (no Node driver)" if use_direct else "Playwright"
+    log.info("PDF transport=%s; %s", LOG_MODE, memory_status())
+    with SLOT, (direct_page(args=chromium_args()) if use_direct else original_page()) as page:
+        page.route("**/*", lambda route: route.abort())
+        if use_direct:
+            for url, resource in print_font_resources().items():
+                page.route("https://study.invalid" + url, lambda route, resource=resource: route.fulfill(content_type="font/ttf", path=resource))
+        page.emulate_media(media="print")
+        # A document URL lets Chromium classify fragment links as PDF
+        # destinations. The route is fulfilled from memory, even offline.
+        address = "https://study.invalid/document"
+        page.route(address, lambda route: route.fulfill(content_type="text/html; charset=utf-8", body=html))
+        page.goto(address, wait_until="load", timeout=15000)
+        page.unroute(address)
+        del html
+        page.evaluate("() => document.fonts.ready.then(() => true)")
+        if use_direct:
+            gc.collect()
+        log.info("PDF fonts ready; %s", memory_status())
+        t_math=time.monotonic()
+        errors = mathjax_prepare(page, address, compact=use_direct)
+        if use_direct and errors:
+            # The original MathML fallback is restored only where MathJax failed.
+            # Successful MathJax output is not changed.
+            missing = page.locator('.study-math[data-deferred-fallback="1"]:not(:has(mjx-container svg))').evaluate_all(
+                "nodes => nodes.map(n=>[n.dataset.tex,n.dataset.display==='1'])")
+            fallbacks = [_legacy_formula(tex, display) for tex,display in missing]
+            page.locator('.study-math[data-deferred-fallback="1"]:not(:has(mjx-container svg))').evaluate_all(
+                "(nodes, htmls) => nodes.forEach((n,i)=>{n.innerHTML=htmls[i]})", fallbacks)
+            page.evaluate("() => document.fonts.ready.then(() => true)")
+        log.info("PDF MathJax: %.1fs, %d fallback formulas",time.monotonic()-t_math,errors)
+        if errors:
+            # Preserve formulas we cannot render instead of quietly deleting them.
+            page.evaluate("""(n)=>{const note=document.querySelector('.volume-note');if(note){note.hidden=false;note.textContent=`${n} формул не удалось обработать MathJax. Для них сохранён исходник или резервная вёрстка.`;}}""", errors)
+        prefix, formulas = mark_formula_locations(page)
+        data = print_fitted(page, page_target(blocks), PdfReader)
     # Chromium and Playwright are gone before pypdf clones the output.
     # This lowers peak memory without changing the PDF appearance.
     log.info("PDF browser closed; %s", memory_status())

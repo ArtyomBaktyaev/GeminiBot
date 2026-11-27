@@ -1,6 +1,7 @@
 """Normalize reserved document metadata and obvious assistant wrappers before printing."""
 import json
 import re
+from study_markdown_export import is_metadata, load_json
 
 
 def _key(s):
@@ -48,9 +49,16 @@ def _outro(b):
 def normalize_blocks(blocks,title=''):
     meta={}; body=[]
     for b in blocks:
-        if b.get('t')=='code' and b.get('lang')=='study':
-            for k,v in _meta(b.get('text','')).items(): meta.setdefault(k,v)
-        else: body.append(dict(b))
+        if b.get('t')=='code' and b.get('lang','') in ('study','json',''):
+            obj = load_json(b.get('text',''))
+            if b.get('lang')=='study' or is_metadata(obj):
+                for k,v in _meta(b.get('text','')).items(): meta.setdefault(k,v)
+                continue
+            if isinstance(obj,dict) and isinstance(obj.get('series'),list) and ('domain' in obj or 'x' in obj):
+                b = dict(b,lang='plot')
+            elif isinstance(obj,dict) and 'root' in obj and isinstance(obj.get('branches'),list):
+                b = dict(b,lang='diagram')
+        body.append(dict(b))
     # The outer title is supplied by the API, not a body section.
     while body and (body[0]['t']=='hr' or _intro(body[0]) or (body[0]['t']=='h' and title and _key(body[0].get('text'))==_key(title))): body.pop(0)
     while body and (body[-1]['t']=='hr' or _outro(body[-1])): body.pop()

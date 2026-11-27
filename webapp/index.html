@@ -1266,6 +1266,7 @@ async function api(path, opt) {
     if (job.state === "error") {
       const err = new Error(job.result?.error || "Сервер не завершил запрос");
       err.draft = job.result?.draft;
+      err.draftSource = job.result?.draft_source;
       throw err;
     }
     if (Number.isFinite(job.remaining_ms)) {
@@ -4090,7 +4091,8 @@ function chatDialogPane() {
           m.model ? h("span", {}, "⚡ " + shortModelName(m.model)) : null,
           !isMe && !m.failed && m.text ? h("button", { class:"act-btn", onclick: () => exportMessageDoc(m.exportText || m.text, "pdf") }, "📄 PDF") : null,
           !isMe && !m.failed && m.text ? h("button", { class:"act-btn", onclick: () => exportMessageDoc(m.exportText || m.text, "docx") }, "📝 Word") : null,
-          !isMe && (m.draft || (!m.failed && m.text)) ? h("button", { class:"act-btn", onclick: () => exportMessageDoc(m.draft || m.exportText || m.text, "md") }, "📝 Оформить в MD") : null,
+          !isMe && (m.draft || (!m.failed && m.text)) ? h("button", { class:"act-btn", onclick: () => exportMessageDoc(m.draftSource || m.draft || m.exportText || m.text, "md") }, "📝 Оформить в MD") : null,
+          !isMe && m.draftSource ? h("button", { class:"act-btn", onclick: () => exportMessageDoc(m.draftSource, "pdf") }, "📄 Повторить PDF") : null,
           !isMe && !m.failed && m.text ? h("button", { class:"act-btn", onclick: () => exportMessageDoc(m.exportText || m.text, "tex") }, "📐 LaTeX (.tex)") : null,
           !isMe && !m.failed && m.text ? h("button", { class:"act-btn", onclick: () => exportMessageDoc(m.exportText || m.text, "texpdf") }, "Собрать TeX → PDF") : null,
           h("button", { class:"act-btn", onclick: () => {
@@ -4213,6 +4215,7 @@ function chatDialogPane() {
     } catch (err) {
       botEntry.loading = false;
       botEntry.draft = err.draft || "";
+      botEntry.draftSource = err.draftSource || "";
       botEntry.failed = true;
       botEntry.text = err.name === "AbortError" ? "⏹ Ожидание остановлено. Сервер может завершить запрос; проверь историю." : ("❌ Ошибка: " + err.message);
     } finally {
