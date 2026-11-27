@@ -2,6 +2,7 @@
 import json
 import re
 from study_markdown_export import is_metadata, load_json
+from study_editorial import compact_chapters, align_cover
 
 
 def _key(s):
@@ -29,6 +30,7 @@ def _meta(raw):
                 goals.append([g[0][:120],g[1][:220]])
             elif isinstance(g,str) and g.strip(): goals.append([g[:160],''])
     if goals: result['goals']=goals
+    if type(obj.get('auto_group')) is bool: result['auto_group']=obj['auto_group']
     p=obj.get('target_pages')
     if isinstance(p,list) and len(p)==2 and all(type(n) is int for n in p) and 1<=p[0]<=p[1]<=30: result['target_pages']=p
     return result
@@ -49,6 +51,9 @@ def _outro(b):
 def normalize_blocks(blocks,title=''):
     meta={}; body=[]
     for b in blocks:
+        # Empty fenced listings (including a stray closing fence) carry no content.
+        if b.get('t')=='code' and not str(b.get('text','')).strip():
+            continue
         if b.get('t')=='code' and b.get('lang','') in ('study','json',''):
             obj = load_json(b.get('text',''))
             if b.get('lang')=='study' or is_metadata(obj):
@@ -105,4 +110,7 @@ def normalize_blocks(blocks,title=''):
             b['text']=re.sub(r'^\*\*Теорема\s+([^:*\n]{1,70}):\*\*\s*',r'Теорема (\1): ',b['text'],count=1,flags=re.I)
     # Drop only an obvious standalone divider before a new chapter, avoiding trailing rules.
     body=[b for i,b in enumerate(body) if not (b['t']=='hr' and (i==len(body)-1 or body[i+1]['t']=='h'))]
+    body=compact_chapters(body,meta.get('target_pages'),meta.get('auto_group') is True)
+    if meta:
+        align_cover(meta,body)
     return ([{'t':'code','lang':'study','text':json.dumps(meta,ensure_ascii=False,sort_keys=True)}] if meta else [])+body
