@@ -110,16 +110,23 @@ def point_label(name, a, b):
 
 
 @lru_cache(maxsize=1)
-def print_font_css():
+def print_font_css(external=False):
     root=Path(__file__).with_name('study_print')/'typefaces'
     faces=[('Inter.ttf','Study Inter','100 900','normal'),('Inter-Italic.ttf','Study Inter','100 900','italic'),('Manrope.ttf','Study Manrope','200 800','normal')]
     rules=[]
     for file,family,weight,style in faces:
         p=root/file
         if not p.is_file() or p.stat().st_size>2_000_000: continue
-        data=base64.b64encode(p.read_bytes()).decode('ascii')
-        rules.append(f'@font-face{{font-family:"{family}";font-style:{style};font-weight:{weight};font-display:block;src:url(data:font/ttf;base64,{data}) format("truetype");}}')
+        url='/fonts/'+file if external else 'data:font/ttf;base64,'+base64.b64encode(p.read_bytes()).decode('ascii')
+        rules.append(f'@font-face{{font-family:"{family}";font-style:{style};font-weight:{weight};font-display:block;src:url({url}) format("truetype");}}')
     return '\n'.join(rules)
+
+
+def print_font_resources():
+    root=Path(__file__).with_name('study_print')/'typefaces'
+    paths={f'/fonts/{name}':root/name for name in ('Inter.ttf','Inter-Italic.ttf','Manrope.ttf')}
+    paths['/fonts/DejaVuSans.ttf']=Path(__file__).with_name('fonts')/'DejaVuSans.ttf'
+    return {url:path for url,path in paths.items() if path.is_file() and path.stat().st_size<=2_000_000}
 
 
 def ordered_source(title, blocks):

@@ -851,7 +851,8 @@ async def _study_request(request, user, handler, kind, *, background=False):
 
     async def recovery(expired):
         core.log.warning("PDF %s expired stage=%s", expired.trace, expired.stage)
-        return {"error": expired.message(), "draft": expired.draft}
+        from study_markdown_export import reader_markdown
+        return {"error": expired.message(), "draft": reader_markdown(expired.draft) if expired.draft else "", "draft_source": expired.draft}
 
     async def work():
         if not budget and kind == "ask":
@@ -1044,7 +1045,8 @@ async def _api_ask(request, user):
                 tool_reports.append(f"✅ Отмечено выполненным задач: **{done_cnt}**")
 
     raw_answer = "\n\n".join(texts + tool_reports).strip()
-    answer = de_latex(raw_answer)
+    from study_markdown_export import clean_markdown
+    answer = de_latex(clean_markdown(raw_answer))
     if not answer and not generated_files:
         answer = "Модель вернула пустой ответ — попробуйте переформулировать."
 

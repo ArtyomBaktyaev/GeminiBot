@@ -86,20 +86,21 @@ def math_slot(tex, display, fallback):
             f'data-display="{int(bool(display))}">{fallback}</span>')
 
 
-def mathjax_prepare(page, address):
+def mathjax_prepare(page, address, *, compact=False):
     asset = Path(os.environ.get("STUDY_MATHJAX_JS") or Path(__file__).with_name("study_print") / "mathjax-svg.js")
     if not asset.is_file():
         raise RuntimeError("MathJax не установлен: запусти python install_study_mathjax.py")
     url = address.rsplit("/",1)[0] + "/mathjax-svg.js"
-    page.route(url, lambda route: route.fulfill(content_type="application/javascript", body=asset.read_bytes()))
-    page.evaluate("""() => {
+    page.route(url, lambda route: route.fulfill(content_type="application/javascript", path=asset))
+    page.evaluate("""(cache) => {
       window.MathJax = {
         startup: {typeset:false},
         tex: {packages:['base','ams','boldsymbol','mathtools','textmacros'], maxBuffer:10000, maxMacros:500},
-        svg: {fontCache:'none'}, options: {enableMenu:false}
+        svg: {fontCache:cache}, options: {enableMenu:false}
       };
-    }""")
+    }""", "local" if compact else "none")
     page.add_script_tag(url=url)
+    page.unroute(url)
     page.wait_for_function("typeof MathJax.tex2svg === 'function'", timeout=15000)
     return page.evaluate(r"""async () => {
       await MathJax.startup.promise;

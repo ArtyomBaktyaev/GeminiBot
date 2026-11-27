@@ -879,7 +879,8 @@ async def send_md(send: Callable, md_text: str, depth: int = 0):
 
 async def reply_md(message: types.Message, text_md: str, reply_markup: Optional[InlineKeyboardMarkup] = None) -> list:
     """Ответ Markdown-текстом: режет на части и отправляет цепочкой, прикрепляя кнопки к последнему сообщению."""
-    chunks = split_message(text_md, limit=CHUNK_LIMIT)
+    from study_markdown_export import clean_markdown
+    chunks = split_message(clean_markdown(text_md), limit=CHUNK_LIMIT)
     sent_msgs = []
     for i, chunk in enumerate(chunks):
         is_last = (i == len(chunks) - 1)
@@ -4141,8 +4142,14 @@ async def recover_telegram_pdf(message, budget):
         async with asyncio.timeout(budget.available(budget.end)):
             await message.reply(budget.message(), parse_mode=None)
             if budget.draft:
-                draft = BufferedInputFile(budget.draft.encode("utf-8"), filename="Черновик.md")
-                await message.reply_document(draft, caption="Черновик для восстановления. Полнота не проверена.")
+                from study_markdown_export import markdown_bytes
+                clean = markdown_bytes(budget.draft)
+                draft = BufferedInputFile(clean, filename="Черновик.md")
+                await message.reply_document(draft, caption="Читаемый черновик. Полнота не проверена.")
+                # Preserve a separate source only when conversion changed actual content.
+                if clean.decode("utf-8").strip() != budget.draft.strip() and budget.end - time.monotonic() > 3:
+                    source = BufferedInputFile(budget.draft.encode("utf-8"), filename="Черновик_для_PDF.md")
+                    await message.reply_document(source, caption="Исходник для повторной вёрстки PDF; содержит технические данные.")
     except (TimeoutError, PdfExpired, TelegramNetworkError):
         log.warning("PDF %s recovery delivery unconfirmed", budget.trace)
 
